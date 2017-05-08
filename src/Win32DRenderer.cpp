@@ -8,6 +8,7 @@
 #define UNICODE
 #define _UNICODE
 
+#include <Pathcch.h>
 #include <Windows.h>
 typedef struct Win32RenderBitmap
 {
@@ -22,39 +23,75 @@ typedef struct Win32RenderBitmap
 FILE_SCOPE Win32RenderBitmap globalRenderBitmap;
 FILE_SCOPE bool              globalRunning;
 
-FILE_SCOPE void Win32DisplayRenderBitmap(Win32RenderBitmap renderBitmap,
-                                         HDC deviceContext, LONG width,
-                                         LONG height)
+typedef struct Win32ExternalCode
 {
-	HDC stretchDC = CreateCompatibleDC(deviceContext);
-	SelectObject(stretchDC, renderBitmap.handle);
-    DQN_ASSERT(renderBitmap.width  == width);
-    DQN_ASSERT(renderBitmap.height == height);
-	StretchBlt(deviceContext, 0, 0, width, height, stretchDC, 0, 0,
-	           renderBitmap.width, renderBitmap.height, SRCCOPY);
+	HMODULE            dll;
+	FILETIME           lastWriteTime;
 
-    // NOTE: Win32 AlphaBlend requires the RGB components to be premultiplied
-	// with alpha.
-#if 0
-	BLENDFUNCTION blend       = {};
-	blend.BlendOp             = AC_SRC_OVER;
-	blend.SourceConstantAlpha = 255;
-	blend.AlphaFormat         = AC_SRC_ALPHA;
-
-	if (!AlphaBlend(deviceContext, 0, 0, width, height, deviceContext, 0, 0,
-	                width, height, blend))
-	{
-		OutputDebugString(L"AlphaBlend() failed.");
-	}
-#endif
-	DeleteDC(stretchDC);
-}
+	DR_UpdateFunction *DR_Update;
+} Win32ExternalCode;
 
 enum Win32Menu
 {
 	Win32Menu_FileOpen = 4,
 	Win32Menu_FileExit,
 };
+
+FILE_SCOPE void Win32DisplayRenderBitmap(Win32RenderBitmap renderBitmap,
+                                         HDC deviceContext, LONG width,
+                                         LONG height)
+{
+	HDC stretchDC = CreateCompatibleDC(deviceContext);
+	SelectObject(stretchDC, renderBitmap.handle);
+    // DQN_ASSERT(renderBitmap.width  == width);
+    // DQN_ASSERT(renderBitmap.height == height);
+	StretchBlt(deviceContext, 0, 0, width, height, stretchDC, 0, 0,
+	           renderBitmap.width, renderBitmap.height, SRCCOPY);
+	DeleteDC(stretchDC);
+}
+
+FILETIME Win32GetLastWriteTime(const char *const srcName)
+{
+	WIN32_FIND_DATA findData = {};
+	FILETIME lastWriteTime   = {};
+	HANDLE findHandle        = FindFirstFileA(srcName, &findData);
+	if (findHandle != INVALID_HANDLE_VALUE)
+	{
+		lastWriteTime = findData.ftLastWriteTime;
+		FindClose(findHandle);
+	}
+
+	return lastWriteTime;
+}
+
+FILE_SCOPE Win32ExternalCode Win32LoadExternalDLL(const char *const srcPath,
+                                                  const char *const tmpPath,
+                                                  const FILETIME lastWriteTime)
+{
+	Win32ExternalCode result = {};
+	result.lastWriteTime     = lastWriteTime;
+	CopyFile(srcPath, tmpPath, false);
+
+	DR_UpdateFunction *updateFunction = NULL;
+	result.dll = LoadLibraryA(tmpPath);
+	if (result.dll)
+	{
+		updateFunction =
+		    (DR_UpdateFunction *)GetProcAddress(result.dll, "DR_Update");
+		if (updateFunction) result.DR_Update = updateFunction;
+	}
+
+
+	return result;
+}
+
+FILE_SCOPE void Win32UnloadExternalDLL(Win32ExternalCode *externalCode)
+{
+
+	if (externalCode->dll) FreeLibrary(externalCode->dll);
+	externalCode->dll       = NULL;
+	externalCode->DR_Update = NULL;
+}
 
 FILE_SCOPE void Win32CreateMenu(HWND window)
 {
@@ -229,6 +266,35 @@ FILE_SCOPE void Win32ProcessMessages(HWND window, PlatformInput *input)
 	}
 }
 
+// Return the index of the last slash
+i32 Win32GetModuleDirectory(char *const buf, const u32 bufLen)
+{
+	if (!buf || bufLen == 0) return 0;
+	u32 copiedLen = GetModuleFileName(NULL, buf, bufLen);
+	if (copiedLen == bufLen)
+	{
+		DQN_WIN32_ERROR_BOX(
+		    "GetModuleFileName() buffer maxed: Len of copied text is len "
+		    "of supplied buffer.",
+		    NULL);
+		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	}
+
+	// NOTE: Should always work if GetModuleFileName works and we're running an
+	// executable.
+	i32 lastSlashIndex = 0;
+	for (i32 i = copiedLen; i > 0; i--)
+	{
+		if (buf[i] == '\\')
+		{
+			lastSlashIndex = i;
+			break;
+		}
+	}
+
+	return lastSlashIndex;
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                     LPWSTR lpCmdLine, int nShowCmd)
 {
@@ -268,14 +334,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	RECT rect   = {};
 	rect.right  = MIN_WIDTH;
 	rect.bottom = MIN_HEIGHT;
-	DWORD windowStyle =
-	    WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+	DWORD windowStyle    = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
 	AdjustWindowRect(&rect, windowStyle, true);
 
 	HWND mainWindow = CreateWindowExW(
-	    WS_EX_COMPOSITED, wc.lpszClassName, L"DRenderer", windowStyle,
-	    CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left,
-	    rect.bottom - rect.top, nullptr, nullptr, hInstance, nullptr);
+	    0, wc.lpszClassName, L"DRenderer", windowStyle, CW_USEDEFAULT,
+	    CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr,
+	    nullptr, hInstance, nullptr);
 
 	if (!mainWindow)
 	{
@@ -291,11 +356,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		header.biPlanes         = 1;
 		header.biBitCount       = 32;
 		header.biCompression    = BI_RGB; // uncompressed bitmap
-		header.biSizeImage      = 0;
-		header.biXPelsPerMeter  = 0;
-		header.biYPelsPerMeter  = 0;
-		header.biClrUsed        = 0;
-		header.biClrImportant   = 0;
 
 		globalRenderBitmap.info.bmiHeader = header;
 		globalRenderBitmap.width          = header.biWidth;
@@ -315,6 +375,26 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		DqnWin32_DisplayLastError("CreateDIBSection() failed");
 		return -1;
 	}
+	////////////////////////////////////////////////////////////////////////////
+	// Make DLL Path
+	////////////////////////////////////////////////////////////////////////////
+	Win32ExternalCode dllCode = {};
+	char dllPath[MAX_PATH]    = {};
+	char dllTmpPath[MAX_PATH] = {};
+	{
+		char exeDir[MAX_PATH] = {};
+		i32 lastSlashIndex =
+		    Win32GetModuleDirectory(exeDir, DQN_ARRAY_COUNT(exeDir));
+		DQN_ASSERT(lastSlashIndex + 1 < DQN_ARRAY_COUNT(exeDir));
+
+		exeDir[lastSlashIndex + 1] = 0;
+		u32 numCopied = Dqn_sprintf(dllPath, "%s%s", exeDir, "drenderer.dll");
+		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllPath));
+
+		numCopied =
+		    Dqn_sprintf(dllTmpPath, "%s%s", exeDir, "drenderer_temp.dll");
+		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllPath));
+	}
 
 	////////////////////////////////////////////////////////////////////////////
 	// Update Loop
@@ -328,13 +408,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	f64 frameTimeInS              = 0.0f;
 	globalRunning                 = true;
 
-    SetWindowTextA(mainWindow, "test");
 	while (globalRunning)
 	{
 		////////////////////////////////////////////////////////////////////////
 		// Update State
 		////////////////////////////////////////////////////////////////////////
 		f64 startFrameTimeInS = DqnTime_NowInS();
+
+		FILETIME lastWriteTime = Win32GetLastWriteTime(dllPath);
+		if (CompareFileTime(&lastWriteTime, &dllCode.lastWriteTime) != 0)
+		{
+			Win32UnloadExternalDLL(&dllCode);
+			dllCode = Win32LoadExternalDLL(dllPath, dllTmpPath, lastWriteTime);
+		}
+
 		{
 			PlatformInput platformInput = {};
 			platformInput.deltaForFrame = (f32)frameTimeInS;
@@ -345,7 +432,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			platformBuffer.height               = globalRenderBitmap.height;
 			platformBuffer.width                = globalRenderBitmap.width;
 			platformBuffer.bytesPerPixel = globalRenderBitmap.bytesPerPixel;
-			DR_Update(&platformBuffer, &platformInput, &platformMemory);
+
+			if (dllCode.DR_Update)
+			{
+				dllCode.DR_Update(&platformBuffer, &platformInput,
+				                  &platformMemory);
+			}
 		}
 
 		////////////////////////////////////////////////////////////////////////
@@ -386,7 +478,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		Dqn_sprintf(windowTitleBuffer, "drenderer - dev - %5.2f ms/f",
 		            msPerFrame);
 		SetWindowTextA(mainWindow, windowTitleBuffer);
-#endif
 	}
 
 	return 0;

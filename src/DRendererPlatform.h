@@ -44,9 +44,6 @@ typedef struct PlatformInput
 {
 	f32 deltaForFrame;
 
-	bool loadNewRom;
-	wchar_t rom[260];
-
 	union {
 		KeyState key[key_count];
 		struct
@@ -91,6 +88,8 @@ typedef struct PlatformRenderBuffer
 	i32   width;
 	i32   height;
 	i32   bytesPerPixel;
+
+	//  Pixel Format: XX RR GG BB
 	void *memory;
 } PlatformRenderBuffer;
 

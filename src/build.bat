@@ -37,12 +37,9 @@ REM wd4201 nonstandard extension used: nameless struct/union
 REM wd4189 local variable is initialised but not referenced
 REM wd4505 unreferenced local function not used will be removed
 set CompileFlags=-EHa- -GR- -Oi -MT -Z7 -W4 -wd4100 -wd4201 -wd4189 -wd4505 -Od -FAsc
-set Defines=
-
-REM ////////////////////////////////////////////////////////////////////////////
-REM Include Directories/Link Libraries
-REM ////////////////////////////////////////////////////////////////////////////
-set IncludeFiles=
+set DLLFlags=/Fm%ProjectName% /Fo%ProjectName% /Fa%ProjectName% /Fe%ProjectName%
+set Win32Flags=/FmWin32DRenderer /FeWin32DRenderer
+set TimeStamp=%date:~10,4%%date:~7,2%%date:~4,2%_%time:~0,2%%time:~3,2%%time:~6,2%
 
 REM Link libraries
 set LinkLibraries=user32.lib kernel32.lib gdi32.lib
@@ -54,9 +51,9 @@ set LinkFlags=-incremental:no -opt:ref -subsystem:WINDOWS -machine:x64 -nologo
 REM ////////////////////////////////////////////////////////////////////////////
 REM Compile
 REM ////////////////////////////////////////////////////////////////////////////
-cl %CompileFlags% %Defines% ..\src\UnityBuild\UnityBuild.cpp %IncludeFiles% /link %LinkLibraries% %LinkFlags% /out:%ProjectName%.exe
-REM cl %CompileFlags% /P %Defines% ..\src\UnityBuild\UnityBuild.cpp %IncludeFiles%
-
+del *.pdb >NUL 2>NUL
+cl %CompileFlags% %Win32Flags% ..\src\Win32DRenderer.cpp /link %LinkLibraries% %LinkFlags%
+cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link /PDB:%ProjectName%_%TimeStamp%.pdb /export:DR_Update %LinkFlags%
 popd
 set LastError=%ERRORLEVEL%
 ctime -end %ProjectName%.ctm %LastError%
