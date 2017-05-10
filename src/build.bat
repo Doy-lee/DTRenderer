@@ -39,7 +39,12 @@ REM wd4505 unreferenced local function not used will be removed
 set CompileFlags=-EHa- -GR- -Oi -MT -Z7 -W4 -wd4100 -wd4201 -wd4189 -wd4505 -Od -FAsc
 set DLLFlags=/Fm%ProjectName% /Fo%ProjectName% /Fa%ProjectName% /Fe%ProjectName%
 set Win32Flags=/FmWin32DRenderer /FeWin32DRenderer
-set TimeStamp=%date:~10,4%%date:~7,2%%date:~4,2%_%time:~0,2%%time:~3,2%%time:~6,2%
+
+REM Clean time necessary for hours <10, which produces  H:MM:SS.SS where the
+REM first character of time is an empty space. CleanTime will pad a 0 if
+REM necessary.
+set CleanTime=%time: =0%
+set TimeStamp=%date:~10,4%%date:~7,2%%date:~4,2%_%CleanTime:~0,2%%CleanTime:~3,2%%CleanTime:~6,2%
 
 REM Link libraries
 set LinkLibraries=user32.lib kernel32.lib gdi32.lib

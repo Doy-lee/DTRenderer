@@ -375,6 +375,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		DqnWin32_DisplayLastError("CreateDIBSection() failed");
 		return -1;
 	}
+
 	////////////////////////////////////////////////////////////////////////////
 	// Make DLL Path
 	////////////////////////////////////////////////////////////////////////////
@@ -393,7 +394,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 		numCopied =
 		    Dqn_sprintf(dllTmpPath, "%s%s", exeDir, "drenderer_temp.dll");
-		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllPath));
+		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllTmpPath));
 	}
 
 	////////////////////////////////////////////////////////////////////////////

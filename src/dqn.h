@@ -48,14 +48,14 @@ typedef float  f32;
 #define DQN_ASSERT(expr) if (!(expr)) { (*((i32 *)0)) = 0; }
 
 #define DQN_PI 3.14159265359f
-
+#define DQN_SQUARED(x) ((x) * (x))
 #define DQN_ABS(x) (((x) < 0) ? (-(x)) : (x))
 #define DQN_DEGREES_TO_RADIANS(x) ((x * (DQN_PI / 180.0f)))
 #define DQN_RADIANS_TO_DEGREES(x) ((x * (180.0f / DQN_PI)))
+
 #define DQN_MAX(a, b) ((a) < (b) ? (b) : (a))
 #define DQN_MIN(a, b) ((a) < (b) ? (a) : (b))
-#define DQN_SQUARED(x) ((x) * (x))
-
+#define DQN_SWAP(type, a, b) do { type tmp = a; a = b; b = tmp; } while(0)
 ////////////////////////////////////////////////////////////////////////////////
 // DqnMem - Memory
 ////////////////////////////////////////////////////////////////////////////////
