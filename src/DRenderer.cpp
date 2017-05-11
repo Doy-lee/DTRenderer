@@ -4,9 +4,21 @@
 #define DQN_IMPLEMENTATION
 #include "dqn.h"
 
-#include <math.h>
-FILE_SCOPE void DR_DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
-                            DqnV2i b, DqnV3 color)
+FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
+                                const i32 x, const i32 y, DqnV3 color)
+{
+	if (!renderBuffer) return;
+	if (x < 0 || x > renderBuffer->width - 1) return;
+	if (y < 0 || y > renderBuffer->height - 1) return;
+
+	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
+	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
+	u32 pixel = ((i32)color.r << 16) | ((i32)color.g << 8) | ((i32)color.b << 0);
+	bitmapPtr[x + (y * pitchInU32)] = pixel;
+}
+
+FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
+                         DqnV2i b, DqnV3 color)
 {
 	if (!renderBuffer) return;
 
@@ -50,17 +62,13 @@ FILE_SCOPE void DR_DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 		plotY = &newY;
 	}
 
-	const u32 pitchInU32 =
-	    (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
-	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
-	u32 pixel = ((i32)color.r << 16) | ((i32)color.g << 8) | ((i32)color.b << 0);
 	for (i32 iterateX = 0; iterateX < numIterations; iterateX++)
 	{
 		newX = a.x + iterateX;
-		bitmapPtr[*plotX + (*plotY * pitchInU32)] = pixel;
+		SetPixel(renderBuffer, *plotX, *plotY, color);
 
 		distAccumulator += distFromPixelOrigin;
-		if (distAccumulator > run)
+   		if (distAccumulator > run)
 		{
 			newY += delta;
 			distAccumulator -= (run * 2);
@@ -68,26 +76,140 @@ FILE_SCOPE void DR_DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 	}
 }
 
-FILE_SCOPE void DR_DrawTriangle(PlatformRenderBuffer *const renderBuffer,
-                                DqnV2 p1, DqnV2 p2, DqnV2 p3, DqnV3 color)
+FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
+                             const DqnV2 p1, const DqnV2 p2, const DqnV2 p3,
+                             const DqnV3 color)
 {
-	DR_DrawLine(renderBuffer, p1, p2, color);
-	DR_DrawLine(renderBuffer, p2, p3, color);
-	DR_DrawLine(renderBuffer, p3, p1, color);
+	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
+	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
+	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
+	                       DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
 
-	// NOTE(doyle): This is just an desc sort using bubble sort on 3 elements
-	if (p1.y < p2.y) DQN_SWAP(DqnV2i, p1, p2);
-	if (p2.y < p3.y) DQN_SWAP(DqnV2i, p1, p3);
-	if (p1.y < p2.y) DQN_SWAP(DqnV2i, p2, p3);
+	min.x = DQN_MAX(min.x, 0);
+	min.y = DQN_MAX(min.y, 0);
 
-	i32 y1i = (i32)(p1.y + 0.5f);
-	i32 y2i = (i32)(p2.y + 0.5f);
-	i32 y3i = (i32)(p3.y + 0.5f);
+	max.x = DQN_MIN(max.x, renderBuffer->width - 1);
+	max.y = DQN_MIN(max.y, renderBuffer->height - 1);
 
-	if (y1i == y3i) return; // Zero height triangle
+	DrawLine(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
+	DrawLine(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
+	DrawLine(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
+	DrawLine(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
+
+	DqnV2 a = p1;
+	DqnV2 b = p2;
+	DqnV2 c = p3;
+
+	f32 area2Times = ((b.x - a.x) * (b.y + a.y)) + ((c.x - b.x) * (c.y + b.y)) +
+	                 ((a.x - c.x) * (a.y + c.y));
+	if (area2Times < 0)
+	{
+		// Counter-clockwise, do nothing this is what we want.
+	}
+	else
+	{
+		// Clockwise swap any point to make it clockwise
+		DQN_SWAP(DqnV2, b, c);
+	}
+
+	/*
+	   NOTE(doyle): Given two points that form a line and an extra point
+	   to test, we can determine whether a point lies on the line, or is
+	   to the left or right of a the line.
+
+	   First forming a 3x3 matrix of our terms and deriving a 2x2 matrix
+	   by subtracting the 1st column from the 2nd and 1st column from
+	   the third.
+
+		   | ax bx cx |     | (bx - ax)  (cx - ax) |
+	   m = | ay by cy | ==> | (by - ay)  (cy - ay) |
+		   | 1  1  1  |
+
+	   From our 2x2 representation we can calculate the determinant
+	   which gives us the signed area of the triangle extended into
+	   a parallelogram.
+
+	   det(m) = (bx - ax)(cy - ay) - (by - ay)(cx - ax)
+
+	   Depending on the order of the vertices supplied, if it's
+	   - CCW and c(x,y) is outside the triangle, the signed area is negative
+	   - CCW and c(x,y) is inside  the triangle, the signed area is positive
+	   - CW  and c(x,y) is outside the triangle, the signed area is positive
+	   - CW  and c(x,y) is inside  the triangle, the signed area is negative
+
+	   NOTE(doyle): The det(m) can be rearranged if expanded to be
+	   SignedArea(cx, cy) = (ay - by)cx + (bx - ay)cy + (ax*by + ay*bx)
+
+	   When we scan to fill our triangle we go pixel by pixel, left to right,
+	   bottom to top, notice that this translates to +1 for x and +1 for y, i.e.
+
+	   The first pixel's signed area is cx, then cx+1, cx+2 .. etc
+	   SignedArea(cx, cy)   = (ay - by)cx   + (bx - ax)cy + (ax*by + ay*bx)
+	   SignedArea(cx+1, cy) = (ay - by)cx+1 + (bx - ax)cy + (ax*by + ay*bx)
+
+	   Then
+	   SignedArea(cx+1, cy) - SignedArea(cx, cy) =
+	     (ay - by)cx+1 + (bx - ax)cy + (ax*by + ay*bx)
+	   - (ay - by)cx   + (bx - ax)cy + (ax*by + ay*bx)
+	   = (ay - by)cx+1 - (ay - by)cx
+	   = (ay - by)(cx+1 - cx)
+	   = (ay - by)(1)         = (ay - by)
+
+	   Similarly when progressing in y
+	   SignedArea(cx, cy)   = (ay - by)cx + (bx - ay)cy   + (ax*by + ay*bx)
+	   SignedArea(cx, cy+1) = (ay - by)cx + (bx - ay)cy+1 + (ax*by + ay*bx)
+
+	   Then
+	   SignedArea(cx, cy+1) - SignedArea(cx, cy) =
+	     (ay - by)cx + (bx - ax)cy+1 + (ax*by + ay*bx)
+	   - (ay - by)cx + (bx - ax)cy   + (ax*by + ay*bx)
+	   = (bx - ax)cy+1 - (bx - ax)cy
+	   = (bx - ax)(cy+1 - cy)
+	   = (bx - ax)(1)         = (bx - ax)
+
+	   Then we can see that when we progress along x, we only need to change by
+	   the value of SignedArea by (ay - by) and similarly for y, (bx - ay)
+	*/
+
+	DqnV2i scanP          = DqnV2i_2i(min.x, min.y);
+	f32 signedArea1       = ((b.x - a.x) * (scanP.y - a.y)) - ((b.y - a.y) * (scanP.x - a.x));
+	f32 signedArea1DeltaX = a.y - b.y;
+	f32 signedArea1DeltaY = b.x - a.x;
+
+	f32 signedArea2       = ((c.x - b.x) * (scanP.y - b.y)) - ((c.y - b.y) * (scanP.x - b.x));
+	f32 signedArea2DeltaX = b.y - c.y;
+	f32 signedArea2DeltaY = c.x - b.x;
+
+	f32 signedArea3       = ((a.x - c.x) * (scanP.y - c.y)) - ((a.y - c.y) * (scanP.x - c.x));
+	f32 signedArea3DeltaX = c.y - a.y;
+	f32 signedArea3DeltaY = a.x - c.x;
+
+	for (scanP.y = min.y; scanP.y < max.y; scanP.y++)
+	{
+
+		f32 signedArea1Row = signedArea1;
+		f32 signedArea2Row = signedArea2;
+		f32 signedArea3Row = signedArea3;
+
+		for (scanP.x = min.x; scanP.x < max.x; scanP.x++)
+		{
+			if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
+			{
+				SetPixel(renderBuffer, scanP.x, scanP.y, color);
+			}
+
+			signedArea1Row += signedArea1DeltaX;
+			signedArea2Row += signedArea2DeltaX;
+			signedArea3Row += signedArea3DeltaX;
+		}
+
+		signedArea1 += signedArea1DeltaY;
+		signedArea2 += signedArea2DeltaY;
+		signedArea3 += signedArea3DeltaY;
+	}
 }
 
-FILE_SCOPE void DR_ClearRenderBuffer(PlatformRenderBuffer *const renderBuffer, DqnV3 color)
+FILE_SCOPE void ClearRenderBuffer(PlatformRenderBuffer *const renderBuffer, DqnV3 color)
 {
 	if (!renderBuffer) return;
 
@@ -111,7 +233,7 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
                           PlatformInput *const input,
                           PlatformMemory *const memory)
 {
-	DR_ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
+	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
 
 	DqnV3 colorRed    = DqnV3_3i(255, 0, 0);
 	DqnV2i bufferMidP = DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
@@ -120,13 +242,31 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 	DqnV2 t0[3] = {DqnV2_2i(10, 70), DqnV2_2i(50, 160), DqnV2_2i(70, 80)};
 	DqnV2 t1[3] = {DqnV2_2i(180, 50),  DqnV2_2i(150, 1),   DqnV2_2i(70, 180)};
 	DqnV2 t2[3] = {DqnV2_2i(180, 150), DqnV2_2i(120, 160), DqnV2_2i(130, 180)};
-	DqnV2 t3[3] = {
+	LOCAL_PERSIST DqnV2 t3[3] = {
 	    DqnV2_2i(boundsOffset, boundsOffset),
 	    DqnV2_2i(bufferMidP.w, renderBuffer->height - boundsOffset),
 	    DqnV2_2i(renderBuffer->width - boundsOffset, boundsOffset)};
 
-	DR_DrawTriangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
-	// DR_DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
-	// DR_DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
-	// DR_DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRed);
+	f32 minX = (f32)(renderBuffer->width - 1);
+	f32 maxX = 0;
+	for (i32 i = 0; i < DQN_ARRAY_COUNT(t3); i++)
+	{
+		t3[i].x += input->deltaForFrame * 2.0f;
+		minX = DQN_MIN(t3[i].x, minX);
+		maxX = DQN_MAX(t3[i].x, maxX);
+	}
+
+	if (minX >= renderBuffer->width - 1)
+	{
+		f32 triangleWidth = maxX - minX;
+		for (i32 i = 0; i < DQN_ARRAY_COUNT(t3); i++)
+		{
+			t3[i].x -= (minX + triangleWidth);
+		}
+	}
+
+	DrawTriangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
+	DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
+	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
+	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRed);
 }
