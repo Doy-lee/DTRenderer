@@ -1,8 +1,31 @@
 #include "DRenderer.h"
 #include "DRendererPlatform.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "external/stb_image.h"
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "external/stb_truetype.h"
+
 #define DQN_IMPLEMENTATION
 #include "dqn.h"
+
+#define DR_DEBUG 1
+
+typedef struct DRFont
+{
+	u8    *bitmap;
+	DqnV2i bitmapDim;
+	DqnV2i codepointRange;
+	f32    sizeInPt;
+
+	stbtt_packedchar *atlas;
+} DRFont;
+
+typedef struct DRState
+{
+	DRFont font;
+} DRState;
 
 FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
                                 const i32 x, const i32 y, DqnV3 color)
@@ -229,12 +252,98 @@ FILE_SCOPE void ClearRenderBuffer(PlatformRenderBuffer *const renderBuffer, DqnV
 	}
 }
 
+FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
+                                 PlatformMemory *const memory,
+                                 DRFont *const font, const char *const path,
+                                 const DqnV2i bitmapDim,
+                                 const DqnV2i codepointRange,
+                                 const f32 sizeInPt)
+{
+	font->bitmapDim      = bitmapDim;
+	font->codepointRange = codepointRange;
+	font->sizeInPt       = sizeInPt;
+
+	DqnTempBuffer transientTempBufferRegion =
+	    DqnMemBuffer_BeginTempRegion(&memory->transientBuffer);
+
+	////////////////////////////////////////////////////////////////////////////
+	// Load font data
+	////////////////////////////////////////////////////////////////////////////
+	PlatformFile file = {};
+	bool result = api.FileOpen(path, &file, PlatformFilePermissionFlag_Read);
+	DQN_ASSERT(result);
+
+	u8 *fontBuf = (u8 *)DqnMemBuffer_Allocate(&memory->transientBuffer, file.size);
+	size_t bytesRead = api.FileRead(&file, fontBuf, file.size);
+	DQN_ASSERT(bytesRead == file.size);
+	api.FileClose(&file);
+
+	stbtt_fontinfo fontInfo = {};
+	DQN_ASSERT(stbtt_InitFont(&fontInfo, fontBuf, 0) != 0);
+#if DR_DEBUG
+	DQN_ASSERT(stbtt_GetNumberOfFonts(fontBuf) == 1);
+#endif
+
+	////////////////////////////////////////////////////////////////////////////
+	// Pack font data to bitmap
+	////////////////////////////////////////////////////////////////////////////
+	font->bitmap = (u8 *)DqnMemBuffer_Allocate(
+	    &memory->permanentBuffer, (size_t)(font->bitmapDim.w * font->bitmapDim.h));
+
+	stbtt_pack_context fontPackContext = {};
+	DQN_ASSERT(stbtt_PackBegin(&fontPackContext, font->bitmap, (i32)bitmapDim.w,
+	                           (i32)bitmapDim.h, 0, 1, NULL) == 1);
+	{
+		i32 numCodepoints =
+		    (i32)((codepointRange.max + 1) - codepointRange.min);
+
+		font->atlas = (stbtt_packedchar *)DqnMemBuffer_Allocate(
+		    &memory->permanentBuffer, numCodepoints * sizeof(stbtt_packedchar));
+		stbtt_PackFontRange(&fontPackContext, fontBuf, 0,
+		                    STBTT_POINT_SIZE(sizeInPt), (i32)codepointRange.min,
+		                    numCodepoints, font->atlas);
+	}
+	stbtt_PackEnd(&fontPackContext);
+
+	////////////////////////////////////////////////////////////////////////////
+	// Premultiply Alpha of Bitmap
+	////////////////////////////////////////////////////////////////////////////
+	for (i32 y = 0; y < bitmapDim.h; y++)
+	{
+		for (i32 x = 0; x < bitmapDim.w; x++)
+		{
+			// NOTE: Bitmap from stb_truetype is 1BPP. So the actual color
+			// value represents its' alpha value but also its' color.
+			u32 index            = x + (y * (i32)bitmapDim.w);
+			f32 alpha            = (f32)(font->bitmap[index]) / 255.0f;
+			f32 color            = alpha;
+			f32 preMulAlphaColor = color * alpha;
+
+			font->bitmap[index] = (u8)(preMulAlphaColor * 255.0f);
+		}
+	}
+	DqnMemBuffer_EndTempRegion(transientTempBufferRegion);
+}
+
 extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
                           PlatformInput *const input,
                           PlatformMemory *const memory)
 {
-	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
+	DRState *state = (DRState *)memory->context;
+	if (!memory->isInit)
+	{
+		memory->isInit = true;
+		memory->context =
+		    DqnMemBuffer_Allocate(&memory->permanentBuffer, sizeof(DRState));
+		DQN_ASSERT(memory->context);
 
+		state = (DRState *)memory->context;
+		BitmapFontCreate(input->api, memory, &state->font, "Roboto-Bold.ttf",
+		                 DqnV2i_2i(512, 512), DqnV2i_2i(' ', '~'), 20);
+		input->api.Print("Hello world!\n");
+	}
+
+	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
 	DqnV3 colorRed    = DqnV3_3i(255, 0, 0);
 	DqnV2i bufferMidP = DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
 	i32 boundsOffset  = 50;
@@ -269,4 +378,5 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 	DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
 	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
 	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRed);
+
 }

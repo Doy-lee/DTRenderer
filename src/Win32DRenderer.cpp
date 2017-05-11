@@ -8,6 +8,75 @@
 #define UNICODE
 #define _UNICODE
 
+////////////////////////////////////////////////////////////////////////////////
+// Platform API Implementation
+////////////////////////////////////////////////////////////////////////////////
+FILE_SCOPE inline PlatformFile DqnFileToPlatformFileInternal(const DqnFile file)
+{
+	PlatformFile result = {};
+	result.handle          = file.handle;
+	result.size            = file.size;
+	result.permissionFlags = file.permissionFlags;
+
+	return result;
+}
+
+FILE_SCOPE inline DqnFile PlatformFileToDqnFileInternal(const PlatformFile file)
+{
+	DqnFile result = {};
+	result.handle          = file.handle;
+	result.size            = file.size;
+	result.permissionFlags = file.permissionFlags;
+
+	return result;
+}
+
+void Platform_Print(const char *const string)
+{
+	if (!string) return;
+	OutputDebugString(string);
+}
+
+bool Platform_FileOpen(const char *const path, PlatformFile *const file,
+                       const u32 permissionFlags)
+{
+	if (!path || !file) return false;
+	DQN_ASSERT((permissionFlags &
+	            ~(PlatformFilePermissionFlag_Write |
+	              PlatformFilePermissionFlag_Read)) == 0);
+
+	DqnFile dqnFile = {};
+	if (DqnFile_Open(path, &dqnFile, permissionFlags, DqnFileAction_OpenOnly))
+	{
+		*file = DqnFileToPlatformFileInternal(dqnFile);
+		return true;
+	}
+
+	return false;
+}
+
+size_t Platform_FileRead(PlatformFile *const file, u8 *const buf,
+                         const size_t bytesToRead)
+{
+	if (!file || !buf) return 0;
+
+	DqnFile dqnFile     = PlatformFileToDqnFileInternal(*file);
+	size_t numBytesRead = DqnFile_Read(dqnFile, buf, bytesToRead);
+
+	return numBytesRead;
+}
+
+void Platform_FileClose(PlatformFile *const file)
+{
+	if (!file) return;
+
+	DqnFile dqnFile = PlatformFileToDqnFileInternal(*file);
+	DqnFile_Close(&dqnFile);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Win32 Layer
+////////////////////////////////////////////////////////////////////////////////
 #include <Pathcch.h>
 #include <Windows.h>
 typedef struct Win32RenderBitmap
@@ -409,6 +478,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	f64 frameTimeInS              = 0.0f;
 	globalRunning                 = true;
 
+	PlatformAPI platformAPI = {};
+	platformAPI.FileOpen    = Platform_FileOpen;
+	platformAPI.FileRead    = Platform_FileRead;
+	platformAPI.FileClose   = Platform_FileClose;
+	platformAPI.Print       = Platform_Print;
+
 	while (globalRunning)
 	{
 		////////////////////////////////////////////////////////////////////////
@@ -426,6 +501,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		{
 			PlatformInput platformInput = {};
 			platformInput.deltaForFrame = (f32)frameTimeInS;
+			platformInput.api           = platformAPI;
 			Win32ProcessMessages(mainWindow, &platformInput);
 
 			PlatformRenderBuffer platformBuffer = {};
@@ -483,3 +559,4 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 	return 0;
 }
+

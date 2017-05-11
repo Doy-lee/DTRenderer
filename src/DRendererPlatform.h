@@ -3,6 +3,33 @@
 
 #include "dqn.h"
 
+enum PlatformFilePermissionFlag
+{
+	PlatformFilePermissionFlag_Read  = (1 << 0),
+	PlatformFilePermissionFlag_Write = (1 << 1),
+};
+
+typedef struct PlatformFile
+{
+	void   *handle;
+	size_t  size;
+	u32     permissionFlags;
+} PlatformFile;
+
+typedef bool   PlatformAPI_FileOpen (const char *const path, PlatformFile *const file,
+                                     const u32 permissionFlags);
+typedef size_t PlatformAPI_FileRead (PlatformFile *const file, u8 *const buf,
+                                     const size_t bytesToRead); // Return bytes read
+typedef void   PlatformAPI_FileClose(PlatformFile *const file);
+typedef void   PlatformAPI_Print    (const char *const string);
+typedef struct PlatformAPI
+{
+	PlatformAPI_FileOpen  *FileOpen;
+	PlatformAPI_FileRead  *FileRead;
+	PlatformAPI_FileClose *FileClose;
+	PlatformAPI_Print     *Print;
+} PlatformAPI;
+
 enum Key
 {
 	key_up,
@@ -43,6 +70,7 @@ typedef struct KeyState
 typedef struct PlatformInput
 {
 	f32 deltaForFrame;
+	PlatformAPI api;
 
 	union {
 		KeyState key[key_count];
@@ -81,6 +109,8 @@ typedef struct PlatformMemory
 {
 	DqnMemBuffer permanentBuffer;
 	DqnMemBuffer transientBuffer;
+	bool  isInit;
+	void *context;
 } PlatformMemory;
 
 typedef struct PlatformRenderBuffer
