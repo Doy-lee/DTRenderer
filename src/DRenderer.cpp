@@ -1,17 +1,23 @@
 #include "DRenderer.h"
 #include "DRendererPlatform.h"
 
+#define STB_RECT_PACK_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
-#include "external/stb_image.h"
-
 #define STB_TRUETYPE_IMPLEMENTATION
+#include "external/stb_rect_pack.h"
+#include "external/stb_image.h"
 #include "external/stb_truetype.h"
+
+// #define DR_DEBUG_RENDER_FONT_BITMAP
+#ifdef DR_DEBUG_RENDER_FONT_BITMAP
+	#define STB_IMAGE_WRITE_IMPLEMENTATION
+	#include "external/stb_image_write.h"
+#endif
 
 #define DQN_IMPLEMENTATION
 #include "dqn.h"
 
 #define DR_DEBUG 1
-
 typedef struct DRFont
 {
 	u8    *bitmap;
@@ -103,6 +109,7 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
                              const DqnV2 p1, const DqnV2 p2, const DqnV2 p3,
                              const DqnV3 color)
 {
+	__rdtsc();
 	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
 	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
 	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
@@ -232,6 +239,86 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	}
 }
 
+FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
+                         const DRFont font, DqnV2 pos, const char *const text,
+                         i32 len = -1)
+{
+	if (!text) return;
+	if (len == -1) len = Dqn_strlen(text);
+
+	i32 index = 0;
+	while (index < len)
+	{
+		if (text[index] < font.codepointRange.min &&
+		    text[index] > font.codepointRange.max)
+		{
+			return;
+		}
+
+		i32 charIndex = text[index++] - (i32)font.codepointRange.min;
+		DQN_ASSERT(charIndex >= 0 &&
+		           charIndex < (i32)(font.codepointRange.max -
+		                             font.codepointRange.min));
+
+		stbtt_aligned_quad alignedQuad = {};
+		stbtt_GetPackedQuad(font.atlas, font.bitmapDim.w, font.bitmapDim.h,
+		                    charIndex, &pos.x, &pos.y, &alignedQuad, true);
+		stbtt_packedchar *charData = font.atlas + charIndex;
+
+		DqnRect fontRect = {};
+		fontRect.min     = DqnV2_2f(alignedQuad.s0 * font.bitmapDim.w, alignedQuad.t1 * font.bitmapDim.h);
+		fontRect.max     = DqnV2_2f(alignedQuad.s1 * font.bitmapDim.w, alignedQuad.t0 * font.bitmapDim.h);
+
+		DqnRect screenRect = {};
+		screenRect.min     = DqnV2_2f(alignedQuad.x0, alignedQuad.y0);
+		screenRect.max     = DqnV2_2f(alignedQuad.x1, alignedQuad.y1);
+
+		// TODO: Assumes 1bpp and pitch of font bitmap
+		const u32 fontPitch = font.bitmapDim.w;
+		u32 fontOffset      = (u32)(fontRect.min.x + (fontRect.max.y * fontPitch));
+		u8 *fontPtr         = font.bitmap + fontOffset;
+
+		DQN_ASSERT(sizeof(u32) == renderBuffer->bytesPerPixel);
+		f32 fontHeightOffset = charData->yoff2 + charData->yoff;
+		u32 screenOffset = (u32)(screenRect.min.x + (screenRect.min.y - fontHeightOffset) * renderBuffer->width);
+		u32 *screenPtr   = ((u32 *)renderBuffer->memory) + screenOffset;
+
+		i32 fontWidth    = DQN_ABS((i32)(fontRect.min.x - fontRect.max.x));
+		i32 fontHeight   = DQN_ABS((i32)(fontRect.min.y - fontRect.max.y));
+		for (i32 y = 0; y < fontHeight; y++)
+		{
+			for (i32 x = 0; x < fontWidth; x++)
+			{
+				i32 yOffset  = fontHeight - y;
+				u8 fontPixel = fontPtr[x + (yOffset * fontPitch)];
+				if (fontPixel == 0) continue;
+
+				f32 srcA = (fontPixel / 255.0f);
+				f32 srcR = (fontPixel / 255.0f);
+				f32 srcG = (fontPixel / 255.0f);
+				f32 srcB = (fontPixel / 255.0f);
+
+				u32 offset = x + (y * renderBuffer->width);
+				u32 old    = screenPtr[offset];
+				f32 oldR   = (f32)((old >> 16) & 0xFF) / 255.0f;
+				f32 oldG   = (f32)((old >> 8) &  0xFF) / 255.0f;
+				f32 oldB   = (f32)((old >> 0) &  0xFF) / 255.0f;
+
+				f32 invA  = 1 - srcA;
+				f32 destR = srcR + (invA * oldR);
+				f32 destG = srcG + (invA * oldG);
+				f32 destB = srcB + (invA * oldB);
+				u32 dest  = ((u32)(destR * 255.0f) << 16) |
+				            ((u32)(destG * 255.0f) << 8) |
+				            ((u32)(destB * 255.0f) << 0);
+
+				screenPtr[offset] = dest;
+			}
+		}
+	}
+}
+
+
 FILE_SCOPE void ClearRenderBuffer(PlatformRenderBuffer *const renderBuffer, DqnV3 color)
 {
 	if (!renderBuffer) return;
@@ -288,11 +375,12 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 	// Pack font data to bitmap
 	////////////////////////////////////////////////////////////////////////////
 	font->bitmap = (u8 *)DqnMemBuffer_Allocate(
-	    &memory->permanentBuffer, (size_t)(font->bitmapDim.w * font->bitmapDim.h));
+	    &memory->permanentBuffer,
+	    (size_t)(font->bitmapDim.w * font->bitmapDim.h));
 
 	stbtt_pack_context fontPackContext = {};
-	DQN_ASSERT(stbtt_PackBegin(&fontPackContext, font->bitmap, (i32)bitmapDim.w,
-	                           (i32)bitmapDim.h, 0, 1, NULL) == 1);
+	DQN_ASSERT(stbtt_PackBegin(&fontPackContext, font->bitmap, bitmapDim.w,
+	                           bitmapDim.h, 0, 1, NULL) == 1);
 	{
 		i32 numCodepoints =
 		    (i32)((codepointRange.max + 1) - codepointRange.min);
@@ -314,7 +402,7 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 		{
 			// NOTE: Bitmap from stb_truetype is 1BPP. So the actual color
 			// value represents its' alpha value but also its' color.
-			u32 index            = x + (y * (i32)bitmapDim.w);
+			u32 index            = x + (y * bitmapDim.w);
 			f32 alpha            = (f32)(font->bitmap[index]) / 255.0f;
 			f32 color            = alpha;
 			f32 preMulAlphaColor = color * alpha;
@@ -322,6 +410,11 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 			font->bitmap[index] = (u8)(preMulAlphaColor * 255.0f);
 		}
 	}
+
+#ifdef DR_DEBUG_RENDER_FONT_BITMAP
+	stbi_write_bmp("test.bmp", bitmapDim.w, bitmapDim.h, 1, font->bitmap);
+#endif
+
 	DqnMemBuffer_EndTempRegion(transientTempBufferRegion);
 }
 
@@ -338,9 +431,8 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 		DQN_ASSERT(memory->context);
 
 		state = (DRState *)memory->context;
-		BitmapFontCreate(input->api, memory, &state->font, "Roboto-Bold.ttf",
-		                 DqnV2i_2i(512, 512), DqnV2i_2i(' ', '~'), 20);
-		input->api.Print("Hello world!\n");
+		BitmapFontCreate(input->api, memory, &state->font, "Roboto-bold.ttf",
+		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 35);
 	}
 
 	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
@@ -377,6 +469,8 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 	DrawTriangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
 	DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
 	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
-	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRed);
+	// DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRed);
 
+	DqnV2 fontP = DqnV2_2i(200, 180);
+	DrawText(renderBuffer, state->font, fontP, "hello world!");
 }
