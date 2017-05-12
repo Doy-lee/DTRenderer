@@ -143,21 +143,22 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	}
 
 	/*
-	   NOTE(doyle): Given two points that form a line and an extra point
-	   to test, we can determine whether a point lies on the line, or is
-	   to the left or right of a the line.
+	   /////////////////////////////////////////////////////////////////////////
+	   // Rearranging the Determinant
+	   /////////////////////////////////////////////////////////////////////////
+	   Given two points that form a line and an extra point to test, we can
+	   determine whether a point lies on the line, or is to the left or right of
+	   a the line.
 
-	   First forming a 3x3 matrix of our terms and deriving a 2x2 matrix
-	   by subtracting the 1st column from the 2nd and 1st column from
-	   the third.
+	   First forming a 3x3 matrix of our terms and deriving a 2x2 matrix by
+	   subtracting the 1st column from the 2nd and 1st column from the third.
 
-		   | ax bx cx |     | (bx - ax)  (cx - ax) |
+	       | ax bx cx |     | (bx - ax)  (cx - ax) |
 	   m = | ay by cy | ==> | (by - ay)  (cy - ay) |
-		   | 1  1  1  |
+	       | 1  1  1  |
 
-	   From our 2x2 representation we can calculate the determinant
-	   which gives us the signed area of the triangle extended into
-	   a parallelogram.
+	   From our 2x2 representation we can calculate the determinant which gives
+	   us the signed area of the triangle extended into a parallelogram.
 
 	   det(m) = (bx - ax)(cy - ay) - (by - ay)(cx - ax)
 
@@ -167,38 +168,77 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	   - CW  and c(x,y) is outside the triangle, the signed area is positive
 	   - CW  and c(x,y) is inside  the triangle, the signed area is negative
 
-	   NOTE(doyle): The det(m) can be rearranged if expanded to be
-	   SignedArea(cx, cy) = (ay - by)cx + (bx - ay)cy + (ax*by + ay*bx)
+	   /////////////////////////////////////////////////////////////////////////
+	   // Optimising the Determinant Calculation
+	   /////////////////////////////////////////////////////////////////////////
+	   The det(m) can be rearranged if expanded to be
+	   SignedArea(cx, cy) = (ay - by)cx + (bx - ay)cy + (ax*by - ay*bx)
 
 	   When we scan to fill our triangle we go pixel by pixel, left to right,
 	   bottom to top, notice that this translates to +1 for x and +1 for y, i.e.
 
 	   The first pixel's signed area is cx, then cx+1, cx+2 .. etc
-	   SignedArea(cx, cy)   = (ay - by)cx   + (bx - ax)cy + (ax*by + ay*bx)
-	   SignedArea(cx+1, cy) = (ay - by)cx+1 + (bx - ax)cy + (ax*by + ay*bx)
+	   SignedArea(cx, cy)   = (ay - by)cx   + (bx - ax)cy + (ax*by - ay*bx)
+	   SignedArea(cx+1, cy) = (ay - by)cx+1 + (bx - ax)cy + (ax*by - ay*bx)
 
 	   Then
 	   SignedArea(cx+1, cy) - SignedArea(cx, cy) =
-	     (ay - by)cx+1 + (bx - ax)cy + (ax*by + ay*bx)
-	   - (ay - by)cx   + (bx - ax)cy + (ax*by + ay*bx)
+	     (ay - by)cx+1 + (bx - ax)cy + (ax*by - ay*bx)
+	   - (ay - by)cx   + (bx - ax)cy + (ax*by - ay*bx)
 	   = (ay - by)cx+1 - (ay - by)cx
 	   = (ay - by)(cx+1 - cx)
 	   = (ay - by)(1)         = (ay - by)
 
 	   Similarly when progressing in y
-	   SignedArea(cx, cy)   = (ay - by)cx + (bx - ay)cy   + (ax*by + ay*bx)
-	   SignedArea(cx, cy+1) = (ay - by)cx + (bx - ay)cy+1 + (ax*by + ay*bx)
+	   SignedArea(cx, cy)   = (ay - by)cx + (bx - ay)cy   + (ax*by - ay*bx)
+	   SignedArea(cx, cy+1) = (ay - by)cx + (bx - ay)cy+1 + (ax*by - ay*bx)
 
 	   Then
 	   SignedArea(cx, cy+1) - SignedArea(cx, cy) =
-	     (ay - by)cx + (bx - ax)cy+1 + (ax*by + ay*bx)
-	   - (ay - by)cx + (bx - ax)cy   + (ax*by + ay*bx)
+	     (ay - by)cx + (bx - ax)cy+1 + (ax*by - ay*bx)
+	   - (ay - by)cx + (bx - ax)cy   + (ax*by - ay*bx)
 	   = (bx - ax)cy+1 - (bx - ax)cy
 	   = (bx - ax)(cy+1 - cy)
 	   = (bx - ax)(1)         = (bx - ax)
 
 	   Then we can see that when we progress along x, we only need to change by
 	   the value of SignedArea by (ay - by) and similarly for y, (bx - ay)
+
+	   /////////////////////////////////////////////////////////////////////////
+	   // Barycentric Coordinates
+	   /////////////////////////////////////////////////////////////////////////
+	   At this point we have an equation that can be used to calculate the
+	   2x the signed area of a triangle, or the signed area of a parallelogram,
+	   the two of which are equivalent.
+
+	   det(m)             = (bx - ax)(cy - ay) - (by - ay)(cx - ax)
+	   SignedArea(cx, cy) = (ay - by)cx + (bx - ay)cy + (ax*by - ay*bx)
+
+	   A barycentric coordinate is some coefficient on A, B, C that allows us to
+	   specify an arbitrary point in the triangle as a linear combination of the
+	   three usually with some coefficient [0, 1].
+
+	   The SignedArea turns out to be actually the barycentric coord for c(x, y)
+	   normalised to the sum of the parallelogram area. For example a triangle
+	   with points, A, B, C and an arbitrary point P inside the triangle. Then
+
+	   SignedArea(P) with vertex A and B = Barycentric Coordinate for C
+	   SignedArea(P) with vertex B and C = Barycentric Coordinate for A
+	   SignedArea(P) with vertex C and A = Barycentric Coordinate for B
+
+	       B
+	      / \
+	     /   \
+	    /  P  \
+	   /_______\
+	  A        C
+
+	   This is normalised to the area's sum, but we can trivially turn this into
+	   a normalised version by dividing the area of the parallelogram, i.e.
+
+	   BaryCentricA(P) = (SignedArea(P) w. vertex C and B)/SignedArea(of the orig triangle)
+	   BaryCentricB(P) = (SignedArea(P) w. vertex A and C)/SignedArea(of the orig triangle)
+	   BaryCentricC(P) = (SignedArea(P) w. vertex A and B)/SignedArea(of the orig triangle)
 	*/
 
 	DqnV2i scanP          = DqnV2i_2i(min.x, min.y);
@@ -263,7 +303,6 @@ FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
 		stbtt_aligned_quad alignedQuad = {};
 		stbtt_GetPackedQuad(font.atlas, font.bitmapDim.w, font.bitmapDim.h,
 		                    charIndex, &pos.x, &pos.y, &alignedQuad, true);
-		stbtt_packedchar *charData = font.atlas + charIndex;
 
 		DqnRect fontRect = {};
 		fontRect.min     = DqnV2_2f(alignedQuad.s0 * font.bitmapDim.w, alignedQuad.t1 * font.bitmapDim.h);
@@ -279,7 +318,13 @@ FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
 		u8 *fontPtr         = font.bitmap + fontOffset;
 
 		DQN_ASSERT(sizeof(u32) == renderBuffer->bytesPerPixel);
-		f32 fontHeightOffset = charData->yoff2 + charData->yoff;
+
+		// NOTE(doyle): This offset, yOffset and flipping t1, t0 is necessary
+		// for reversing the order of the font since its convention is 0,0 top
+		// left and -ve Y.
+		stbtt_packedchar *const charData = font.atlas + charIndex;
+		f32 fontHeightOffset             = charData->yoff2 + charData->yoff;
+
 		u32 screenOffset = (u32)(screenRect.min.x + (screenRect.min.y - fontHeightOffset) * renderBuffer->width);
 		u32 *screenPtr   = ((u32 *)renderBuffer->memory) + screenOffset;
 
