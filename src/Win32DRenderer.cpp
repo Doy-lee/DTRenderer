@@ -110,6 +110,7 @@ FILE_SCOPE void Win32DisplayRenderBitmap(Win32RenderBitmap renderBitmap,
                                          HDC deviceContext, LONG width,
                                          LONG height)
 {
+#if 0
 	HDC stretchDC = CreateCompatibleDC(deviceContext);
 	SelectObject(stretchDC, renderBitmap.handle);
     // DQN_ASSERT(renderBitmap.width  == width);
@@ -117,6 +118,11 @@ FILE_SCOPE void Win32DisplayRenderBitmap(Win32RenderBitmap renderBitmap,
 	StretchBlt(deviceContext, 0, 0, width, height, stretchDC, 0, 0,
 	           renderBitmap.width, renderBitmap.height, SRCCOPY);
 	DeleteDC(stretchDC);
+#else
+	StretchDIBits(deviceContext, 0, 0, width, height, 0, 0, renderBitmap.width,
+	              renderBitmap.height, renderBitmap.memory,
+	              &renderBitmap.info, DIB_RGB_COLORS, SRCCOPY);
+#endif
 }
 
 FILETIME Win32GetLastWriteTime(const char *const srcName)

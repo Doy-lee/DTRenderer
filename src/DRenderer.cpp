@@ -33,23 +33,65 @@ typedef struct DRState
 	DRFont font;
 } DRState;
 
-FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
-                                const i32 x, const i32 y, DqnV3 color)
+FILE_SCOPE inline DqnV4 PreMultiplyAlpha(DqnV4 color)
 {
+	DqnV4 result;
+	f32 normA = color.a / 255.0f;
+	result.r  = color.r * normA;
+	result.g  = color.g * normA;
+	result.b  = color.b * normA;
+	result.a  = color.a;
+
+	return result;
+}
+
+// IMPORTANT(doyle): Color is expected to be premultiplied already
+FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
+                                const i32 x, const i32 y, const DqnV4 color)
+{
+
 	if (!renderBuffer) return;
 	if (x < 0 || x > renderBuffer->width - 1) return;
 	if (y < 0 || y > renderBuffer->height - 1) return;
 
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
-	u32 pixel = ((i32)color.r << 16) | ((i32)color.g << 8) | ((i32)color.b << 0);
+
+	f32 newA     = color.a;
+	f32 newANorm = newA / 255.0f;
+	f32 newR     = color.r;
+	f32 newG     = color.g;
+	f32 newB     = color.b;
+
+	u32 src  = bitmapPtr[x + (y * pitchInU32)];
+	f32 srcR = (f32)((src >> 16) & 0xFF);
+	f32 srcG = (f32)((src >> 8) & 0xFF);
+	f32 srcB = (f32)((src >> 0) & 0xFF);
+
+	// NOTE(doyle): AlphaBlend equations is (alpha * new) + (1 - alpha) * src.
+	// IMPORTANT(doyle): We pre-multiply so we can take out the (alpha * new)
+	f32 invANorm  = 1 - newANorm;
+	// f32 destA = (((1 - srcA) * newA) + srcA) * 255.0f;
+	f32 destR = newR + (invANorm * srcR);
+	f32 destG = newG + (invANorm * srcG);
+	f32 destB = newB + (invANorm * srcB);
+
+	// DQN_ASSERT(destA >= 0 && destA <= 255.0f);
+	DQN_ASSERT(destR >= 0 && destR <= 255.0f);
+	DQN_ASSERT(destG >= 0 && destG <= 255.0f);
+	DQN_ASSERT(destB >= 0 && destB <= 255.0f);
+
+	u32 pixel = ((u32)(destR) << 16 |
+	             (u32)(destG) << 8 |
+	             (u32)(destB) << 0);
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
 }
 
 FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
-                         DqnV2i b, DqnV3 color)
+                         DqnV2i b, DqnV4 color)
 {
 	if (!renderBuffer) return;
+	color = PreMultiplyAlpha(color);
 
 	bool yTallerThanX = false;
 	if (DQN_ABS(a.x - b.x) < DQN_ABS(a.y - b.y))
@@ -107,9 +149,10 @@ FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 
 FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
                              const DqnV2 p1, const DqnV2 p2, const DqnV2 p3,
-                             const DqnV3 color)
+                             DqnV4 color)
 {
-	__rdtsc();
+	color = PreMultiplyAlpha(color);
+
 	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
 	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
 	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
@@ -150,8 +193,15 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	   determine whether a point lies on the line, or is to the left or right of
 	   a the line.
 
-	   First forming a 3x3 matrix of our terms and deriving a 2x2 matrix by
-	   subtracting the 1st column from the 2nd and 1st column from the third.
+	   Then you can imagine if we iterate over the triangle vertexes, 2 at at
+	   time and a last point P, being the point we want to test if it's inside
+	   the triangle, then if the point is considered to lie on the side of the
+	   line forming the interior of the triangle for all 3 vertexes then the
+	   point is inside the triangle. We can do this using the determinant.
+
+	   First forming a 3x3 matrix of our terms with a, b being from the triangle
+	   and test point c, we can derive a 2x2 matrix by subtracting the 1st
+	   column from the 2nd and 1st column from the third.
 
 	       | ax bx cx |     | (bx - ax)  (cx - ax) |
 	   m = | ay by cy | ==> | (by - ay)  (cy - ay) |
@@ -163,10 +213,10 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	   det(m) = (bx - ax)(cy - ay) - (by - ay)(cx - ax)
 
 	   Depending on the order of the vertices supplied, if it's
-	   - CCW and c(x,y) is outside the triangle, the signed area is negative
-	   - CCW and c(x,y) is inside  the triangle, the signed area is positive
-	   - CW  and c(x,y) is outside the triangle, the signed area is positive
-	   - CW  and c(x,y) is inside  the triangle, the signed area is negative
+	   - CCW and c(x,y) is outside the line (triangle), the signed area is negative
+	   - CCW and c(x,y) is inside  the line (triangle), the signed area is positive
+	   - CW  and c(x,y) is outside the line (triangle), the signed area is positive
+	   - CW  and c(x,y) is inside  the line (triangle), the signed area is negative
 
 	   /////////////////////////////////////////////////////////////////////////
 	   // Optimising the Determinant Calculation
@@ -236,9 +286,9 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	   This is normalised to the area's sum, but we can trivially turn this into
 	   a normalised version by dividing the area of the parallelogram, i.e.
 
-	   BaryCentricA(P) = (SignedArea(P) w. vertex C and B)/SignedArea(of the orig triangle)
-	   BaryCentricB(P) = (SignedArea(P) w. vertex A and C)/SignedArea(of the orig triangle)
-	   BaryCentricC(P) = (SignedArea(P) w. vertex A and B)/SignedArea(of the orig triangle)
+	   BaryCentricC(P) = (SignedArea(P) with vertex A and B)/SignedArea(with the orig triangle vertex)
+	   BaryCentricA(P) = (SignedArea(P) with vertex B and C)/SignedArea(with the orig triangle vertex)
+	   BaryCentricB(P) = (SignedArea(P) with vertex C and A)/SignedArea(with the orig triangle vertex)
 	*/
 
 	DqnV2i scanP          = DqnV2i_2i(min.x, min.y);
@@ -253,6 +303,8 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	f32 signedArea3       = ((a.x - c.x) * (scanP.y - c.y)) - ((a.y - c.y) * (scanP.x - c.x));
 	f32 signedArea3DeltaX = c.y - a.y;
 	f32 signedArea3DeltaY = a.x - c.x;
+
+	f32 invSignedAreaParallelogram = 1 / ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
 
 	for (scanP.y = min.y; scanP.y < max.y; scanP.y++)
 	{
@@ -281,12 +333,13 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 
 FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
                          const DRFont font, DqnV2 pos, const char *const text,
-                         i32 len = -1)
+                         DqnV4 color = DqnV4_4f(255, 255, 255, 255), i32 len = -1)
 {
 	if (!text) return;
 	if (len == -1) len = Dqn_strlen(text);
 
 	i32 index = 0;
+	color     = PreMultiplyAlpha(color);
 	while (index < len)
 	{
 		if (text[index] < font.codepointRange.min &&
@@ -334,30 +387,20 @@ FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
 		{
 			for (i32 x = 0; x < fontWidth; x++)
 			{
-				i32 yOffset  = fontHeight - y;
-				u8 fontPixel = fontPtr[x + (yOffset * fontPitch)];
-				if (fontPixel == 0) continue;
+				i32 yOffset = fontHeight - y;
+				u8 srcA     = fontPtr[x + (yOffset * fontPitch)];
+				if (srcA == 0) continue;
 
-				f32 srcA = (fontPixel / 255.0f);
-				f32 srcR = (fontPixel / 255.0f);
-				f32 srcG = (fontPixel / 255.0f);
-				f32 srcB = (fontPixel / 255.0f);
+				f32 srcANorm = srcA / 255.0f;
+				DqnV4 resultColor = {};
+				resultColor.r     = color.r * srcANorm;
+				resultColor.g     = color.g * srcANorm;
+				resultColor.b     = color.b * srcANorm;
+				resultColor.a     = color.a * srcANorm;
 
-				u32 offset = x + (y * renderBuffer->width);
-				u32 old    = screenPtr[offset];
-				f32 oldR   = (f32)((old >> 16) & 0xFF) / 255.0f;
-				f32 oldG   = (f32)((old >> 8) &  0xFF) / 255.0f;
-				f32 oldB   = (f32)((old >> 0) &  0xFF) / 255.0f;
-
-				f32 invA  = 1 - srcA;
-				f32 destR = srcR + (invA * oldR);
-				f32 destG = srcG + (invA * oldG);
-				f32 destB = srcB + (invA * oldB);
-				u32 dest  = ((u32)(destR * 255.0f) << 16) |
-				            ((u32)(destG * 255.0f) << 8) |
-				            ((u32)(destB * 255.0f) << 0);
-
-				screenPtr[offset] = dest;
+				i32 actualX = (i32)(screenRect.min.x + x);
+				i32 actualY = (i32)(screenRect.min.y + y - fontHeightOffset);
+				SetPixel(renderBuffer, actualX, actualY, resultColor);
 			}
 		}
 	}
@@ -451,6 +494,7 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 			f32 alpha            = (f32)(font->bitmap[index]) / 255.0f;
 			f32 color            = alpha;
 			f32 preMulAlphaColor = color * alpha;
+			DQN_ASSERT(preMulAlphaColor >= 0.0f && preMulAlphaColor <= 255.0f);
 
 			font->bitmap[index] = (u8)(preMulAlphaColor * 255.0f);
 		}
@@ -480,8 +524,8 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 35);
 	}
 
-	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
-	DqnV3 colorRed    = DqnV3_3i(255, 0, 0);
+	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 255, 0));
+	DqnV4 colorRed    = DqnV4_4i(50, 0, 0, 255);
 	DqnV2i bufferMidP = DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
 	i32 boundsOffset  = 50;
 
@@ -497,7 +541,7 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 	f32 maxX = 0;
 	for (i32 i = 0; i < DQN_ARRAY_COUNT(t3); i++)
 	{
-		t3[i].x += input->deltaForFrame * 2.0f;
+		// t3[i].x += input->deltaForFrame * 2.0f;
 		minX = DQN_MIN(t3[i].x, minX);
 		maxX = DQN_MAX(t3[i].x, maxX);
 	}
@@ -511,11 +555,14 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 		}
 	}
 
+	DqnV2 fontP = DqnV2_2i(200, 180);
+	DrawText(renderBuffer, state->font, fontP, "hello world!");
+
 	DrawTriangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
 	DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
 	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
-	// DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRed);
 
-	DqnV2 fontP = DqnV2_2i(200, 180);
-	DrawText(renderBuffer, state->font, fontP, "hello world!");
+	DqnV4 colorRedHalfA = DqnV4_4i(255, 0, 0, 190);
+	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA);
+
 }
