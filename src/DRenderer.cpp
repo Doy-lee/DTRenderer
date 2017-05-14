@@ -529,19 +529,30 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 FILE_SCOPE void DrawBitmap(PlatformRenderBuffer *const renderBuffer,
                            DRBitmap *const bitmap, i32 x, i32 y)
 {
-	if (!bitmap || !bitmap->memory) return;
+	if (!bitmap || !bitmap->memory || !renderBuffer) return;
+
+	DqnRect viewport   = DqnRect_4i(0, 0, renderBuffer->width, renderBuffer->height);
+	DqnRect bitmapRect = DqnRect_4i(x, y, x + bitmap->dim.w, y + bitmap->dim.h);
+	bitmapRect         = DqnRect_ClipRect(bitmapRect, viewport);
+	if (bitmapRect.max.x < 0 || bitmapRect.max.y < 0) return;
+
+	i32 startX = (x > 0) ? 0 : DQN_ABS(x);
+	i32 startY = (y > 0) ? 0 : DQN_ABS(y);
+
+	i32 endX, endY;
+	DqnRect_GetSize2i(bitmapRect, &endX, &endY);
 
 	const i32 pitch  = bitmap->dim.w * bitmap->bytesPerPixel;
-	for (i32 bitmapY = 0; bitmapY < bitmap->dim.w; bitmapY++)
+	for (i32 bitmapY = startY; bitmapY < endY; bitmapY++)
 	{
 		u8 *const srcRow = bitmap->memory + (bitmapY * pitch);
-		i32 bufferY      = y + bitmapY;
+		i32 bufferY      = (i32)bitmapRect.min.y + bitmapY;
 
-		for (i32 bitmapX = 0; bitmapX < bitmap->dim.w; bitmapX++)
+		for (i32 bitmapX = startX; bitmapX < endX; bitmapX++)
 		{
 			u32 *pixelPtr = (u32 *)srcRow;
 			u32 pixel     = pixelPtr[bitmapX];
-			i32 bufferX   = x + bitmapX;
+			i32 bufferX   = (i32)bitmapRect.min.x + bitmapX;
 
 			DqnV4 color = {};
 			color.a     = (f32)(pixel >> 24);
@@ -658,7 +669,6 @@ void DebugUpdate(PlatformRenderBuffer *const renderBuffer,
 
 	debug->totalSetPixels += debug->setPixelsPerFrame;
 	debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
-	debug->setPixelsPerFrame = 0;
 
 	// totalSetPixels
 	{
@@ -683,6 +693,8 @@ void DebugUpdate(PlatformRenderBuffer *const renderBuffer,
 		DebugDisplayMemBuffer(renderBuffer, "TransBuffer",
 		                      &memory->transientBuffer, &debugP, font);
 	}
+
+	debug->setPixelsPerFrame = 0;
 }
 
 extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
@@ -745,8 +757,7 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 
 	DqnV2 fontP = DqnV2_2i(200, 180);
 	DrawText(renderBuffer, state->font, fontP, "hello world!");
+
 	DrawBitmap(renderBuffer, &state->bitmap, 700, 400);
-
 	DebugUpdate(renderBuffer, input, memory, state->font);
-
 }

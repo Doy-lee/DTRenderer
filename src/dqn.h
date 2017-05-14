@@ -589,10 +589,14 @@ typedef struct DqnRect
 	DqnV2 max;
 } DqnRect;
 
+DQN_FILE_SCOPE DqnRect DqnRect_4f       (f32 minX, f32 minY, f32 maxX, f32 maxY);
+DQN_FILE_SCOPE DqnRect DqnRect_4i       (i32 minX, i32 minY, i32 maxX, i32 maxY);
 DQN_FILE_SCOPE DqnRect DqnRect_Init     (DqnV2 origin, DqnV2 size);
 DQN_FILE_SCOPE void    DqnRect_GetSize2f(DqnRect rect, f32 *width, f32 *height);
-DQN_FILE_SCOPE DqnV2   DqnRect_GetSizev2(DqnRect rect);
+DQN_FILE_SCOPE void    DqnRect_GetSize2i(DqnRect rect, i32 *width, i32 *height);
+DQN_FILE_SCOPE DqnV2   DqnRect_GetSizeV2(DqnRect rect);
 DQN_FILE_SCOPE DqnV2   DqnRect_GetCenter(DqnRect rect);
+DQN_FILE_SCOPE DqnRect DqnRect_ClipRect (DqnRect rect, DqnRect clip);
 DQN_FILE_SCOPE DqnRect DqnRect_Move     (DqnRect rect, DqnV2 shift);
 DQN_FILE_SCOPE bool    DqnRect_ContainsP(DqnRect rect, DqnV2 p);
 
@@ -2229,6 +2233,24 @@ DQN_FILE_SCOPE DqnV4 DqnMat4_MulV4(DqnMat4 a, DqnV4 b)
 ////////////////////////////////////////////////////////////////////////////////
 // Rect
 ////////////////////////////////////////////////////////////////////////////////
+DQN_FILE_SCOPE DqnRect DqnRect_4f(f32 minX, f32 minY, f32 maxX, f32 maxY)
+{
+	DqnRect result = {};
+	result.min     = DqnV2_2f(minX, minY);
+	result.max     = DqnV2_2f(maxX, maxY);
+
+	return result;
+}
+
+DQN_FILE_SCOPE DqnRect DqnRect_4i(i32 minX, i32 minY, i32 maxX, i32 maxY)
+{
+	DqnRect result = {};
+	result.min     = DqnV2_2i(minX, minY);
+	result.max     = DqnV2_2i(maxX, maxY);
+
+	return result;
+}
+
 DQN_FILE_SCOPE DqnRect DqnRect_Init(DqnV2 origin, DqnV2 size)
 {
 	DqnRect result = {};
@@ -2242,6 +2264,12 @@ DQN_FILE_SCOPE void DqnRect_GetSize2f(DqnRect rect, f32 *width, f32 *height)
 {
 	*width  = DQN_ABS(rect.max.x - rect.min.x);
 	*height = DQN_ABS(rect.max.y - rect.min.y);
+}
+
+DQN_FILE_SCOPE void DqnRect_GetSize2i(DqnRect rect, i32 *width, i32 *height)
+{
+	*width  = (i32)DQN_ABS(rect.max.x - rect.min.x);
+	*height = (i32)DQN_ABS(rect.max.y - rect.min.y);
 }
 
 DQN_FILE_SCOPE DqnV2 DqnRect_GetSizeV2(DqnRect rect)
@@ -2258,6 +2286,18 @@ DQN_FILE_SCOPE DqnV2 DqnRect_GetCentre(DqnRect rect)
 	f32 sumX  = rect.min.x + rect.max.x;
 	f32 sumY  = rect.min.y + rect.max.y;
 	DqnV2 result = DqnV2_Scalef(DqnV2_2f(sumX, sumY), 0.5f);
+	return result;
+}
+
+DQN_FILE_SCOPE DqnRect DqnRect_ClipRect(DqnRect rect, DqnRect clip)
+{
+	DqnRect result = {};
+	DqnV2 clipSize = DqnRect_GetSizeV2(clip);
+
+	result.max.x = DQN_MIN(rect.max.x, clipSize.w);
+	result.max.y = DQN_MIN(rect.max.y, clipSize.h);
+	result.min.x = DQN_MAX(clip.min.x, rect.min.x);
+	result.min.y = DQN_MAX(clip.min.y, rect.min.y);
 	return result;
 }
 
