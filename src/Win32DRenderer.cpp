@@ -90,6 +90,7 @@ typedef struct Win32RenderBitmap
 } Win32RenderBitmap;
 
 FILE_SCOPE Win32RenderBitmap globalRenderBitmap;
+FILE_SCOPE PlatformMemory    globalPlatformMemory;
 FILE_SCOPE bool              globalRunning;
 
 typedef struct Win32ExternalCode
@@ -103,6 +104,7 @@ typedef struct Win32ExternalCode
 enum Win32Menu
 {
 	Win32Menu_FileOpen = 4,
+	Win32Menu_FileFlushMemory,
 	Win32Menu_FileExit,
 };
 
@@ -175,6 +177,7 @@ FILE_SCOPE void Win32CreateMenu(HWND window)
 		HMENU menu = CreatePopupMenu();
 		AppendMenu(menuBar, MF_STRING | MF_POPUP, (UINT_PTR)menu, "File");
 		AppendMenu(menu, MF_STRING, Win32Menu_FileOpen, "Open");
+		AppendMenu(menu, MF_STRING, Win32Menu_FileFlushMemory, "Flush Memory");
 		AppendMenu(menu, MF_STRING, Win32Menu_FileExit, "Exit");
 	}
 	SetMenu(window, menuBar);
@@ -245,6 +248,26 @@ FILE_SCOPE void Win32HandleMenuMessages(HWND window, MSG msg,
 		case Win32Menu_FileExit:
 		{
 			globalRunning = false;
+		}
+		break;
+
+		case Win32Menu_FileFlushMemory:
+		{
+			DqnMemBuffer permBuffer  = globalPlatformMemory.permanentBuffer;
+			DqnMemBuffer transBuffer = globalPlatformMemory.transientBuffer;
+			while (permBuffer.block->prevBlock)
+				DqnMemBuffer_FreeLastBlock(&permBuffer);
+
+			while (transBuffer.block->prevBlock)
+				DqnMemBuffer_FreeLastBlock(&transBuffer);
+
+			DqnMemBuffer_ClearCurrBlock(&transBuffer, true);
+			DqnMemBuffer_ClearCurrBlock(&permBuffer, true);
+
+			PlatformMemory empty                 = {};
+			globalPlatformMemory                 = empty;
+			globalPlatformMemory.permanentBuffer = permBuffer;
+			globalPlatformMemory.transientBuffer = transBuffer;
 		}
 		break;
 
@@ -475,9 +498,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	////////////////////////////////////////////////////////////////////////////
 	// Update Loop
 	////////////////////////////////////////////////////////////////////////////
-	PlatformMemory platformMemory = {};
-	DQN_ASSERT(DqnMemBuffer_Init(&platformMemory.permanentBuffer, DQN_MEGABYTE(1), true, 4) &&
-	           DqnMemBuffer_Init(&platformMemory.transientBuffer, DQN_MEGABYTE(1), true, 4));
+	DQN_ASSERT(DqnMemBuffer_Init(&globalPlatformMemory.permanentBuffer, DQN_MEGABYTE(1), true, 4) &&
+	           DqnMemBuffer_Init(&globalPlatformMemory.transientBuffer, DQN_MEGABYTE(1), true, 4));
 
 	const f32 TARGET_FRAMES_PER_S = 60.0f;
 	f32 targetSecondsPerFrame     = 1 / TARGET_FRAMES_PER_S;
@@ -506,6 +528,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 		{
 			PlatformInput platformInput = {};
+			platformInput.timeNowInS    = DqnTime_NowInS();
 			platformInput.deltaForFrame = (f32)frameTimeInS;
 			platformInput.api           = platformAPI;
 			Win32ProcessMessages(mainWindow, &platformInput);
@@ -519,7 +542,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			if (dllCode.DR_Update)
 			{
 				dllCode.DR_Update(&platformBuffer, &platformInput,
-				                  &platformMemory);
+				                  &globalPlatformMemory);
 			}
 		}
 

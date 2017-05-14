@@ -70,8 +70,9 @@ typedef struct KeyState
 typedef struct PlatformInput
 {
 	f32 deltaForFrame;
-	PlatformAPI api;
+	f64 timeNowInS;
 
+	PlatformAPI api;
 	union {
 		KeyState key[key_count];
 		struct

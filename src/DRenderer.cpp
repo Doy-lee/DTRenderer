@@ -28,10 +28,26 @@ typedef struct DRFont
 	stbtt_packedchar *atlas;
 } DRFont;
 
+typedef struct DRBitmap
+{
+	u8    *memory;
+	DqnV2i dim;
+	i32    bytesPerPixel;
+} DRBitmap;
+
 typedef struct DRState
 {
-	DRFont font;
+	DRFont   font;
+	DRBitmap bitmap;
 } DRState;
+
+typedef struct DRDebug
+{
+	i32 setPixelsPerFrame;
+	i32 totalSetPixels;
+
+	i32    displayYOffset;
+} DRDebug;
 
 FILE_SCOPE inline DqnV4 PreMultiplyAlpha(DqnV4 color)
 {
@@ -45,14 +61,15 @@ FILE_SCOPE inline DqnV4 PreMultiplyAlpha(DqnV4 color)
 	return result;
 }
 
+FILE_SCOPE DRDebug globalDebug;
+
 // IMPORTANT(doyle): Color is expected to be premultiplied already
 FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
                                 const i32 x, const i32 y, const DqnV4 color)
 {
-
 	if (!renderBuffer) return;
-	if (x < 0 || x > renderBuffer->width - 1) return;
-	if (y < 0 || y > renderBuffer->height - 1) return;
+	if (x <= 0 || x > (renderBuffer->width - 1)) return;
+	if (y <= 0 || y > (renderBuffer->height - 1)) return;
 
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
@@ -85,6 +102,8 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
 	             (u32)(destG) << 8 |
 	             (u32)(destB) << 0);
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
+
+	globalDebug.setPixelsPerFrame++;
 }
 
 FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
@@ -507,6 +526,165 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 	DqnMemBuffer_EndTempRegion(transientTempBufferRegion);
 }
 
+FILE_SCOPE void DrawBitmap(PlatformRenderBuffer *const renderBuffer,
+                           DRBitmap *const bitmap, i32 x, i32 y)
+{
+	if (!bitmap || !bitmap->memory) return;
+
+	const i32 pitch  = bitmap->dim.w * bitmap->bytesPerPixel;
+	for (i32 bitmapY = 0; bitmapY < bitmap->dim.w; bitmapY++)
+	{
+		u8 *const srcRow = bitmap->memory + (bitmapY * pitch);
+		i32 bufferY      = y + bitmapY;
+
+		for (i32 bitmapX = 0; bitmapX < bitmap->dim.w; bitmapX++)
+		{
+			u32 *pixelPtr = (u32 *)srcRow;
+			u32 pixel     = pixelPtr[bitmapX];
+			i32 bufferX   = x + bitmapX;
+
+			DqnV4 color = {};
+			color.a     = (f32)(pixel >> 24);
+			color.b     = (f32)((pixel >> 16) & 0xFF);
+			color.g     = (f32)((pixel >> 8) & 0xFF);
+			color.r     = (f32)((pixel >> 0) & 0xFF);
+
+			SetPixel(renderBuffer, bufferX, bufferY, color);
+		}
+	}
+}
+
+FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DRBitmap *bitmap,
+                           const char *const path,
+                           DqnMemBuffer *const transientBuffer)
+{
+	if (!bitmap) return false;
+
+	PlatformFile file = {};
+	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
+		return false;
+
+	DqnTempBuffer tempBuffer = DqnMemBuffer_BeginTempRegion(transientBuffer);
+	{
+		u8 *const rawData =
+		    (u8 *)DqnMemBuffer_Allocate(transientBuffer, file.size);
+		size_t bytesRead = api.FileRead(&file, rawData, file.size);
+		api.FileClose(&file);
+
+		if (bytesRead != file.size)
+		{
+			DqnMemBuffer_EndTempRegion(tempBuffer);
+			return false;
+		}
+
+		bitmap->memory =
+		    stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w,
+		                          &bitmap->dim.h, &bitmap->bytesPerPixel, 4);
+	}
+	DqnMemBuffer_EndTempRegion(tempBuffer);
+	if (!bitmap->memory) return false;
+
+	const i32 pitch = bitmap->dim.w * bitmap->bytesPerPixel;
+	for (i32 y = 0; y < bitmap->dim.h; y++)
+	{
+		u8 *const srcRow = bitmap->memory + (y * pitch);
+		for (i32 x = 0; x < bitmap->dim.w; x++)
+		{
+			u32 *pixelPtr = (u32 *)srcRow;
+			u32 pixel     = pixelPtr[x];
+
+			DqnV4 color = {};
+			color.a     = (f32)(pixel >> 24);
+			color.b     = (f32)((pixel >> 16) & 0xFF);
+			color.g     = (f32)((pixel >> 8) & 0xFF);
+			color.r     = (f32)((pixel >> 0) & 0xFF);
+			color       = PreMultiplyAlpha(color);
+
+			pixel = (((u32)color.a << 24) |
+			         ((u32)color.b << 16) |
+			         ((u32)color.g << 8) |
+			         ((u32)color.r << 0));
+
+			pixelPtr[x] = pixel;
+		}
+	}
+
+	return true;
+}
+
+void DebugDisplayMemBuffer(PlatformRenderBuffer *const renderBuffer,
+                           const char *const name,
+                           const DqnMemBuffer *const buffer,
+                           DqnV2 *const debugP, const DRFont font)
+{
+	if (!name && !buffer && !debugP) return;
+
+	size_t totalUsed   = 0;
+	size_t totalSize   = 0;
+	size_t totalWasted = 0;
+	i32 numBlocks      = 0;
+
+	DqnMemBufferBlock *blockPtr = buffer->block;
+	while (blockPtr)
+	{
+		totalUsed += blockPtr->used;
+		totalSize += blockPtr->size;
+		blockPtr = blockPtr->prevBlock;
+		numBlocks++;
+	}
+
+	size_t totalUsedKb   = totalUsed / 1024;
+	size_t totalSizeKb   = totalSize / 1024;
+	size_t totalWastedKb = totalWasted / 1024;
+
+	char str[128] = {};
+	Dqn_sprintf(str, "%s: %d block(s): %dkb/%dkb", name, numBlocks,
+	            totalUsedKb, totalSizeKb);
+
+	DrawText(renderBuffer, font, *debugP, str);
+	debugP->y += globalDebug.displayYOffset;
+}
+
+void DebugUpdate(PlatformRenderBuffer *const renderBuffer,
+                 PlatformInput *const input, PlatformMemory *const memory,
+                 const DRFont font)
+{
+	DRDebug *const debug = &globalDebug;
+
+	globalDebug.displayYOffset = -(i32)(font.sizeInPt + 0.5f);
+	DQN_ASSERT(globalDebug.displayYOffset < 0);
+
+	DqnV2 debugP = DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
+
+	debug->totalSetPixels += debug->setPixelsPerFrame;
+	debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
+	debug->setPixelsPerFrame = 0;
+
+	// totalSetPixels
+	{
+		char str[128] = {};
+		Dqn_sprintf(str, "%s: %d", "TotalSetPixels", debug->totalSetPixels);
+		DrawText(renderBuffer, font, debugP, str);
+		debugP.y += globalDebug.displayYOffset;
+	}
+
+	// setPixelsPerFrame
+	{
+		char str[128] = {};
+		Dqn_sprintf(str, "%s: %d", "SetPixelsPerFrame", debug->setPixelsPerFrame);
+		DrawText(renderBuffer, font, debugP, str);
+		debugP.y += globalDebug.displayYOffset;
+	}
+
+	// memory
+	{
+		DebugDisplayMemBuffer(renderBuffer, "PermBuffer",
+		                      &memory->permanentBuffer, &debugP, font);
+		DebugDisplayMemBuffer(renderBuffer, "TransBuffer",
+		                      &memory->transientBuffer, &debugP, font);
+	}
+}
+
 extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
                           PlatformInput *const input,
                           PlatformMemory *const memory)
@@ -514,17 +692,20 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 	DRState *state = (DRState *)memory->context;
 	if (!memory->isInit)
 	{
+		stbi_set_flip_vertically_on_load(true);
 		memory->isInit = true;
 		memory->context =
 		    DqnMemBuffer_Allocate(&memory->permanentBuffer, sizeof(DRState));
 		DQN_ASSERT(memory->context);
 
 		state = (DRState *)memory->context;
-		BitmapFontCreate(input->api, memory, &state->font, "Roboto-bold.ttf",
-		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 35);
+		BitmapFontCreate(input->api, memory, &state->font, "consola.ttf",
+		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 18);
+		DQN_ASSERT(BitmapLoad(input->api, &state->bitmap, "lune_logo.png",
+		           &memory->transientBuffer));
 	}
 
-	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 255, 0));
+	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
 	DqnV4 colorRed    = DqnV4_4i(50, 0, 0, 255);
 	DqnV2i bufferMidP = DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
 	i32 boundsOffset  = 50;
@@ -555,14 +736,17 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 		}
 	}
 
-	DqnV2 fontP = DqnV2_2i(200, 180);
-	DrawText(renderBuffer, state->font, fontP, "hello world!");
-
 	DrawTriangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
 	DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
 	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
 
 	DqnV4 colorRedHalfA = DqnV4_4i(255, 0, 0, 190);
 	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA);
+
+	DqnV2 fontP = DqnV2_2i(200, 180);
+	DrawText(renderBuffer, state->font, fontP, "hello world!");
+	DrawBitmap(renderBuffer, &state->bitmap, 700, 400);
+
+	DebugUpdate(renderBuffer, input, memory, state->font);
 
 }

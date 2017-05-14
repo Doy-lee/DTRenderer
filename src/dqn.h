@@ -611,11 +611,11 @@ DQN_FILE_SCOPE i32   Dqn_strlen           (const char *a);
 DQN_FILE_SCOPE i32   Dqn_strlenDelimitWith(const char *a, const char delimiter);
 DQN_FILE_SCOPE char *Dqn_strncpy          (char *dest, const char *src, i32 numChars);
 
-#define DQN_I32_TO_STR_MAX_BUF_SIZE 11
 DQN_FILE_SCOPE bool Dqn_StrReverse           (char *buf, const i32 bufSize);
 DQN_FILE_SCOPE i32  Dqn_StrFindFirstOccurence(const char *const src, const i32 srcLen, const char *const find, const i32 findLen);
 DQN_FILE_SCOPE bool Dqn_StrHasSubstring      (const char *const src, const i32 srcLen, const char *const find, const i32 findLen);
 
+#define DQN_I32_TO_STR_MAX_BUF_SIZE 11
 DQN_FILE_SCOPE i32   Dqn_StrToI32(const char *const buf, const i32 bufSize);
 // Return the len of the derived string
 DQN_FILE_SCOPE i32   Dqn_I32ToStr(i32 value, char *buf, i32 bufSize);
@@ -3163,12 +3163,14 @@ FILE_SCOPE f64 DqnWin32_QueryPerfCounterTimeInSInternal()
 
 f64 DqnTime_NowInS()
 {
+	f64 result;
 #ifdef DQN_WIN32_IMPLEMENTATION
-	return DqnWin32_QueryPerfCounterTimeInSInternal();
+	result = DQN_MAX(DqnWin32_QueryPerfCounterTimeInSInternal(), 0);
 #else
+	result = 0;
 	DQN_ASSERT(DQN_INVALID_CODE_PATH);
-	return 0;
 #endif
+	return result;
 };
 
 f64 DqnTime_NowInMs() { return DqnTime_NowInS() * 1000.0f; }
