@@ -129,13 +129,11 @@ FILE_SCOPE void Win32DisplayRenderBitmap(Win32RenderBitmap renderBitmap,
 
 FILETIME Win32GetLastWriteTime(const char *const srcName)
 {
-	WIN32_FIND_DATA findData = {};
-	FILETIME lastWriteTime   = {};
-	HANDLE findHandle        = FindFirstFileA(srcName, &findData);
-	if (findHandle != INVALID_HANDLE_VALUE)
+	FILETIME lastWriteTime               = {};
+	WIN32_FILE_ATTRIBUTE_DATA attribData = {};
+	if (GetFileAttributesEx(srcName, GetFileExInfoStandard, &attribData) != 0)
 	{
-		lastWriteTime = findData.ftLastWriteTime;
-		FindClose(findHandle);
+		lastWriteTime = attribData.ftLastWriteTime;
 	}
 
 	return lastWriteTime;
@@ -150,14 +148,13 @@ FILE_SCOPE Win32ExternalCode Win32LoadExternalDLL(const char *const srcPath,
 	CopyFile(srcPath, tmpPath, false);
 
 	DR_UpdateFunction *updateFunction = NULL;
-	result.dll = LoadLibraryA(tmpPath);
+	result.dll                        = LoadLibraryA(tmpPath);
 	if (result.dll)
 	{
 		updateFunction =
 		    (DR_UpdateFunction *)GetProcAddress(result.dll, "DR_Update");
 		if (updateFunction) result.DR_Update = updateFunction;
 	}
-
 
 	return result;
 }
@@ -519,15 +516,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		////////////////////////////////////////////////////////////////////////
 		f64 startFrameTimeInS = DqnTime_NowInS();
 
-		FILETIME lastWriteTime = Win32GetLastWriteTime(dllPath);
+		PlatformInput platformInput = {};
+		FILETIME lastWriteTime      = Win32GetLastWriteTime(dllPath);
 		if (CompareFileTime(&lastWriteTime, &dllCode.lastWriteTime) != 0)
 		{
 			Win32UnloadExternalDLL(&dllCode);
 			dllCode = Win32LoadExternalDLL(dllPath, dllTmpPath, lastWriteTime);
+			platformInput.executableReloaded = true;
 		}
 
 		{
-			PlatformInput platformInput = {};
 			platformInput.timeNowInS    = DqnTime_NowInS();
 			platformInput.deltaForFrame = (f32)frameTimeInS;
 			platformInput.api           = platformAPI;

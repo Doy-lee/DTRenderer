@@ -69,8 +69,9 @@ typedef struct KeyState
 
 typedef struct PlatformInput
 {
-	f32 deltaForFrame;
-	f64 timeNowInS;
+	f32  deltaForFrame;
+	f64  timeNowInS;
+	bool executableReloaded;
 
 	PlatformAPI api;
 	union {

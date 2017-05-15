@@ -432,8 +432,8 @@ typedef union DqnV2 {
 	f32 e[2];
 } DqnV2;
 
-
 DQN_FILE_SCOPE DqnV2 DqnV2_2i(i32 x, i32 y); // Typecasts 2 integers to 2 floats
+DQN_FILE_SCOPE DqnV2 DqnV2_1f(f32 xy);
 DQN_FILE_SCOPE DqnV2 DqnV2_2f(f32 x, f32 y);
 
 DQN_FILE_SCOPE DqnV2 DqnV2_Add     (DqnV2 a, DqnV2 b);
@@ -473,6 +473,7 @@ typedef union DqnV2i {
 
 DQN_FILE_SCOPE DqnV2i DqnV2i_2i(i32 x, i32 y);
 DQN_FILE_SCOPE DqnV2i DqnV2i_2f(f32 x, f32 y); // Typecasts 2 floats to 2 integers
+DQN_FILE_SCOPE DqnV2i DqnV2i_V2(DqnV2 a);
 
 DQN_FILE_SCOPE DqnV2i DqnV2i_Add     (DqnV2i a, DqnV2i b);
 DQN_FILE_SCOPE DqnV2i DqnV2i_Sub     (DqnV2i a, DqnV2i b);
@@ -619,10 +620,12 @@ DQN_FILE_SCOPE bool Dqn_StrReverse           (char *buf, const i32 bufSize);
 DQN_FILE_SCOPE i32  Dqn_StrFindFirstOccurence(const char *const src, const i32 srcLen, const char *const find, const i32 findLen);
 DQN_FILE_SCOPE bool Dqn_StrHasSubstring      (const char *const src, const i32 srcLen, const char *const find, const i32 findLen);
 
-#define DQN_I32_TO_STR_MAX_BUF_SIZE 11
-DQN_FILE_SCOPE i32   Dqn_StrToI32(const char *const buf, const i32 bufSize);
-// Return the len of the derived string
-DQN_FILE_SCOPE i32   Dqn_I32ToStr(i32 value, char *buf, i32 bufSize);
+#define DQN_32BIT_NUM_MAX_STR_SIZE 11
+#define DQN_64BIT_NUM_MAX_STR_SIZE 20
+// Return the len of the derived string. If buf is NULL and or bufSize is 0 the
+// function returns the required string length for the integer.
+DQN_FILE_SCOPE i32   Dqn_I64ToStr(i64 value, char *const buf, const i32 bufSize);
+DQN_FILE_SCOPE i64   Dqn_StrToI64(const char *const buf, const i32 bufSize);
 
 // Both return the number of bytes read, return 0 if invalid codepoint or UTF8
 DQN_FILE_SCOPE u32 Dqn_UCSToUTF8(u32 *dest, u32 character);
@@ -1717,6 +1720,15 @@ DQN_FILE_SCOPE DqnV2 DqnV2_2f(f32 x, f32 y)
 	return result;
 }
 
+DQN_FILE_SCOPE DqnV2 DqnV2_1f(f32 xy)
+{
+	DqnV2 result = {};
+	result.x  = xy;
+	result.y  = xy;
+
+	return result;
+}
+
 DQN_FILE_SCOPE DqnV2 DqnV2_2i(i32 x, i32 y)
 {
 	DqnV2 result = DqnV2_2f((f32)x, (f32)y);
@@ -1870,6 +1882,14 @@ DQN_FILE_SCOPE DqnV2i DqnV2i_2i(i32 x, i32 y)
 DQN_FILE_SCOPE DqnV2i DqnV2i_2f(f32 x, f32 y)
 {
 	DqnV2i result = DqnV2i_2i((i32)x, (i32)y);
+	return result;
+}
+
+DQN_FILE_SCOPE DqnV2i DqnV2i_V2(DqnV2 a)
+{
+	DqnV2i result = {};
+	result.x      = (i32)a.x;
+	result.y      = (i32)a.y;
 	return result;
 }
 
@@ -2475,7 +2495,64 @@ DQN_FILE_SCOPE bool Dqn_StrHasSubstring(const char *const src, const i32 srcLen,
 	return true;
 }
 
-DQN_FILE_SCOPE i32 Dqn_StrToI32(const char *const buf, const i32 bufSize)
+DQN_FILE_SCOPE i32 Dqn_I64ToStr(i64 value, char *const buf, const i32 bufSize)
+{
+	bool validBuffer = true;
+	if (!buf || bufSize == 0) validBuffer = false;
+
+	if (value == 0)
+	{
+		if (validBuffer) buf[0] = '0';
+		return 1;
+	}
+	
+	// NOTE(doyle): Max 32bit integer (+-)2147483647
+	i32 charIndex = 0;
+	bool negative           = false;
+	if (value < 0) negative = true;
+
+	if (negative)
+	{
+		if (validBuffer) buf[charIndex] = '-';
+		charIndex++;
+	}
+
+	i32 val = DQN_ABS(value);
+	if (validBuffer)
+	{
+		while (val != 0 && charIndex < bufSize)
+		{
+			i32 rem        = val % 10;
+			buf[charIndex++] = (u8)rem + '0';
+			val /= 10;
+		}
+
+		// NOTE(doyle): If string is negative, we only want to reverse starting
+		// from the second character, so we don't put the negative sign at the
+		// end
+		if (negative)
+		{
+			Dqn_StrReverse(buf + 1, charIndex - 1);
+		}
+		else
+		{
+			Dqn_StrReverse(buf, charIndex);
+		}
+	}
+	else
+	{
+		while (val != 0)
+		{
+			i32 rem = val % 10;
+			val /= 10;
+			charIndex++;
+		}
+	}
+
+	return charIndex;
+}
+
+DQN_FILE_SCOPE i64 Dqn_StrToI64(const char *const buf, const i32 bufSize)
 {
 	if (!buf || bufSize == 0) return 0;
 
@@ -2491,7 +2568,7 @@ DQN_FILE_SCOPE i32 Dqn_StrToI32(const char *const buf, const i32 bufSize)
 		return 0;
 	}
 
-	i32 result = 0;
+	i64 result = 0;
 	for (i32 i = index; i < bufSize; i++)
 	{
 		if (DqnChar_IsDigit(buf[i]))
@@ -2508,45 +2585,6 @@ DQN_FILE_SCOPE i32 Dqn_StrToI32(const char *const buf, const i32 bufSize)
 	if (isNegative) result *= -1;
 
 	return result;
-}
-
-DQN_FILE_SCOPE i32 Dqn_I32ToStr(i32 value, char *buf, i32 bufSize)
-{
-	if (!buf || bufSize == 0) return 0;
-
-	if (value == 0)
-	{
-		buf[0] = '0';
-		return 0;
-	}
-	
-	// NOTE(doyle): Max 32bit integer (+-)2147483647
-	i32 charIndex = 0;
-	bool negative           = false;
-	if (value < 0) negative = true;
-
-	if (negative) buf[charIndex++] = '-';
-
-	i32 val = DQN_ABS(value);
-	while (val != 0 && charIndex < bufSize)
-	{
-		i32 rem          = val % 10;
-		buf[charIndex++] = (u8)rem + '0';
-		val /= 10;
-	}
-
-	// NOTE(doyle): If string is negative, we only want to reverse starting
-	// from the second character, so we don't put the negative sign at the end
-	if (negative)
-	{
-		Dqn_StrReverse(buf + 1, charIndex - 1);
-	}
-	else
-	{
-		Dqn_StrReverse(buf, charIndex);
-	}
-
-	return charIndex;
 }
 
 /*

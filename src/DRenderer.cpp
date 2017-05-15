@@ -17,6 +17,8 @@
 #define DQN_IMPLEMENTATION
 #include "dqn.h"
 
+#include <math.h>
+
 #define DR_DEBUG 1
 typedef struct DRFont
 {
@@ -43,10 +45,13 @@ typedef struct DRState
 
 typedef struct DRDebug
 {
-	i32 setPixelsPerFrame;
-	i32 totalSetPixels;
+	DRFont *font;
+	DqnV2   displayP;
+	i32     displayYOffset;
 
-	i32    displayYOffset;
+	u64 setPixelsPerFrame;
+	u64 totalSetPixels;
+
 } DRDebug;
 
 FILE_SCOPE inline DqnV4 PreMultiplyAlpha(DqnV4 color)
@@ -104,6 +109,101 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
 
 	globalDebug.setPixelsPerFrame++;
+}
+
+FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
+                         const DRFont font, DqnV2 pos, const char *const text,
+                         DqnV4 color = DqnV4_4f(255, 255, 255, 255), i32 len = -1)
+{
+	if (!text) return;
+	if (len == -1) len = Dqn_strlen(text);
+
+	i32 index = 0;
+	color     = PreMultiplyAlpha(color);
+	while (index < len)
+	{
+		if (text[index] < font.codepointRange.min &&
+		    text[index] > font.codepointRange.max)
+		{
+			return;
+		}
+
+		i32 charIndex = text[index++] - (i32)font.codepointRange.min;
+		DQN_ASSERT(charIndex >= 0 &&
+		           charIndex < (i32)(font.codepointRange.max -
+		                             font.codepointRange.min));
+
+		stbtt_aligned_quad alignedQuad = {};
+		stbtt_GetPackedQuad(font.atlas, font.bitmapDim.w, font.bitmapDim.h,
+		                    charIndex, &pos.x, &pos.y, &alignedQuad, true);
+
+		DqnRect fontRect = {};
+		fontRect.min     = DqnV2_2f(alignedQuad.s0 * font.bitmapDim.w, alignedQuad.t1 * font.bitmapDim.h);
+		fontRect.max     = DqnV2_2f(alignedQuad.s1 * font.bitmapDim.w, alignedQuad.t0 * font.bitmapDim.h);
+
+		DqnRect screenRect = {};
+		screenRect.min     = DqnV2_2f(alignedQuad.x0, alignedQuad.y0);
+		screenRect.max     = DqnV2_2f(alignedQuad.x1, alignedQuad.y1);
+
+		// TODO: Assumes 1bpp and pitch of font bitmap
+		const u32 fontPitch = font.bitmapDim.w;
+		u32 fontOffset      = (u32)(fontRect.min.x + (fontRect.max.y * fontPitch));
+		u8 *fontPtr         = font.bitmap + fontOffset;
+
+		DQN_ASSERT(sizeof(u32) == renderBuffer->bytesPerPixel);
+
+		// NOTE(doyle): This offset, yOffset and flipping t1, t0 is necessary
+		// for reversing the order of the font since its convention is 0,0 top
+		// left and -ve Y.
+		stbtt_packedchar *const charData = font.atlas + charIndex;
+		f32 fontHeightOffset             = charData->yoff2 + charData->yoff;
+
+		u32 screenOffset = (u32)(screenRect.min.x + (screenRect.min.y - fontHeightOffset) * renderBuffer->width);
+		u32 *screenPtr   = ((u32 *)renderBuffer->memory) + screenOffset;
+
+		i32 fontWidth    = DQN_ABS((i32)(fontRect.min.x - fontRect.max.x));
+		i32 fontHeight   = DQN_ABS((i32)(fontRect.min.y - fontRect.max.y));
+		for (i32 y = 0; y < fontHeight; y++)
+		{
+			for (i32 x = 0; x < fontWidth; x++)
+			{
+				i32 yOffset = fontHeight - y;
+				u8 srcA     = fontPtr[x + (yOffset * fontPitch)];
+				if (srcA == 0) continue;
+
+				f32 srcANorm = srcA / 255.0f;
+				DqnV4 resultColor = {};
+				resultColor.r     = color.r * srcANorm;
+				resultColor.g     = color.g * srcANorm;
+				resultColor.b     = color.b * srcANorm;
+				resultColor.a     = color.a * srcANorm;
+
+				i32 actualX = (i32)(screenRect.min.x + x);
+				i32 actualY = (i32)(screenRect.min.y + y - fontHeightOffset);
+				SetPixel(renderBuffer, actualX, actualY, resultColor);
+			}
+		}
+	}
+}
+
+FILE_SCOPE void DebugPushText(PlatformRenderBuffer *const renderBuffer,
+                              const char *const formatStr, ...)
+{
+#ifdef DR_DEBUG
+	DRDebug *const debug = &globalDebug;
+	char str[1024]       = {};
+
+	va_list argList;
+	va_start(argList, formatStr);
+	{
+		i32 numCopied = Dqn_vsprintf(str, formatStr, argList);
+		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(str));
+	}
+	va_end(argList);
+
+	DrawText(renderBuffer, *debug->font, debug->displayP, str);
+	debug->displayP.y += globalDebug.displayYOffset;
+#endif
 }
 
 FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
@@ -166,12 +266,64 @@ FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 	}
 }
 
-FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
-                             const DqnV2 p1, const DqnV2 p2, const DqnV2 p3,
-                             DqnV4 color)
+FILE_SCOPE void TransformVertexes(const DqnV2 origin, DqnV2 *const vertexList,
+                                  const i32 numVertexes, const DqnV2 scale,
+                                  const f32 rotation)
 {
-	color = PreMultiplyAlpha(color);
+	if (!vertexList || numVertexes == 0) return;
 
+	DqnV2 xAxis = (DqnV2_2f(cosf(rotation), sinf(rotation)));
+	DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x);
+	xAxis *= scale.x;
+	yAxis *= scale.y;
+
+	for (i32 i = 0; i < numVertexes; i++)
+	{
+		DqnV2 p       = vertexList[i];
+		vertexList[i] = origin + (xAxis * p.x) + (yAxis * p.y);
+	}
+}
+
+FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
+                             DqnV2 p2, DqnV2 p3, DqnV4 color,
+                             DqnV2 scale = DqnV2_1f(1.0f), f32 rotation = 0,
+                             DqnV2 anchor = DqnV2_1f(0.5f))
+{
+	f32 area2Times = ((p2.x - p1.x) * (p2.y + p1.y)) +
+	                 ((p3.x - p2.x) * (p3.y + p2.y)) +
+	                 ((p1.x - p3.x) * (p1.y + p3.y));
+	if (area2Times < 0)
+	{
+		// Counter-clockwise, do nothing this is what we want.
+	}
+	else
+	{
+		// Clockwise swap any point to make it clockwise
+		DQN_SWAP(DqnV2, p2, p3);
+	}
+
+	// Transform vertexes
+#if 1
+	{
+		DqnV2 max = DqnV2_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
+		                     DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
+		DqnV2 min = DqnV2_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
+		                     DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
+
+		DqnV2 boundsDim = DqnV2_2f(max.x - min.x, max.y - min.y);
+		DQN_ASSERT(boundsDim.w > 0 && boundsDim.h > 0);
+		DqnV2 origin = DqnV2_2f(min.x + (anchor.x * boundsDim.w), min.y + (anchor.y * boundsDim.h));
+
+		DqnV2 vertexList[3] = {p1 - origin, p2 - origin, p3 - origin};
+		TransformVertexes(origin, vertexList, DQN_ARRAY_COUNT(vertexList),
+		                  scale, rotation);
+		p1 = vertexList[0];
+		p2 = vertexList[1];
+		p3 = vertexList[2];
+	}
+#endif
+
+	color      = PreMultiplyAlpha(color);
 	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
 	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
 	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
@@ -183,26 +335,12 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	max.x = DQN_MIN(max.x, renderBuffer->width - 1);
 	max.y = DQN_MIN(max.y, renderBuffer->height - 1);
 
+#if 1
 	DrawLine(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
 	DrawLine(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
 	DrawLine(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
 	DrawLine(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
-
-	DqnV2 a = p1;
-	DqnV2 b = p2;
-	DqnV2 c = p3;
-
-	f32 area2Times = ((b.x - a.x) * (b.y + a.y)) + ((c.x - b.x) * (c.y + b.y)) +
-	                 ((a.x - c.x) * (a.y + c.y));
-	if (area2Times < 0)
-	{
-		// Counter-clockwise, do nothing this is what we want.
-	}
-	else
-	{
-		// Clockwise swap any point to make it clockwise
-		DQN_SWAP(DqnV2, b, c);
-	}
+#endif
 
 	/*
 	   /////////////////////////////////////////////////////////////////////////
@@ -310,6 +448,10 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 	   BaryCentricB(P) = (SignedArea(P) with vertex C and A)/SignedArea(with the orig triangle vertex)
 	*/
 
+	const DqnV2 a = p1;
+	const DqnV2 b = p2;
+	const DqnV2 c = p3;
+
 	DqnV2i scanP          = DqnV2i_2i(min.x, min.y);
 	f32 signedArea1       = ((b.x - a.x) * (scanP.y - a.y)) - ((b.y - a.y) * (scanP.x - a.x));
 	f32 signedArea1DeltaX = a.y - b.y;
@@ -348,83 +490,89 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer,
 		signedArea2 += signedArea2DeltaY;
 		signedArea3 += signedArea3DeltaY;
 	}
-}
 
-FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
-                         const DRFont font, DqnV2 pos, const char *const text,
-                         DqnV4 color = DqnV4_4f(255, 255, 255, 255), i32 len = -1)
-{
-	if (!text) return;
-	if (len == -1) len = Dqn_strlen(text);
-
-	i32 index = 0;
-	color     = PreMultiplyAlpha(color);
-	while (index < len)
+#if 1
 	{
-		if (text[index] < font.codepointRange.min &&
-		    text[index] > font.codepointRange.max)
+		DqnV2 xAxis = DqnV2_2f(cosf(rotation), sinf(rotation)) * scale.x;
+		DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x) * scale.y;
+
+		DqnV2 vertexList[3] = {p1, p2, p3};
+		DqnRect bounds = {};
+		bounds.min     = vertexList[0];
+		bounds.max     = vertexList[0];
+		for (i32 i = 1; i < DQN_ARRAY_COUNT(vertexList); i++)
 		{
-			return;
+			const DqnV2 p = vertexList[i];
+			bounds.min    = DqnV2_2f(DQN_MIN(p.x, bounds.min.x),
+			                      DQN_MIN(p.y, bounds.min.y));
+			bounds.max = DqnV2_2f(DQN_MAX(p.x, bounds.max.x),
+			                      DQN_MAX(p.y, bounds.max.y));
 		}
 
-		i32 charIndex = text[index++] - (i32)font.codepointRange.min;
-		DQN_ASSERT(charIndex >= 0 &&
-		           charIndex < (i32)(font.codepointRange.max -
-		                             font.codepointRange.min));
+		DqnV2 boundsDim = DqnRect_GetSizeV2(bounds);
+		DqnV2 origin    = DqnV2_2f(bounds.min.x + (anchor.x * boundsDim.w),
+		                           bounds.min.y + (anchor.y * boundsDim.h));
 
-		stbtt_aligned_quad alignedQuad = {};
-		stbtt_GetPackedQuad(font.atlas, font.bitmapDim.w, font.bitmapDim.h,
-		                    charIndex, &pos.x, &pos.y, &alignedQuad, true);
+		DqnV4 coordSysColor = DqnV4_4f(0, 255, 255, 255);
+		i32 axisLen = 50;
+		DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
+		DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
+	}
+#endif
+}
 
-		DqnRect fontRect = {};
-		fontRect.min     = DqnV2_2f(alignedQuad.s0 * font.bitmapDim.w, alignedQuad.t1 * font.bitmapDim.h);
-		fontRect.max     = DqnV2_2f(alignedQuad.s1 * font.bitmapDim.w, alignedQuad.t0 * font.bitmapDim.h);
+FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
+                              DqnV2 min, DqnV2 max, DqnV4 color,
+                              const DqnV2 scale  = DqnV2_1f(1.0f),
+                              const f32 rotation = 0,
+                              const DqnV2 anchor = DqnV2_1f(0.5f))
+{
+	// TODO(doyle): Do edge test for quads
+	if (rotation > 0)
+	{
+		DqnV2 p1 = min;
+		DqnV2 p2 = DqnV2_2f(max.x, min.y);
+		DqnV2 p3 = max;
+		DqnV2 p4 = DqnV2_2f(min.x, max.y);
+		DrawTriangle(renderBuffer, p1, p2, p3, color, scale, rotation, anchor);
+		DrawTriangle(renderBuffer, p1, p3, p4, color, scale, rotation, anchor);
+		return;
+	}
 
-		DqnRect screenRect = {};
-		screenRect.min     = DqnV2_2f(alignedQuad.x0, alignedQuad.y0);
-		screenRect.max     = DqnV2_2f(alignedQuad.x1, alignedQuad.y1);
+	// Transform vertexes
+	{
+		DqnV2 dim = DqnV2_2f(max.x - min.x, max.y - min.y);
+		DQN_ASSERT(dim.w > 0 && dim.h > 0);
+		DqnV2 origin = DqnV2_2f(min.x + (anchor.x * dim.w), min.y + (anchor.y * dim.h));
 
-		// TODO: Assumes 1bpp and pitch of font bitmap
-		const u32 fontPitch = font.bitmapDim.w;
-		u32 fontOffset      = (u32)(fontRect.min.x + (fontRect.max.y * fontPitch));
-		u8 *fontPtr         = font.bitmap + fontOffset;
+		DqnV2 p1 = min - origin;
+		DqnV2 p2 = max - origin;
+		DqnV2 vertexList[4] = {p1, p2};
+		TransformVertexes(origin, vertexList, DQN_ARRAY_COUNT(vertexList),
+		                  scale, rotation);
+		min = vertexList[0];
+		max = vertexList[1];
+	}
 
-		DQN_ASSERT(sizeof(u32) == renderBuffer->bytesPerPixel);
+	color = PreMultiplyAlpha(color);
 
-		// NOTE(doyle): This offset, yOffset and flipping t1, t0 is necessary
-		// for reversing the order of the font since its convention is 0,0 top
-		// left and -ve Y.
-		stbtt_packedchar *const charData = font.atlas + charIndex;
-		f32 fontHeightOffset             = charData->yoff2 + charData->yoff;
+	DqnRect rect = DqnRect_4f(min.x, min.y, max.x, max.y);
+	DqnRect clip = DqnRect_4i(0, 0, renderBuffer->width, renderBuffer->height);
 
-		u32 screenOffset = (u32)(screenRect.min.x + (screenRect.min.y - fontHeightOffset) * renderBuffer->width);
-		u32 *screenPtr   = ((u32 *)renderBuffer->memory) + screenOffset;
+	DqnRect clippedRect = DqnRect_ClipRect(rect, clip);
+	DqnV2 clippedSize  = DqnRect_GetSizeV2(clippedRect);
 
-		i32 fontWidth    = DQN_ABS((i32)(fontRect.min.x - fontRect.max.x));
-		i32 fontHeight   = DQN_ABS((i32)(fontRect.min.y - fontRect.max.y));
-		for (i32 y = 0; y < fontHeight; y++)
+	DebugPushText(renderBuffer, "ClippedSized: %5.2f, %5.2f", clippedSize.w, clippedSize.h);
+	for (i32 y = 0; y < clippedSize.w; y++)
+	{
+		i32 bufferY = (i32)clippedRect.min.y + y;
+		for (i32 x = 0; x < clippedSize.h; x++)
 		{
-			for (i32 x = 0; x < fontWidth; x++)
-			{
-				i32 yOffset = fontHeight - y;
-				u8 srcA     = fontPtr[x + (yOffset * fontPitch)];
-				if (srcA == 0) continue;
-
-				f32 srcANorm = srcA / 255.0f;
-				DqnV4 resultColor = {};
-				resultColor.r     = color.r * srcANorm;
-				resultColor.g     = color.g * srcANorm;
-				resultColor.b     = color.b * srcANorm;
-				resultColor.a     = color.a * srcANorm;
-
-				i32 actualX = (i32)(screenRect.min.x + x);
-				i32 actualY = (i32)(screenRect.min.y + y - fontHeightOffset);
-				SetPixel(renderBuffer, actualX, actualY, resultColor);
-			}
+			i32 bufferX = (i32)clippedRect.min.x + x;
+			SetPixel(renderBuffer, bufferX, bufferY, color);
 		}
 	}
 }
-
 
 FILE_SCOPE void ClearRenderBuffer(PlatformRenderBuffer *const renderBuffer, DqnV3 color)
 {
@@ -489,6 +637,8 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 	DQN_ASSERT(stbtt_PackBegin(&fontPackContext, font->bitmap, bitmapDim.w,
 	                           bitmapDim.h, 0, 1, NULL) == 1);
 	{
+		// stbtt_PackSetOversampling(&fontPackContext, 2, 2);
+
 		i32 numCodepoints =
 		    (i32)((codepointRange.max + 1) - codepointRange.min);
 
@@ -649,23 +799,18 @@ void DebugDisplayMemBuffer(PlatformRenderBuffer *const renderBuffer,
 	size_t totalWastedKb = totalWasted / 1024;
 
 	char str[128] = {};
-	Dqn_sprintf(str, "%s: %d block(s): %dkb/%dkb", name, numBlocks,
-	            totalUsedKb, totalSizeKb);
+	Dqn_sprintf(str, "%s: %d block(s): %_$lld/%_$lld", name, numBlocks, totalUsed,
+	            totalSize);
 
 	DrawText(renderBuffer, font, *debugP, str);
 	debugP->y += globalDebug.displayYOffset;
 }
 
 void DebugUpdate(PlatformRenderBuffer *const renderBuffer,
-                 PlatformInput *const input, PlatformMemory *const memory,
-                 const DRFont font)
+                 PlatformInput *const input, PlatformMemory *const memory)
 {
+#ifdef DR_DEBUG
 	DRDebug *const debug = &globalDebug;
-
-	globalDebug.displayYOffset = -(i32)(font.sizeInPt + 0.5f);
-	DQN_ASSERT(globalDebug.displayYOffset < 0);
-
-	DqnV2 debugP = DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
 
 	debug->totalSetPixels += debug->setPixelsPerFrame;
 	debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
@@ -673,28 +818,31 @@ void DebugUpdate(PlatformRenderBuffer *const renderBuffer,
 	// totalSetPixels
 	{
 		char str[128] = {};
-		Dqn_sprintf(str, "%s: %d", "TotalSetPixels", debug->totalSetPixels);
-		DrawText(renderBuffer, font, debugP, str);
-		debugP.y += globalDebug.displayYOffset;
+		Dqn_sprintf(str, "%s: %'lld", "TotalSetPixels", debug->totalSetPixels);
+		DrawText(renderBuffer, *debug->font, debug->displayP, str);
+		debug->displayP.y += globalDebug.displayYOffset;
 	}
 
 	// setPixelsPerFrame
 	{
 		char str[128] = {};
-		Dqn_sprintf(str, "%s: %d", "SetPixelsPerFrame", debug->setPixelsPerFrame);
-		DrawText(renderBuffer, font, debugP, str);
-		debugP.y += globalDebug.displayYOffset;
+		Dqn_sprintf(str, "%s: %'lld", "SetPixelsPerFrame", debug->setPixelsPerFrame);
+		DrawText(renderBuffer, *debug->font, debug->displayP, str);
+		debug->displayP.y += globalDebug.displayYOffset;
 	}
 
 	// memory
 	{
 		DebugDisplayMemBuffer(renderBuffer, "PermBuffer",
-		                      &memory->permanentBuffer, &debugP, font);
+		                      &memory->permanentBuffer, &debug->displayP, *debug->font);
 		DebugDisplayMemBuffer(renderBuffer, "TransBuffer",
-		                      &memory->transientBuffer, &debugP, font);
+		                      &memory->transientBuffer, &debug->displayP, *debug->font);
 	}
 
 	debug->setPixelsPerFrame = 0;
+	debug->displayP =
+	    DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
+#endif
 }
 
 extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
@@ -711,16 +859,27 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 		DQN_ASSERT(memory->context);
 
 		state = (DRState *)memory->context;
-		BitmapFontCreate(input->api, memory, &state->font, "consola.ttf",
-		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 18);
+		BitmapFontCreate(input->api, memory, &state->font, "Roboto-bold.ttf",
+		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 16);
 		DQN_ASSERT(BitmapLoad(input->api, &state->bitmap, "lune_logo.png",
 		           &memory->transientBuffer));
 	}
 
+#ifdef DR_DEBUG
+	if (input->executableReloaded || !memory->isInit)
+	{
+		globalDebug.font           = &state->font;
+		globalDebug.displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);
+		globalDebug.displayP =
+		    DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
+		DQN_ASSERT(globalDebug.displayYOffset < 0);
+	}
+#endif
+
 	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
 	DqnV4 colorRed    = DqnV4_4i(50, 0, 0, 255);
 	DqnV2i bufferMidP = DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
-	i32 boundsOffset  = 50;
+	i32 boundsOffset  = 100;
 
 	DqnV2 t0[3] = {DqnV2_2i(10, 70), DqnV2_2i(50, 160), DqnV2_2i(70, 80)};
 	DqnV2 t1[3] = {DqnV2_2i(180, 50),  DqnV2_2i(150, 1),   DqnV2_2i(70, 180)};
@@ -753,11 +912,18 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
 
 	DqnV4 colorRedHalfA = DqnV4_4i(255, 0, 0, 190);
-	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA);
+	LOCAL_PERSIST f32 rotation = 0;
+	rotation += input->deltaForFrame * 0.25f;
+	DqnV2 scale         = DqnV2_1f(1.0f);
+	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA, scale,
+	             rotation, DqnV2_1f(0.5f));
+
+	DrawRectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f), colorRed,
+	              DqnV2_1f(1.0f), rotation);
 
 	DqnV2 fontP = DqnV2_2i(200, 180);
 	DrawText(renderBuffer, state->font, fontP, "hello world!");
 
-	DrawBitmap(renderBuffer, &state->bitmap, 700, 400);
-	DebugUpdate(renderBuffer, input, memory, state->font);
+	DrawBitmap(renderBuffer, &state->bitmap, 300, 250);
+	DebugUpdate(renderBuffer, input, memory);
 }
