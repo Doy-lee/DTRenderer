@@ -220,6 +220,52 @@ void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 	}
 }
 
+typedef struct RectPoints
+{
+	DqnV2 pList[4];
+} RectPoints;
+
+// Apply rotation and scale around the anchored point. This is a helper function that expands the
+// min and max into the 4 vertexes of a rectangle then calls the normal transform routine.
+// anchor: A normalised [0->1] value the points should be positioned from
+FILE_SCOPE RectPoints TransformRectPoints(DqnV2 min, DqnV2 max, DqnV2 anchor, DqnV2 scale,
+                                          f32 rotation)
+{
+	DqnV2 dim    = DqnV2_2f(max.x - min.x, max.y - min.y);
+	DqnV2 origin = DqnV2_2f(min.x + (anchor.x * dim.w), min.y + (anchor.y * dim.h));
+	DQN_ASSERT(dim.w > 0 && dim.h > 0);
+
+	RectPoints result = {};
+	result.pList[0]   = min - origin;
+	result.pList[1]   = DqnV2_2f(max.x, min.y) - origin;
+	result.pList[2]   = max - origin;
+	result.pList[3]   = DqnV2_2f(min.x, max.y) - origin;
+
+	TransformPoints(origin, result.pList, DQN_ARRAY_COUNT(result.pList), scale, rotation);
+
+	return result;
+}
+
+FILE_SCOPE DqnRect GetBoundingBox(const DqnV2 *const pList, const i32 numP)
+{
+	DqnRect result = {};
+	if (numP == 0 || !pList) return result;
+
+	result.min = pList[0];
+	result.max = pList[0];
+	for (i32 i = 1; i < numP; i++)
+	{
+		DqnV2 checkP = pList[i];
+		result.min.x = DQN_MIN(result.min.x, checkP.x);
+		result.min.y = DQN_MIN(result.min.y, checkP.y);
+
+		result.max.x = DQN_MAX(result.max.x, checkP.x);
+		result.max.y = DQN_MAX(result.max.y, checkP.y);
+	}
+
+	return result;
+}
+
 void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
                          DqnV2 max, DqnV4 color, const DqnV2 scale,
                          const f32 rotation, const DqnV2 anchor)
@@ -227,29 +273,16 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
-	DqnV2 dim = DqnV2_2f(max.x - min.x, max.y - min.y);
-	DQN_ASSERT(dim.w > 0 && dim.h > 0);
-	DqnV2 initOrigin = DqnV2_2f(min.x + (anchor.x * dim.w), min.y + (anchor.y * dim.h));
-
-	DqnV2 p1      = min - initOrigin;
-	DqnV2 p2      = DqnV2_2f(max.x, min.y) - initOrigin;
-	DqnV2 p3      = max - initOrigin;
-	DqnV2 p4      = DqnV2_2f(min.x, max.y) - initOrigin;
-	DqnV2 pList[] = {p1, p2, p3, p4};
-
-	TransformPoints(initOrigin, pList, DQN_ARRAY_COUNT(pList), scale, rotation);
-	min = pList[0];
-	max = pList[0];
-	for (i32 i = 1; i < DQN_ARRAY_COUNT(pList); i++)
-	{
-		DqnV2 checkP = pList[i];
-		min.x = DQN_MIN(min.x, checkP.x);
-		min.y = DQN_MIN(min.y, checkP.y);
-		max.x = DQN_MAX(max.x, checkP.x);
-		max.y = DQN_MAX(max.y, checkP.y);
-	}
-
 	color = DTRRender_PreMultiplyAlpha(color);
+
+	RectPoints rectPoints     = TransformRectPoints(min, max, anchor, scale, rotation);
+	DqnV2 *const pList        = &rectPoints.pList[0];
+	const i32 RECT_PLIST_SIZE = DQN_ARRAY_COUNT(rectPoints.pList);
+
+	DqnRect bounds = GetBoundingBox(pList, RECT_PLIST_SIZE);
+	min = bounds.min;
+	max = bounds.max;
+
 	////////////////////////////////////////////////////////////////////////////
 	// Clip Drawing Space
 	////////////////////////////////////////////////////////////////////////////
@@ -272,11 +305,10 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
 				i32 bufferX = (i32)clippedRect.min.x + x;
 				bool pIsInside = true;
 
-				for (i32 pIndex = 0; pIndex < DQN_ARRAY_COUNT(pList);
-				     pIndex++)
+				for (i32 pIndex = 0; pIndex < RECT_PLIST_SIZE; pIndex++)
 				{
 					DqnV2 origin  = pList[pIndex];
-					DqnV2 line    = pList[(pIndex + 1) % DQN_ARRAY_COUNT(pList)] - origin;
+					DqnV2 line    = pList[(pIndex + 1) % RECT_PLIST_SIZE] - origin;
 					DqnV2 axis    = DqnV2_2i(bufferX, bufferY) - origin;
 					f32 dotResult = DqnV2_Dot(line, axis);
 
@@ -555,32 +587,53 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 }
 
 void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
-                      DTRBitmap *const bitmap, i32 x, i32 y)
+                      DTRBitmap *const bitmap, DqnV2i pos,
+                      DTRRenderTransform transform)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
 
-	DqnRect viewport   = DqnRect_4i(0, 0, renderBuffer->width, renderBuffer->height);
-	DqnRect bitmapRect = DqnRect_4i(x, y, x + bitmap->dim.w, y + bitmap->dim.h);
-	bitmapRect         = DqnRect_ClipRect(bitmapRect, viewport);
-	if (bitmapRect.max.x < 0 || bitmapRect.max.y < 0) return;
+	////////////////////////////////////////////////////////////////////////////
+	// Transform vertexes
+	////////////////////////////////////////////////////////////////////////////
+	DqnV2 min = DqnV2_V2i(pos);
+	DqnV2 max = min + DqnV2_V2i(bitmap->dim);
+	DTRDebug_PushText("OldRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", min.x, min.y, max.x, max.y);
 
-	i32 startX = (x > 0) ? 0 : DQN_ABS(x);
-	i32 startY = (y > 0) ? 0 : DQN_ABS(y);
+	RectPoints rectPoints     = TransformRectPoints(min, max, transform.anchor, transform.scale, transform.rotation);
+	DqnV2 *const pList        = &rectPoints.pList[0];
+	const i32 RECT_PLIST_SIZE = DQN_ARRAY_COUNT(rectPoints.pList);
 
-	i32 endX, endY;
-	DqnRect_GetSize2i(bitmapRect, &endX, &endY);
+	DqnRect bounds = GetBoundingBox(pList, RECT_PLIST_SIZE);
+	min = bounds.min;
+	max = bounds.max;
 
+	////////////////////////////////////////////////////////////////////////////
+	// Clip drawing space
+	////////////////////////////////////////////////////////////////////////////
+	DqnRect drawRect = DqnRect_4f(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y);
+	DqnRect clip     = DqnRect_4i(0, 0, renderBuffer->width, renderBuffer->height);
+
+	DqnRect clippedDrawRect = DqnRect_ClipRect(drawRect, clip);
+	DqnV2 clippedSize       = DqnRect_GetSizeV2(clippedDrawRect);
+
+	i32 texelX = (pos.x > 0) ? 0 : DQN_ABS(pos.x);
+	i32 texelY = (pos.y > 0) ? 0 : DQN_ABS(pos.y);
+
+	DTRDebug_PushText("ClippedRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", clippedDrawRect.min.x, clippedDrawRect.min.y, clippedDrawRect.max.x, clippedDrawRect.max.y);
+	DTRDebug_PushText("ClippedSize: (%5.2f, %5.2f)", clippedSize.w, clippedSize.h);
+	DTRDebug_PushText("DrawRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", drawRect.min.x, drawRect.min.y, drawRect.max.x, drawRect.max.y);
+	DTRDebug_PushText("TexelXY: (%d, %d)", texelX, texelY);
 	const i32 pitch  = bitmap->dim.w * bitmap->bytesPerPixel;
-	for (i32 bitmapY = startY; bitmapY < endY; bitmapY++)
+	for (i32 y = 0; y < (i32)clippedSize.h; y++)
 	{
-		u8 *const srcRow = bitmap->memory + (bitmapY * pitch);
-		i32 bufferY      = (i32)bitmapRect.min.y + bitmapY;
+		u8 *const srcRow = bitmap->memory + ((texelY + y) * pitch);
+		i32 bufferY      = (i32)clippedDrawRect.min.y + y;
 
-		for (i32 bitmapX = startX; bitmapX < endX; bitmapX++)
+		for (i32 x = 0; x < (i32)clippedSize.w; x++)
 		{
 			u32 *pixelPtr = (u32 *)srcRow;
-			u32 pixel     = pixelPtr[bitmapX];
-			i32 bufferX   = (i32)bitmapRect.min.x + bitmapX;
+			u32 pixel     = 0; // pixelPtr[texelX + x];
+			i32 bufferX   = (i32)clippedDrawRect.min.x + x;
 
 			DqnV4 color = {};
 			color.a     = (f32)(pixel >> 24);
@@ -589,6 +642,45 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 			color.r     = (f32)((pixel >> 0) & 0xFF);
 
 			SetPixel(renderBuffer, bufferX, bufferY, color);
+		}
+	}
+
+	if (DTR_DEBUG)
+	{
+		// Draw Bounding box
+		{
+			DqnV4 yellow = DqnV4_4f(255, 255, 0, 255);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, min.y), DqnV2i_2f(min.x, max.y), yellow);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, max.y), DqnV2i_2f(max.x, max.y), yellow);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(max.x, max.y), DqnV2i_2f(max.x, min.y), yellow);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(max.x, min.y), DqnV2i_2f(min.x, min.y), yellow);
+		}
+
+		// Draw rotating outline
+		if (transform.rotation > 0)
+		{
+			DqnV4 green = DqnV4_4f(0, 255, 0, 255);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[0]), DqnV2i_V2(pList[1]), green);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[1]), DqnV2i_V2(pList[2]), green);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[2]), DqnV2i_V2(pList[3]), green);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[3]), DqnV2i_V2(pList[0]), green);
+		}
+
+		// Draw axis point
+		{
+			DqnV4 red    = DqnV4_4f(255, 0, 0, 255);
+			DqnV4 green  = DqnV4_4f(0, 255, 0, 255);
+			DqnV4 blue   = DqnV4_4f(0, 0, 255, 255);
+			DqnV4 purple = DqnV4_4f(255, 0, 255, 255);
+
+			DqnV2 p1 = pList[0];
+			DqnV2 p2 = pList[1];
+			DqnV2 p3 = pList[2];
+			DqnV2 p4 = pList[3];
+			DTRRender_Rectangle(renderBuffer, p1 - DqnV2_1f(5), p1 + DqnV2_1f(5), green);
+			DTRRender_Rectangle(renderBuffer, p2 - DqnV2_1f(5), p2 + DqnV2_1f(5), blue);
+			DTRRender_Rectangle(renderBuffer, p3 - DqnV2_1f(5), p3 + DqnV2_1f(5), purple);
+			DTRRender_Rectangle(renderBuffer, p4 - DqnV2_1f(5), p4 + DqnV2_1f(5), red);
 		}
 	}
 }

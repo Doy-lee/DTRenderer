@@ -75,8 +75,6 @@ void DTRDebug_Update(DTRState *const state,
 		if (debug->font->bitmap && debug->renderBuffer)
 		{
 			debug->displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);
-			debug->displayP =
-			    DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
 			DQN_ASSERT(globalDebug.displayYOffset < 0);
 		}
 

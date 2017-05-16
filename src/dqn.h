@@ -432,9 +432,18 @@ typedef union DqnV2 {
 	f32 e[2];
 } DqnV2;
 
-DQN_FILE_SCOPE DqnV2 DqnV2_2i(i32 x, i32 y); // Typecasts 2 integers to 2 floats
-DQN_FILE_SCOPE DqnV2 DqnV2_1f(f32 xy);
-DQN_FILE_SCOPE DqnV2 DqnV2_2f(f32 x, f32 y);
+typedef union DqnV2i {
+	struct { i32 x, y; };
+	struct { i32 w, h; };
+	struct { i32 min, max; };
+	i32 e[2];
+} DqnV2i;
+
+// DqnV2
+DQN_FILE_SCOPE DqnV2 DqnV2_2i (i32 x, i32 y); // Typecasts 2 integers to 2 floats
+DQN_FILE_SCOPE DqnV2 DqnV2_1f (f32 xy);
+DQN_FILE_SCOPE DqnV2 DqnV2_2f (f32 x, f32 y);
+DQN_FILE_SCOPE DqnV2 DqnV2_V2i(DqnV2i a);
 
 DQN_FILE_SCOPE DqnV2 DqnV2_Add     (DqnV2 a, DqnV2 b);
 DQN_FILE_SCOPE DqnV2 DqnV2_Sub     (DqnV2 a, DqnV2 b);
@@ -464,13 +473,7 @@ DQN_FILE_SCOPE inline DqnV2 &operator-=(DqnV2 &a, DqnV2 b) { return (a = DqnV2_S
 DQN_FILE_SCOPE inline DqnV2 &operator+=(DqnV2 &a, DqnV2 b) { return (a = DqnV2_Add     (a, b)); }
 DQN_FILE_SCOPE inline bool   operator==(DqnV2  a, DqnV2 b) { return      DqnV2_Equals  (a, b);  }
 
-typedef union DqnV2i {
-	struct { i32 x, y; };
-	struct { i32 w, h; };
-	struct { i32 min, max; };
-	i32 e[2];
-} DqnV2i;
-
+// DqnV2i
 DQN_FILE_SCOPE DqnV2i DqnV2i_2i(i32 x, i32 y);
 DQN_FILE_SCOPE DqnV2i DqnV2i_2f(f32 x, f32 y); // Typecasts 2 floats to 2 integers
 DQN_FILE_SCOPE DqnV2i DqnV2i_V2(DqnV2 a);
@@ -1732,6 +1735,14 @@ DQN_FILE_SCOPE DqnV2 DqnV2_1f(f32 xy)
 DQN_FILE_SCOPE DqnV2 DqnV2_2i(i32 x, i32 y)
 {
 	DqnV2 result = DqnV2_2f((f32)x, (f32)y);
+	return result;
+}
+
+DQN_FILE_SCOPE DqnV2 DqnV2_V2i(DqnV2i a)
+{
+	DqnV2 result = {};
+	result.x = (f32)a.x;
+	result.y = (f32)a.y;
 	return result;
 }
 

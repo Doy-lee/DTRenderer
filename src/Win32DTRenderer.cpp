@@ -80,8 +80,8 @@ void Platform_FileClose(PlatformFile *const file)
 ////////////////////////////////////////////////////////////////////////////////
 // Win32 Layer
 ////////////////////////////////////////////////////////////////////////////////
-#include <Pathcch.h>
 #include <Windows.h>
+#include <Psapi.h>    // For win32 GetProcessMemoryInfo()
 typedef struct Win32RenderBitmap
 {
 	BITMAPINFO  info;
@@ -581,9 +581,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		frameTimeInS   = DqnTime_NowInS() - startFrameTimeInS;
 		f32 msPerFrame = 1000.0f * (f32)frameTimeInS;
 
+		////////////////////////////////////////////////////////////////////////
+		// Misc
+		////////////////////////////////////////////////////////////////////////
+		// Get Win32 reported mem usage
+		PROCESS_MEMORY_COUNTERS memCounter = {};
+		GetProcessMemoryInfo(GetCurrentProcess(), &memCounter, sizeof(memCounter));
+
+		// Update title bar
 		char windowTitleBuffer[128] = {};
-		Dqn_sprintf(windowTitleBuffer, "drenderer - dev - %5.2f ms/f",
-		            msPerFrame);
+		Dqn_sprintf(windowTitleBuffer, "drenderer - dev - %5.2f ms/f - mem %'dkb", msPerFrame,
+		            (u32)(memCounter.PagefileUsage / 1024.0f));
 		SetWindowTextA(mainWindow, windowTitleBuffer);
 	}
 

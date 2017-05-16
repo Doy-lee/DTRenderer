@@ -217,6 +217,8 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DqnV2 fontP = DqnV2_2i(200, 180);
 	DTRRender_Text(renderBuffer, state->font, fontP, "hello world!");
 
-	DTRRender_Bitmap(renderBuffer, &state->bitmap, 300, 250);
+	DTRRenderTransform transform = DTRRender_DefaultTransform();
+	transform.rotation           = rotation;
+	DTRRender_Bitmap(renderBuffer, &state->bitmap, DqnV2i_2i(200, 300), transform);
 	DTRDebug_Update(state, renderBuffer, input, memory);
 }
