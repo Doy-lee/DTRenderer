@@ -1,1 +1,3 @@
-#include "..\DRenderer.cpp"
+#include "..\DTRendererDebug.cpp"
+#include "..\DTRendererRender.cpp"
+#include "..\DTRenderer.cpp"

@@ -10,10 +10,13 @@ if %errorlevel%==1 (
 	goto end
 )
 
-REM Build tags file
-ctags -R
+REM Build tags file if you have ctags in path
+where /q ctags
+if %errorlevel%==0 (
+	ctags -R
+)
 
-set ProjectName=drenderer
+set ProjectName=dtrenderer
 ctime -begin ..\src\%ProjectName%.ctm
 
 IF NOT EXIST ..\bin mkdir ..\bin
@@ -38,7 +41,7 @@ REM wd4189 local variable is initialised but not referenced
 REM wd4505 unreferenced local function not used will be removed
 set CompileFlags=-EHa- -GR- -Oi -MT -Z7 -W4 -wd4100 -wd4201 -wd4189 -wd4505 -Od -FAsc
 set DLLFlags=/Fm%ProjectName% /Fo%ProjectName% /Fa%ProjectName% /Fe%ProjectName%
-set Win32Flags=/FmWin32DRenderer /FeWin32DRenderer
+set Win32Flags=/FmWin32DTRenderer /FeWin32DTRenderer
 
 REM Clean time necessary for hours <10, which produces  H:MM:SS.SS where the
 REM first character of time is an empty space. CleanTime will pad a 0 if
@@ -57,8 +60,9 @@ REM ////////////////////////////////////////////////////////////////////////////
 REM Compile
 REM ////////////////////////////////////////////////////////////////////////////
 del *.pdb >NUL 2>NUL
-cl %CompileFlags% %Win32Flags% ..\src\Win32DRenderer.cpp /link %LinkLibraries% %LinkFlags%
-cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link /PDB:%ProjectName%_%TimeStamp%.pdb /export:DR_Update %LinkFlags%
+cl %CompileFlags% %Win32Flags% ..\src\Win32DTRenderer.cpp /link %LinkLibraries% %LinkFlags%
+cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
+
 popd
 set LastError=%ERRORLEVEL%
 ctime -end %ProjectName%.ctm %LastError%

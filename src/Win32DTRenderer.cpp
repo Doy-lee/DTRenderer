@@ -1,5 +1,5 @@
-#include "DRenderer.h"
-#include "DRendererPlatform.h"
+#include "DTRenderer.h"
+#include "DTRendererPlatform.h"
 
 #define DQN_IMPLEMENTATION
 #define DQN_WIN32_IMPLEMENTATION
@@ -7,6 +7,9 @@
 
 #define UNICODE
 #define _UNICODE
+
+const char *const DLL_NAME     = "dtrenderer.dll";
+const char *const DLL_TMP_NAME = "dtrenderer_temp.dll";
 
 ////////////////////////////////////////////////////////////////////////////////
 // Platform API Implementation
@@ -98,7 +101,7 @@ typedef struct Win32ExternalCode
 	HMODULE            dll;
 	FILETIME           lastWriteTime;
 
-	DR_UpdateFunction *DR_Update;
+	DTR_UpdateFunction *DTR_Update;
 } Win32ExternalCode;
 
 enum Win32Menu
@@ -147,13 +150,13 @@ FILE_SCOPE Win32ExternalCode Win32LoadExternalDLL(const char *const srcPath,
 	result.lastWriteTime     = lastWriteTime;
 	CopyFile(srcPath, tmpPath, false);
 
-	DR_UpdateFunction *updateFunction = NULL;
+	DTR_UpdateFunction *updateFunction = NULL;
 	result.dll                        = LoadLibraryA(tmpPath);
 	if (result.dll)
 	{
 		updateFunction =
-		    (DR_UpdateFunction *)GetProcAddress(result.dll, "DR_Update");
-		if (updateFunction) result.DR_Update = updateFunction;
+		    (DTR_UpdateFunction *)GetProcAddress(result.dll, "DTR_Update");
+		if (updateFunction) result.DTR_Update = updateFunction;
 	}
 
 	return result;
@@ -164,7 +167,7 @@ FILE_SCOPE void Win32UnloadExternalDLL(Win32ExternalCode *externalCode)
 
 	if (externalCode->dll) FreeLibrary(externalCode->dll);
 	externalCode->dll       = NULL;
-	externalCode->DR_Update = NULL;
+	externalCode->DTR_Update = NULL;
 }
 
 FILE_SCOPE void Win32CreateMenu(HWND window)
@@ -484,11 +487,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		DQN_ASSERT(lastSlashIndex + 1 < DQN_ARRAY_COUNT(exeDir));
 
 		exeDir[lastSlashIndex + 1] = 0;
-		u32 numCopied = Dqn_sprintf(dllPath, "%s%s", exeDir, "drenderer.dll");
+		u32 numCopied = Dqn_sprintf(dllPath, "%s%s", exeDir, DLL_NAME);
 		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllPath));
 
 		numCopied =
-		    Dqn_sprintf(dllTmpPath, "%s%s", exeDir, "drenderer_temp.dll");
+		    Dqn_sprintf(dllTmpPath, "%s%s", exeDir, DLL_TMP_NAME);
 		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllTmpPath));
 	}
 
@@ -537,10 +540,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			platformBuffer.width                = globalRenderBitmap.width;
 			platformBuffer.bytesPerPixel = globalRenderBitmap.bytesPerPixel;
 
-			if (dllCode.DR_Update)
+			if (dllCode.DTR_Update)
 			{
-				dllCode.DR_Update(&platformBuffer, &platformInput,
-				                  &globalPlatformMemory);
+				dllCode.DTR_Update(&platformBuffer, &platformInput,
+				                   &globalPlatformMemory);
 			}
 		}
 

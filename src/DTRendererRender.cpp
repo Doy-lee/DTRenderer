@@ -1,61 +1,18 @@
-#include "DRenderer.h"
-#include "DRendererPlatform.h"
+#include "DTRendererRender.h"
+#include "DTRendererPlatform.h"
 
 #define STB_RECT_PACK_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "external/stb_rect_pack.h"
-#include "external/stb_image.h"
 #include "external/stb_truetype.h"
 
-// #define DR_DEBUG_RENDER_FONT_BITMAP
-#ifdef DR_DEBUG_RENDER_FONT_BITMAP
+// #define DTR_DEBUG_RENDER_FONT_BITMAP
+#ifdef DTR_DEBUG_RENDER_FONT_BITMAP
 	#define STB_IMAGE_WRITE_IMPLEMENTATION
 	#include "external/stb_image_write.h"
 #endif
 
-#define DQN_IMPLEMENTATION
-#include "dqn.h"
-
-#include <math.h>
-
-#define DR_DEBUG 1
-typedef struct DRFont
-{
-	u8    *bitmap;
-	DqnV2i bitmapDim;
-	DqnV2i codepointRange;
-	f32    sizeInPt;
-
-	stbtt_packedchar *atlas;
-} DRFont;
-
-typedef struct DRBitmap
-{
-	u8    *memory;
-	DqnV2i dim;
-	i32    bytesPerPixel;
-} DRBitmap;
-
-typedef struct DRState
-{
-	DRFont   font;
-	DRBitmap bitmap;
-} DRState;
-
-typedef struct DRDebug
-{
-	DRFont *font;
-	PlatformRenderBuffer *renderBuffer;
-
-	DqnV2   displayP;
-	i32     displayYOffset;
-
-	u64 setPixelsPerFrame;
-	u64 totalSetPixels;
-} DRDebug;
-
-FILE_SCOPE inline DqnV4 PreMultiplyAlpha(DqnV4 color)
+inline DqnV4 DTRRender_PreMultiplyAlpha(const DqnV4 color)
 {
 	DqnV4 result;
 	f32 normA = color.a / 255.0f;
@@ -66,8 +23,6 @@ FILE_SCOPE inline DqnV4 PreMultiplyAlpha(DqnV4 color)
 
 	return result;
 }
-
-FILE_SCOPE DRDebug globalDebug;
 
 // IMPORTANT(doyle): Color is expected to be premultiplied already
 FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
@@ -94,12 +49,10 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
 	// NOTE(doyle): AlphaBlend equations is (alpha * new) + (1 - alpha) * src.
 	// IMPORTANT(doyle): We pre-multiply so we can take out the (alpha * new)
 	f32 invANorm  = 1 - newANorm;
-	// f32 destA = (((1 - srcA) * newA) + srcA) * 255.0f;
 	f32 destR = newR + (invANorm * srcR);
 	f32 destG = newG + (invANorm * srcG);
 	f32 destB = newB + (invANorm * srcB);
 
-	// DQN_ASSERT(destA >= 0 && destA <= 255.0f);
 	DQN_ASSERT(destR >= 0 && destR <= 255.0f);
 	DQN_ASSERT(destG >= 0 && destG <= 255.0f);
 	DQN_ASSERT(destB >= 0 && destB <= 255.0f);
@@ -112,15 +65,17 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
 	globalDebug.setPixelsPerFrame++;
 }
 
-FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
-                         const DRFont font, DqnV2 pos, const char *const text,
-                         DqnV4 color = DqnV4_4f(255, 255, 255, 255), i32 len = -1)
+void DTRRender_Text(PlatformRenderBuffer *const renderBuffer,
+                    const DTRFont font, DqnV2 pos, const char *const text,
+                    DqnV4 color, i32 len)
 {
 	if (!text) return;
+	if (!font.bitmap || !font.atlas || !renderBuffer) return;
+
 	if (len == -1) len = Dqn_strlen(text);
 
 	i32 index = 0;
-	color     = PreMultiplyAlpha(color);
+	color     = DTRRender_PreMultiplyAlpha(color);
 	while (index < len)
 	{
 		if (text[index] < font.codepointRange.min &&
@@ -187,33 +142,29 @@ FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
 	}
 }
 
-FILE_SCOPE void DebugPushText(const char *const formatStr, ...)
+FILE_SCOPE void TransformPoints(const DqnV2 origin, DqnV2 *const pList,
+                                const i32 numP, const DqnV2 scale,
+                                const f32 rotation)
 {
-	if (DR_DEBUG)
+	if (!pList || numP == 0) return;
+
+	DqnV2 xAxis = (DqnV2_2f(cosf(rotation), sinf(rotation)));
+	DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x);
+	xAxis *= scale.x;
+	yAxis *= scale.y;
+
+	for (i32 i = 0; i < numP; i++)
 	{
-		DRDebug *const debug = &globalDebug;
-		if (!debug->renderBuffer) return;
-
-		char str[1024] = {};
-
-		va_list argList;
-		va_start(argList, formatStr);
-		{
-			i32 numCopied = Dqn_vsprintf(str, formatStr, argList);
-			DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(str));
-		}
-		va_end(argList);
-
-		DrawText(debug->renderBuffer, *debug->font, debug->displayP, str);
-		debug->displayP.y += globalDebug.displayYOffset;
+		DqnV2 p  = pList[i];
+		pList[i] = origin + (xAxis * p.x) + (yAxis * p.y);
 	}
 }
 
-FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
-                         DqnV2i b, DqnV4 color)
+void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
+                    DqnV2i b, DqnV4 color)
 {
 	if (!renderBuffer) return;
-	color = PreMultiplyAlpha(color);
+	color = DTRRender_PreMultiplyAlpha(color);
 
 	bool yTallerThanX = false;
 	if (DQN_ABS(a.x - b.x) < DQN_ABS(a.y - b.y))
@@ -269,44 +220,10 @@ FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 	}
 }
 
-FILE_SCOPE void TransformPoints(const DqnV2 origin, DqnV2 *const pList,
-                                  const i32 numP, const DqnV2 scale,
-                                  const f32 rotation)
+void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
+                         DqnV2 max, DqnV4 color, const DqnV2 scale,
+                         const f32 rotation, const DqnV2 anchor)
 {
-	if (!pList || numP == 0) return;
-
-	DqnV2 xAxis = (DqnV2_2f(cosf(rotation), sinf(rotation)));
-	DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x);
-	xAxis *= scale.x;
-	yAxis *= scale.y;
-
-	for (i32 i = 0; i < numP; i++)
-	{
-		DqnV2 p  = pList[i];
-		pList[i] = origin + (xAxis * p.x) + (yAxis * p.y);
-	}
-}
-
-FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
-                              DqnV2 min, DqnV2 max, DqnV4 color,
-                              const DqnV2 scale  = DqnV2_1f(1.0f),
-                              f32 rotation = 0,
-                              const DqnV2 anchor = DqnV2_1f(0.5f))
-{
-	// TODO(doyle): Do edge test for quads
-#if 0
-	if (rotation > 0)
-	{
-		DqnV2 p1 = min;
-		DqnV2 p2 = DqnV2_2f(max.x, min.y);
-		DqnV2 p3 = max;
-		DqnV2 p4 = DqnV2_2f(min.x, max.y);
-		DrawTriangle(renderBuffer, p1, p2, p3, color, scale, rotation, anchor);
-		DrawTriangle(renderBuffer, p1, p3, p4, color, scale, rotation, anchor);
-		return;
-	}
-#endif
-
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
@@ -332,7 +249,7 @@ FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
 		max.y = DQN_MAX(max.y, checkP.y);
 	}
 
-	color = PreMultiplyAlpha(color);
+	color = DTRRender_PreMultiplyAlpha(color);
 	////////////////////////////////////////////////////////////////////////////
 	// Clip Drawing Space
 	////////////////////////////////////////////////////////////////////////////
@@ -376,10 +293,10 @@ FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
 	}
 	else
 	{
-		for (i32 y = 0; y < clippedSize.w; y++)
+		for (i32 y = 0; y < clippedSize.h; y++)
 		{
 			i32 bufferY = (i32)clippedRect.min.y + y;
-			for (i32 x = 0; x < clippedSize.h; x++)
+			for (i32 x = 0; x < clippedSize.w; x++)
 			{
 				i32 bufferX = (i32)clippedRect.min.x + x;
 				SetPixel(renderBuffer, bufferX, bufferY, color);
@@ -387,35 +304,39 @@ FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
 		}
 	}
 
-	if (DR_DEBUG)
+	////////////////////////////////////////////////////////////////////////////
+	// Debug
+	////////////////////////////////////////////////////////////////////////////
+	if (DTR_DEBUG)
 	{
 		// Draw Bounding box
 		{
-			DrawLine(renderBuffer, DqnV2i_2f(min.x, min.y), DqnV2i_2f(min.x, max.y), color);
-			DrawLine(renderBuffer, DqnV2i_2f(min.x, max.y), DqnV2i_2f(max.x, max.y), color);
-			DrawLine(renderBuffer, DqnV2i_2f(max.x, max.y), DqnV2i_2f(max.x, min.y), color);
-			DrawLine(renderBuffer, DqnV2i_2f(max.x, min.y), DqnV2i_2f(min.x, min.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, min.y), DqnV2i_2f(min.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, max.y), DqnV2i_2f(max.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(max.x, max.y), DqnV2i_2f(max.x, min.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2f(max.x, min.y), DqnV2i_2f(min.x, min.y), color);
 		}
 
 		// Draw rotating outline
 		if (rotation > 0)
 		{
 			DqnV4 green = DqnV4_4f(0, 255, 0, 255);
-			DrawLine(renderBuffer, DqnV2i_V2(pList[0]), DqnV2i_V2(pList[1]), green);
-			DrawLine(renderBuffer, DqnV2i_V2(pList[1]), DqnV2i_V2(pList[2]), green);
-			DrawLine(renderBuffer, DqnV2i_V2(pList[2]), DqnV2i_V2(pList[3]), green);
-			DrawLine(renderBuffer, DqnV2i_V2(pList[3]), DqnV2i_V2(pList[0]), green);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[0]), DqnV2i_V2(pList[1]), green);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[1]), DqnV2i_V2(pList[2]), green);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[2]), DqnV2i_V2(pList[3]), green);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[3]), DqnV2i_V2(pList[0]), green);
 		}
 
 	}
 }
 
-FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
-                             DqnV2 p2, DqnV2 p3, DqnV4 color,
-                             DqnV2 scale = DqnV2_1f(1.0f), f32 rotation = 0,
-                             DqnV2 anchor = DqnV2_1f(0.33f))
+void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
+                        DqnV2 p2, DqnV2 p3, DqnV4 color, const DqnV2 scale,
+                        const f32 rotation, const DqnV2 anchor)
 {
+	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
+	////////////////////////////////////////////////////////////////////////////
 	DqnV2 p1p2         = p2 - p1;
 	DqnV2 p1p3         = p3 - p1;
 	DqnV2 p1p2Anchored = p1p2 * anchor;
@@ -428,7 +349,11 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 	p2 = pList[1];
 	p3 = pList[2];
 
-	color      = PreMultiplyAlpha(color);
+	color      = DTRRender_PreMultiplyAlpha(color);
+
+	////////////////////////////////////////////////////////////////////////////
+	// Calculate Bounding Box
+	////////////////////////////////////////////////////////////////////////////
 	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
 	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
 	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
@@ -566,6 +491,9 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 
 	f32 invSignedAreaParallelogram = 1 / ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
 
+	////////////////////////////////////////////////////////////////////////////
+	// Scan and Render
+	////////////////////////////////////////////////////////////////////////////
 	for (scanP.y = min.y; scanP.y < max.y; scanP.y++)
 	{
 
@@ -590,14 +518,17 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 		signedArea3 += signedArea3DeltaY;
 	}
 
-	if (DR_DEBUG)
+	////////////////////////////////////////////////////////////////////////////
+	// Debug
+	////////////////////////////////////////////////////////////////////////////
+	if (DTR_DEBUG)
 	{
 		// Draw Bounding box
 		{
-			DrawLine(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
-			DrawLine(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
-			DrawLine(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
-			DrawLine(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
 		}
 
 		// Draw Triangle Coordinate Basis
@@ -606,8 +537,8 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 			DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x) * scale.y;
 			DqnV4 coordSysColor = DqnV4_4f(0, 255, 255, 255);
 			i32 axisLen = 50;
-			DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
-			DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
 		}
 
 		// Draw axis point
@@ -616,116 +547,15 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 			DqnV4 blue   = DqnV4_4f(0, 0, 255, 255);
 			DqnV4 purple = DqnV4_4f(255, 0, 255, 255);
 
-			DrawRectangle(renderBuffer, p1 - DqnV2_1f(5), p1 + DqnV2_1f(5), green);
-			DrawRectangle(renderBuffer, p2 - DqnV2_1f(5), p2 + DqnV2_1f(5), blue);
-			DrawRectangle(renderBuffer, p3 - DqnV2_1f(5), p3 + DqnV2_1f(5), purple);
+			DTRRender_Rectangle(renderBuffer, p1 - DqnV2_1f(5), p1 + DqnV2_1f(5), green);
+			DTRRender_Rectangle(renderBuffer, p2 - DqnV2_1f(5), p2 + DqnV2_1f(5), blue);
+			DTRRender_Rectangle(renderBuffer, p3 - DqnV2_1f(5), p3 + DqnV2_1f(5), purple);
 		}
 	}
 }
 
-FILE_SCOPE void ClearRenderBuffer(PlatformRenderBuffer *const renderBuffer,
-                                  DqnV3 color)
-{
-	if (!renderBuffer) return;
-
-	DQN_ASSERT(color.r >= 0.0f && color.r <= 255.0f);
-	DQN_ASSERT(color.g >= 0.0f && color.g <= 255.0f);
-	DQN_ASSERT(color.b >= 0.0f && color.b <= 255.0f);
-
-	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
-	for (i32 y = 0; y < renderBuffer->height; y++)
-	{
-		for (i32 x = 0; x < renderBuffer->width; x++)
-		{
-			u32 pixel = ((i32)color.r << 16) | ((i32)color.g << 8) |
-			            ((i32)color.b << 0);
-			bitmapPtr[x + (y * renderBuffer->width)] = pixel;
-		}
-	}
-}
-
-FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
-                                 PlatformMemory *const memory,
-                                 DRFont *const font, const char *const path,
-                                 const DqnV2i bitmapDim,
-                                 const DqnV2i codepointRange,
-                                 const f32 sizeInPt)
-{
-	font->bitmapDim      = bitmapDim;
-	font->codepointRange = codepointRange;
-	font->sizeInPt       = sizeInPt;
-
-	DqnTempBuffer transientTempBufferRegion =
-	    DqnMemBuffer_BeginTempRegion(&memory->transientBuffer);
-
-	////////////////////////////////////////////////////////////////////////////
-	// Load font data
-	////////////////////////////////////////////////////////////////////////////
-	PlatformFile file = {};
-	bool result = api.FileOpen(path, &file, PlatformFilePermissionFlag_Read);
-	DQN_ASSERT(result);
-
-	u8 *fontBuf = (u8 *)DqnMemBuffer_Allocate(&memory->transientBuffer, file.size);
-	size_t bytesRead = api.FileRead(&file, fontBuf, file.size);
-	DQN_ASSERT(bytesRead == file.size);
-	api.FileClose(&file);
-
-	stbtt_fontinfo fontInfo = {};
-	DQN_ASSERT(stbtt_InitFont(&fontInfo, fontBuf, 0) != 0);
-	if (DR_DEBUG) DQN_ASSERT(stbtt_GetNumberOfFonts(fontBuf) == 1);
-
-	////////////////////////////////////////////////////////////////////////////
-	// Pack font data to bitmap
-	////////////////////////////////////////////////////////////////////////////
-	font->bitmap = (u8 *)DqnMemBuffer_Allocate(
-	    &memory->permanentBuffer,
-	    (size_t)(font->bitmapDim.w * font->bitmapDim.h));
-
-	stbtt_pack_context fontPackContext = {};
-	DQN_ASSERT(stbtt_PackBegin(&fontPackContext, font->bitmap, bitmapDim.w,
-	                           bitmapDim.h, 0, 1, NULL) == 1);
-	{
-		// stbtt_PackSetOversampling(&fontPackContext, 2, 2);
-
-		i32 numCodepoints =
-		    (i32)((codepointRange.max + 1) - codepointRange.min);
-
-		font->atlas = (stbtt_packedchar *)DqnMemBuffer_Allocate(
-		    &memory->permanentBuffer, numCodepoints * sizeof(stbtt_packedchar));
-		stbtt_PackFontRange(&fontPackContext, fontBuf, 0,
-		                    STBTT_POINT_SIZE(sizeInPt), (i32)codepointRange.min,
-		                    numCodepoints, font->atlas);
-	}
-	stbtt_PackEnd(&fontPackContext);
-
-	////////////////////////////////////////////////////////////////////////////
-	// Premultiply Alpha of Bitmap
-	////////////////////////////////////////////////////////////////////////////
-	for (i32 y = 0; y < bitmapDim.h; y++)
-	{
-		for (i32 x = 0; x < bitmapDim.w; x++)
-		{
-			// NOTE: Bitmap from stb_truetype is 1BPP. So the actual color
-			// value represents its' alpha value but also its' color.
-			u32 index            = x + (y * bitmapDim.w);
-			f32 alpha            = (f32)(font->bitmap[index]) / 255.0f;
-			f32 color            = alpha;
-			f32 preMulAlphaColor = color * alpha;
-			DQN_ASSERT(preMulAlphaColor >= 0.0f && preMulAlphaColor <= 255.0f);
-
-			font->bitmap[index] = (u8)(preMulAlphaColor * 255.0f);
-		}
-	}
-
-#ifdef DR_DEBUG_RENDER_FONT_BITMAP
-	stbi_write_bmp("test.bmp", bitmapDim.w, bitmapDim.h, 1, font->bitmap);
-#endif
-
-	DqnMemBuffer_EndTempRegion(transientTempBufferRegion);
-}
-
-FILE_SCOPE void DrawBitmap(PlatformRenderBuffer *const renderBuffer,
-                           DRBitmap *const bitmap, i32 x, i32 y)
+void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
+                      DTRBitmap *const bitmap, i32 x, i32 y)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
 
@@ -763,201 +593,25 @@ FILE_SCOPE void DrawBitmap(PlatformRenderBuffer *const renderBuffer,
 	}
 }
 
-FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DRBitmap *bitmap,
-                           const char *const path,
-                           DqnMemBuffer *const transientBuffer)
+void DTRRender_Clear(PlatformRenderBuffer *const renderBuffer,
+                     const DqnV3 color)
 {
-	if (!bitmap) return false;
+	if (!renderBuffer) return;
 
-	PlatformFile file = {};
-	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
-		return false;
+	DQN_ASSERT(color.r >= 0.0f && color.r <= 255.0f);
+	DQN_ASSERT(color.g >= 0.0f && color.g <= 255.0f);
+	DQN_ASSERT(color.b >= 0.0f && color.b <= 255.0f);
 
-	DqnTempBuffer tempBuffer = DqnMemBuffer_BeginTempRegion(transientBuffer);
+	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
+	for (i32 y = 0; y < renderBuffer->height; y++)
 	{
-		u8 *const rawData =
-		    (u8 *)DqnMemBuffer_Allocate(transientBuffer, file.size);
-		size_t bytesRead = api.FileRead(&file, rawData, file.size);
-		api.FileClose(&file);
-
-		if (bytesRead != file.size)
+		for (i32 x = 0; x < renderBuffer->width; x++)
 		{
-			DqnMemBuffer_EndTempRegion(tempBuffer);
-			return false;
+			u32 pixel = ((i32)color.r << 16) | ((i32)color.g << 8) |
+			            ((i32)color.b << 0);
+			bitmapPtr[x + (y * renderBuffer->width)] = pixel;
 		}
-
-		bitmap->memory =
-		    stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w,
-		                          &bitmap->dim.h, &bitmap->bytesPerPixel, 4);
-	}
-	DqnMemBuffer_EndTempRegion(tempBuffer);
-	if (!bitmap->memory) return false;
-
-	const i32 pitch = bitmap->dim.w * bitmap->bytesPerPixel;
-	for (i32 y = 0; y < bitmap->dim.h; y++)
-	{
-		u8 *const srcRow = bitmap->memory + (y * pitch);
-		for (i32 x = 0; x < bitmap->dim.w; x++)
-		{
-			u32 *pixelPtr = (u32 *)srcRow;
-			u32 pixel     = pixelPtr[x];
-
-			DqnV4 color = {};
-			color.a     = (f32)(pixel >> 24);
-			color.b     = (f32)((pixel >> 16) & 0xFF);
-			color.g     = (f32)((pixel >> 8) & 0xFF);
-			color.r     = (f32)((pixel >> 0) & 0xFF);
-			color       = PreMultiplyAlpha(color);
-
-			pixel = (((u32)color.a << 24) |
-			         ((u32)color.b << 16) |
-			         ((u32)color.g << 8) |
-			         ((u32)color.r << 0));
-
-			pixelPtr[x] = pixel;
-		}
-	}
-
-	return true;
-}
-
-void DebugDisplayMemBuffer(PlatformRenderBuffer *const renderBuffer,
-                           const char *const name,
-                           const DqnMemBuffer *const buffer,
-                           DqnV2 *const debugP, const DRFont font)
-{
-	if (!name && !buffer && !debugP) return;
-
-	size_t totalUsed   = 0;
-	size_t totalSize   = 0;
-	size_t totalWasted = 0;
-	i32 numBlocks      = 0;
-
-	DqnMemBufferBlock *blockPtr = buffer->block;
-	while (blockPtr)
-	{
-		totalUsed += blockPtr->used;
-		totalSize += blockPtr->size;
-		blockPtr = blockPtr->prevBlock;
-		numBlocks++;
-	}
-
-	size_t totalUsedKb   = totalUsed / 1024;
-	size_t totalSizeKb   = totalSize / 1024;
-	size_t totalWastedKb = totalWasted / 1024;
-
-	char str[128] = {};
-	Dqn_sprintf(str, "%s: %d block(s): %_$lld/%_$lld", name, numBlocks, totalUsed,
-	            totalSize);
-
-	DrawText(renderBuffer, font, *debugP, str);
-	debugP->y += globalDebug.displayYOffset;
-}
-
-void DebugUpdate(DRState *const state, PlatformRenderBuffer *const renderBuffer,
-                 PlatformInput *const input, PlatformMemory *const memory)
-{
-	if (DR_DEBUG)
-	{
-		DRDebug *const debug = &globalDebug;
-
-		if (input->executableReloaded || !memory->isInit)
-		{
-			debug->font           = &state->font;
-			debug->displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);
-			debug->displayP =
-			    DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
-			DQN_ASSERT(globalDebug.displayYOffset < 0);
-			debug->renderBuffer = renderBuffer;
-		}
-
-		debug->totalSetPixels += debug->setPixelsPerFrame;
-		debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
-
-		// totalSetPixels
-		{
-			char str[128] = {};
-			Dqn_sprintf(str, "%s: %'lld", "TotalSetPixels", debug->totalSetPixels);
-			DrawText(debug->renderBuffer, *debug->font, debug->displayP, str);
-			debug->displayP.y += globalDebug.displayYOffset;
-		}
-
-		// setPixelsPerFrame
-		{
-			char str[128] = {};
-			Dqn_sprintf(str, "%s: %'lld", "SetPixelsPerFrame", debug->setPixelsPerFrame);
-			DrawText(debug->renderBuffer, *debug->font, debug->displayP, str);
-			debug->displayP.y += globalDebug.displayYOffset;
-		}
-
-		// memory
-		{
-			DebugDisplayMemBuffer(debug->renderBuffer, "PermBuffer",
-			                      &memory->permanentBuffer, &debug->displayP,
-			                      *debug->font);
-			DebugDisplayMemBuffer(debug->renderBuffer, "TransBuffer",
-			                      &memory->transientBuffer, &debug->displayP,
-			                      *debug->font);
-		}
-
-		debug->setPixelsPerFrame = 0;
-		debug->displayP =
-			DqnV2_2i(0, debug->renderBuffer->height + globalDebug.displayYOffset);
 	}
 }
 
-extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
-                          PlatformInput *const input,
-                          PlatformMemory *const memory)
-{
-	DRState *state = (DRState *)memory->context;
-	if (!memory->isInit)
-	{
-		stbi_set_flip_vertically_on_load(true);
-		memory->isInit = true;
-		memory->context =
-		    DqnMemBuffer_Allocate(&memory->permanentBuffer, sizeof(DRState));
-		DQN_ASSERT(memory->context);
 
-		state = (DRState *)memory->context;
-		BitmapFontCreate(input->api, memory, &state->font, "Roboto-bold.ttf",
-		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 16);
-		DQN_ASSERT(BitmapLoad(input->api, &state->bitmap, "lune_logo.png",
-		           &memory->transientBuffer));
-	}
-
-	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
-	DqnV4 colorRed = DqnV4_4i(180, 0, 0, 255);
-	DqnV2i bufferMidP =
-	    DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
-	i32 boundsOffset = 100;
-
-	DqnV2 t0[3] = {DqnV2_2i(10, 70), DqnV2_2i(50, 160), DqnV2_2i(70, 80)};
-	DqnV2 t1[3] = {DqnV2_2i(180, 50),  DqnV2_2i(150, 1),   DqnV2_2i(70, 180)};
-	DqnV2 t2[3] = {DqnV2_2i(180, 150), DqnV2_2i(120, 160), DqnV2_2i(130, 180)};
-	LOCAL_PERSIST DqnV2 t3[3] = {
-	    DqnV2_2i(boundsOffset, boundsOffset),
-	    DqnV2_2i(bufferMidP.w, renderBuffer->height - boundsOffset),
-	    DqnV2_2i(renderBuffer->width - boundsOffset, boundsOffset)};
-
-#if 1
-	DrawTriangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
-	DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
-	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
-#endif
-
-	DqnV4 colorRedHalfA = DqnV4_4i(255, 0, 0, 64);
-	LOCAL_PERSIST f32 rotation = 0;
-	rotation += input->deltaForFrame * 0.25f;
-	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA,
-	              DqnV2_1f(1.0f), rotation, DqnV2_2f(0.33f, 0.33f));
-
-	DrawRectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f),
-	              colorRed, DqnV2_1f(1.0f), 45 + rotation);
-
-	DqnV2 fontP = DqnV2_2i(200, 180);
-	// DrawText(renderBuffer, state->font, fontP, "hello world!");
-
-	// DrawBitmap(renderBuffer, &state->bitmap, 300, 250);
-	DebugUpdate(state, renderBuffer, input, memory);
-}
