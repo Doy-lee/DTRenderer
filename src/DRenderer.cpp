@@ -46,6 +46,8 @@ typedef struct DRState
 typedef struct DRDebug
 {
 	DRFont *font;
+	PlatformRenderBuffer *renderBuffer;
+
 	DqnV2   displayP;
 	i32     displayYOffset;
 
@@ -186,24 +188,26 @@ FILE_SCOPE void DrawText(PlatformRenderBuffer *const renderBuffer,
 	}
 }
 
-FILE_SCOPE void DebugPushText(PlatformRenderBuffer *const renderBuffer,
-                              const char *const formatStr, ...)
+FILE_SCOPE void DebugPushText(const char *const formatStr, ...)
 {
-#ifdef DR_DEBUG
-	DRDebug *const debug = &globalDebug;
-	char str[1024]       = {};
-
-	va_list argList;
-	va_start(argList, formatStr);
+	if (DR_DEBUG)
 	{
-		i32 numCopied = Dqn_vsprintf(str, formatStr, argList);
-		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(str));
-	}
-	va_end(argList);
+		DRDebug *const debug = &globalDebug;
+		if (!debug->renderBuffer) return;
 
-	DrawText(renderBuffer, *debug->font, debug->displayP, str);
-	debug->displayP.y += globalDebug.displayYOffset;
-#endif
+		char str[1024] = {};
+
+		va_list argList;
+		va_start(argList, formatStr);
+		{
+			i32 numCopied = Dqn_vsprintf(str, formatStr, argList);
+			DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(str));
+		}
+		va_end(argList);
+
+		DrawText(debug->renderBuffer, *debug->font, debug->displayP, str);
+		debug->displayP.y += globalDebug.displayYOffset;
+	}
 }
 
 FILE_SCOPE void DrawLine(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
@@ -284,63 +288,49 @@ FILE_SCOPE void TransformVertexes(const DqnV2 origin, DqnV2 *const vertexList,
 	}
 }
 
+FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
+                              DqnV2 min, DqnV2 max, DqnV4 color,
+                              const DqnV2 scale  = DqnV2_1f(1.0f),
+                              const f32 rotation = 0,
+                              const DqnV2 anchor = DqnV2_1f(0.5f));
+
 FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
                              DqnV2 p2, DqnV2 p3, DqnV4 color,
                              DqnV2 scale = DqnV2_1f(1.0f), f32 rotation = 0,
-                             DqnV2 anchor = DqnV2_1f(0.5f))
+                             DqnV2 anchor = DqnV2_1f(0.33f))
 {
 	f32 area2Times = ((p2.x - p1.x) * (p2.y + p1.y)) +
 	                 ((p3.x - p2.x) * (p3.y + p2.y)) +
 	                 ((p1.x - p3.x) * (p1.y + p3.y));
-	if (area2Times < 0)
-	{
-		// Counter-clockwise, do nothing this is what we want.
-	}
-	else
+	if (area2Times > 0)
 	{
 		// Clockwise swap any point to make it clockwise
 		DQN_SWAP(DqnV2, p2, p3);
 	}
 
 	// Transform vertexes
-#if 1
-	{
-		DqnV2 max = DqnV2_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
-		                     DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
-		DqnV2 min = DqnV2_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
-		                     DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
+	DqnV2 p1p2         = p2 - p1;
+	DqnV2 p1p3         = p3 - p1;
+	DqnV2 p1p2Anchored = p1p2 * anchor;
+	DqnV2 p1p3Anchored = p1p3 * anchor;
 
-		DqnV2 boundsDim = DqnV2_2f(max.x - min.x, max.y - min.y);
-		DQN_ASSERT(boundsDim.w > 0 && boundsDim.h > 0);
-		DqnV2 origin = DqnV2_2f(min.x + (anchor.x * boundsDim.w), min.y + (anchor.y * boundsDim.h));
-
-		DqnV2 vertexList[3] = {p1 - origin, p2 - origin, p3 - origin};
-		TransformVertexes(origin, vertexList, DQN_ARRAY_COUNT(vertexList),
-		                  scale, rotation);
-		p1 = vertexList[0];
-		p2 = vertexList[1];
-		p3 = vertexList[2];
-	}
-#endif
+	DqnV2 origin        = p1 + p1p2Anchored + p1p3Anchored;
+	DqnV2 vertexList[3] = {p1 - origin, p2 - origin, p3 - origin};
+	TransformVertexes(origin, vertexList, DQN_ARRAY_COUNT(vertexList), scale,
+	                  rotation);
+	p1 = vertexList[0];
+	p2 = vertexList[1];
+	p3 = vertexList[2];
 
 	color      = PreMultiplyAlpha(color);
 	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
 	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
 	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
 	                       DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
-
 	min.x = DQN_MAX(min.x, 0);
 	min.y = DQN_MAX(min.y, 0);
-
 	max.x = DQN_MIN(max.x, renderBuffer->width - 1);
 	max.y = DQN_MIN(max.y, renderBuffer->height - 1);
-
-#if 1
-	DrawLine(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
-	DrawLine(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
-	DrawLine(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
-	DrawLine(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
-#endif
 
 	/*
 	   /////////////////////////////////////////////////////////////////////////
@@ -349,12 +339,6 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 	   Given two points that form a line and an extra point to test, we can
 	   determine whether a point lies on the line, or is to the left or right of
 	   a the line.
-
-	   Then you can imagine if we iterate over the triangle vertexes, 2 at at
-	   time and a last point P, being the point we want to test if it's inside
-	   the triangle, then if the point is considered to lie on the side of the
-	   line forming the interior of the triangle for all 3 vertexes then the
-	   point is inside the triangle. We can do this using the determinant.
 
 	   First forming a 3x3 matrix of our terms with a, b being from the triangle
 	   and test point c, we can derive a 2x2 matrix by subtracting the 1st
@@ -491,41 +475,43 @@ FILE_SCOPE void DrawTriangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 		signedArea3 += signedArea3DeltaY;
 	}
 
-#if 1
+	if (DR_DEBUG)
 	{
-		DqnV2 xAxis = DqnV2_2f(cosf(rotation), sinf(rotation)) * scale.x;
-		DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x) * scale.y;
-
-		DqnV2 vertexList[3] = {p1, p2, p3};
-		DqnRect bounds = {};
-		bounds.min     = vertexList[0];
-		bounds.max     = vertexList[0];
-		for (i32 i = 1; i < DQN_ARRAY_COUNT(vertexList); i++)
+		// Draw Bounding box
 		{
-			const DqnV2 p = vertexList[i];
-			bounds.min    = DqnV2_2f(DQN_MIN(p.x, bounds.min.x),
-			                      DQN_MIN(p.y, bounds.min.y));
-			bounds.max = DqnV2_2f(DQN_MAX(p.x, bounds.max.x),
-			                      DQN_MAX(p.y, bounds.max.y));
+			DrawLine(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
+			DrawLine(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
+			DrawLine(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
+			DrawLine(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
 		}
 
-		DqnV2 boundsDim = DqnRect_GetSizeV2(bounds);
-		DqnV2 origin    = DqnV2_2f(bounds.min.x + (anchor.x * boundsDim.w),
-		                           bounds.min.y + (anchor.y * boundsDim.h));
+		// Draw Triangle Coordinate Basis
+		{
+			DqnV2 xAxis = DqnV2_2f(cosf(rotation), sinf(rotation)) * scale.x;
+			DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x) * scale.y;
+			DqnV4 coordSysColor = DqnV4_4f(0, 255, 255, 255);
+			i32 axisLen = 50;
+			DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
+			DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
+		}
 
-		DqnV4 coordSysColor = DqnV4_4f(0, 255, 255, 255);
-		i32 axisLen = 50;
-		DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
-		DrawLine(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
+		// Draw axis point
+		{
+			DqnV4 green  = DqnV4_4f(0, 255, 0, 255);
+			DqnV4 blue   = DqnV4_4f(0, 0, 255, 255);
+			DqnV4 purple = DqnV4_4f(255, 0, 255, 255);
+
+			DrawRectangle(renderBuffer, p1 - DqnV2_1f(5), p1 + DqnV2_1f(5), green);
+			DrawRectangle(renderBuffer, p2 - DqnV2_1f(5), p2 + DqnV2_1f(5), blue);
+			DrawRectangle(renderBuffer, p3 - DqnV2_1f(5), p3 + DqnV2_1f(5), purple);
+		}
 	}
-#endif
 }
 
 FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
                               DqnV2 min, DqnV2 max, DqnV4 color,
-                              const DqnV2 scale  = DqnV2_1f(1.0f),
-                              const f32 rotation = 0,
-                              const DqnV2 anchor = DqnV2_1f(0.5f))
+                              const DqnV2 scale, const f32 rotation,
+                              const DqnV2 anchor)
 {
 	// TODO(doyle): Do edge test for quads
 	if (rotation > 0)
@@ -562,7 +548,6 @@ FILE_SCOPE void DrawRectangle(PlatformRenderBuffer *const renderBuffer,
 	DqnRect clippedRect = DqnRect_ClipRect(rect, clip);
 	DqnV2 clippedSize  = DqnRect_GetSizeV2(clippedRect);
 
-	DebugPushText(renderBuffer, "ClippedSized: %5.2f, %5.2f", clippedSize.w, clippedSize.h);
 	for (i32 y = 0; y < clippedSize.w; y++)
 	{
 		i32 bufferY = (i32)clippedRect.min.y + y;
@@ -622,9 +607,7 @@ FILE_SCOPE void BitmapFontCreate(const PlatformAPI api,
 
 	stbtt_fontinfo fontInfo = {};
 	DQN_ASSERT(stbtt_InitFont(&fontInfo, fontBuf, 0) != 0);
-#if DR_DEBUG
-	DQN_ASSERT(stbtt_GetNumberOfFonts(fontBuf) == 1);
-#endif
+	if (DR_DEBUG) DQN_ASSERT(stbtt_GetNumberOfFonts(fontBuf) == 1);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Pack font data to bitmap
@@ -806,43 +789,54 @@ void DebugDisplayMemBuffer(PlatformRenderBuffer *const renderBuffer,
 	debugP->y += globalDebug.displayYOffset;
 }
 
-void DebugUpdate(PlatformRenderBuffer *const renderBuffer,
+void DebugUpdate(DRState *const state, PlatformRenderBuffer *const renderBuffer,
                  PlatformInput *const input, PlatformMemory *const memory)
 {
-#ifdef DR_DEBUG
-	DRDebug *const debug = &globalDebug;
-
-	debug->totalSetPixels += debug->setPixelsPerFrame;
-	debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
-
-	// totalSetPixels
+	if (DR_DEBUG)
 	{
-		char str[128] = {};
-		Dqn_sprintf(str, "%s: %'lld", "TotalSetPixels", debug->totalSetPixels);
-		DrawText(renderBuffer, *debug->font, debug->displayP, str);
-		debug->displayP.y += globalDebug.displayYOffset;
-	}
+		DRDebug *const debug = &globalDebug;
 
-	// setPixelsPerFrame
-	{
-		char str[128] = {};
-		Dqn_sprintf(str, "%s: %'lld", "SetPixelsPerFrame", debug->setPixelsPerFrame);
-		DrawText(renderBuffer, *debug->font, debug->displayP, str);
-		debug->displayP.y += globalDebug.displayYOffset;
-	}
+		if (input->executableReloaded || !memory->isInit)
+		{
+			debug->font           = &state->font;
+			debug->displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);
+			debug->displayP =
+			    DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
+			DQN_ASSERT(globalDebug.displayYOffset < 0);
+			debug->renderBuffer = renderBuffer;
+		}
 
-	// memory
-	{
-		DebugDisplayMemBuffer(renderBuffer, "PermBuffer",
-		                      &memory->permanentBuffer, &debug->displayP, *debug->font);
-		DebugDisplayMemBuffer(renderBuffer, "TransBuffer",
-		                      &memory->transientBuffer, &debug->displayP, *debug->font);
-	}
+		debug->totalSetPixels += debug->setPixelsPerFrame;
+		debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
 
-	debug->setPixelsPerFrame = 0;
-	debug->displayP =
-	    DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
-#endif
+		// totalSetPixels
+		{
+			char str[128] = {};
+			Dqn_sprintf(str, "%s: %'lld", "TotalSetPixels", debug->totalSetPixels);
+			DrawText(debug->renderBuffer, *debug->font, debug->displayP, str);
+			debug->displayP.y += globalDebug.displayYOffset;
+		}
+
+		// setPixelsPerFrame
+		{
+			char str[128] = {};
+			Dqn_sprintf(str, "%s: %'lld", "SetPixelsPerFrame", debug->setPixelsPerFrame);
+			DrawText(debug->renderBuffer, *debug->font, debug->displayP, str);
+			debug->displayP.y += globalDebug.displayYOffset;
+		}
+
+		// memory
+		{
+			DebugDisplayMemBuffer(debug->renderBuffer, "PermBuffer",
+								  &memory->permanentBuffer, &debug->displayP, *debug->font);
+			DebugDisplayMemBuffer(debug->renderBuffer, "TransBuffer",
+								  &memory->transientBuffer, &debug->displayP, *debug->font);
+		}
+
+		debug->setPixelsPerFrame = 0;
+		debug->displayP =
+			DqnV2_2i(0, debug->renderBuffer->height + globalDebug.displayYOffset);
+	}
 }
 
 extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
@@ -865,21 +859,11 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 		           &memory->transientBuffer));
 	}
 
-#ifdef DR_DEBUG
-	if (input->executableReloaded || !memory->isInit)
-	{
-		globalDebug.font           = &state->font;
-		globalDebug.displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);
-		globalDebug.displayP =
-		    DqnV2_2i(0, renderBuffer->height + globalDebug.displayYOffset);
-		DQN_ASSERT(globalDebug.displayYOffset < 0);
-	}
-#endif
-
 	ClearRenderBuffer(renderBuffer, DqnV3_3f(0, 0, 0));
-	DqnV4 colorRed    = DqnV4_4i(50, 0, 0, 255);
-	DqnV2i bufferMidP = DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
-	i32 boundsOffset  = 100;
+	DqnV4 colorRed = DqnV4_4i(50, 0, 0, 255);
+	DqnV2i bufferMidP =
+	    DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
+	i32 boundsOffset = 100;
 
 	DqnV2 t0[3] = {DqnV2_2i(10, 70), DqnV2_2i(50, 160), DqnV2_2i(70, 80)};
 	DqnV2 t1[3] = {DqnV2_2i(180, 50),  DqnV2_2i(150, 1),   DqnV2_2i(70, 180)};
@@ -889,41 +873,24 @@ extern "C" void DR_Update(PlatformRenderBuffer *const renderBuffer,
 	    DqnV2_2i(bufferMidP.w, renderBuffer->height - boundsOffset),
 	    DqnV2_2i(renderBuffer->width - boundsOffset, boundsOffset)};
 
-	f32 minX = (f32)(renderBuffer->width - 1);
-	f32 maxX = 0;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(t3); i++)
-	{
-		// t3[i].x += input->deltaForFrame * 2.0f;
-		minX = DQN_MIN(t3[i].x, minX);
-		maxX = DQN_MAX(t3[i].x, maxX);
-	}
-
-	if (minX >= renderBuffer->width - 1)
-	{
-		f32 triangleWidth = maxX - minX;
-		for (i32 i = 0; i < DQN_ARRAY_COUNT(t3); i++)
-		{
-			t3[i].x -= (minX + triangleWidth);
-		}
-	}
-
+#if 0
 	DrawTriangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
 	DrawTriangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
 	DrawTriangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
+#endif
 
 	DqnV4 colorRedHalfA = DqnV4_4i(255, 0, 0, 190);
 	LOCAL_PERSIST f32 rotation = 0;
 	rotation += input->deltaForFrame * 0.25f;
-	DqnV2 scale         = DqnV2_1f(1.0f);
-	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA, scale,
-	             rotation, DqnV2_1f(0.5f));
+	DrawTriangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA,
+	             DqnV2_1f(1.0f), rotation, DqnV2_2f(0.33f, 0.33f));
 
-	DrawRectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f), colorRed,
-	              DqnV2_1f(1.0f), rotation);
+	DrawRectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f),
+	              colorRed, DqnV2_1f(1.0f), rotation);
 
 	DqnV2 fontP = DqnV2_2i(200, 180);
 	DrawText(renderBuffer, state->font, fontP, "hello world!");
 
-	DrawBitmap(renderBuffer, &state->bitmap, 300, 250);
-	DebugUpdate(renderBuffer, input, memory);
+	// DrawBitmap(renderBuffer, &state->bitmap, 300, 250);
+	DebugUpdate(state, renderBuffer, input, memory);
 }

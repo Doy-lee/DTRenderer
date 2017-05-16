@@ -2282,24 +2282,23 @@ DQN_FILE_SCOPE DqnRect DqnRect_Init(DqnV2 origin, DqnV2 size)
 
 DQN_FILE_SCOPE void DqnRect_GetSize2f(DqnRect rect, f32 *width, f32 *height)
 {
-	*width  = DQN_ABS(rect.max.x - rect.min.x);
-	*height = DQN_ABS(rect.max.y - rect.min.y);
+	*width  = rect.max.x - rect.min.x;
+	*height = rect.max.y - rect.min.y;
 }
 
 DQN_FILE_SCOPE void DqnRect_GetSize2i(DqnRect rect, i32 *width, i32 *height)
 {
-	*width  = (i32)DQN_ABS(rect.max.x - rect.min.x);
-	*height = (i32)DQN_ABS(rect.max.y - rect.min.y);
+	*width  = (i32)(rect.max.x - rect.min.x);
+	*height = (i32)(rect.max.y - rect.min.y);
 }
 
 DQN_FILE_SCOPE DqnV2 DqnRect_GetSizeV2(DqnRect rect)
 {
-	f32 width     = DQN_ABS(rect.max.x - rect.min.x);
-	f32 height    = DQN_ABS(rect.max.y - rect.min.y);
+	f32 width     = rect.max.x - rect.min.x;
+	f32 height    = rect.max.y - rect.min.y;
 	DqnV2 result  = DqnV2_2f(width, height);
 	return result;
 }
-
 
 DQN_FILE_SCOPE DqnV2 DqnRect_GetCentre(DqnRect rect)
 {
