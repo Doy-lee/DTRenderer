@@ -73,10 +73,12 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 		                    STBTT_POINT_SIZE(sizeInPt), (i32)codepointRange.min,
 		                    numCodepoints, loadedFont.atlas);
 		stbtt_PackEnd(&fontPackContext);
+		DqnMemBuffer_EndTempRegion(tmpMemRegion);
 	}
 	else
 	{
 		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		DqnMemBuffer_EndTempRegion(tmpMemRegion);
 		return false;
 	}
 

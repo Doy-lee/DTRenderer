@@ -220,9 +220,21 @@ void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 	}
 }
 
+// NOTE: This information is only particularly relevant for bitmaps so that
+// after transformation, we can still programatically find the original
+// coordinate system of the bitmap for texture mapping.
+enum RectPointsIndex
+{
+	RectPointsIndex_Basis = 0,
+	RectPointsIndex_XAxis,
+	RectPointsIndex_Point,
+	RectPointsIndex_YAxis,
+	RectPointsIndex_Count
+};
+
 typedef struct RectPoints
 {
-	DqnV2 pList[4];
+	DqnV2 pList[RectPointsIndex_Count];
 } RectPoints;
 
 // Apply rotation and scale around the anchored point. This is a helper function that expands the
@@ -236,10 +248,10 @@ FILE_SCOPE RectPoints TransformRectPoints(DqnV2 min, DqnV2 max, DqnV2 anchor, Dq
 	DQN_ASSERT(dim.w > 0 && dim.h > 0);
 
 	RectPoints result = {};
-	result.pList[0]   = min - origin;
-	result.pList[1]   = DqnV2_2f(max.x, min.y) - origin;
-	result.pList[2]   = max - origin;
-	result.pList[3]   = DqnV2_2f(min.x, max.y) - origin;
+	result.pList[RectPointsIndex_Basis] = min - origin;
+	result.pList[RectPointsIndex_XAxis]       = DqnV2_2f(max.x, min.y) - origin;
+	result.pList[RectPointsIndex_Point]       = max - origin;
+	result.pList[RectPointsIndex_YAxis]       = DqnV2_2f(min.x, max.y) - origin;
 
 	TransformPoints(origin, result.pList, DQN_ARRAY_COUNT(result.pList), scale, rotation);
 
@@ -600,7 +612,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	DTRDebug_PushText("OldRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", min.x, min.y, max.x, max.y);
 
 	RectPoints rectPoints     = TransformRectPoints(min, max, transform.anchor, transform.scale, transform.rotation);
-	DqnV2 *const pList        = &rectPoints.pList[0];
+	const DqnV2 *const pList  = &rectPoints.pList[0];
 	const i32 RECT_PLIST_SIZE = DQN_ARRAY_COUNT(rectPoints.pList);
 
 	DqnRect bounds = GetBoundingBox(pList, RECT_PLIST_SIZE);
@@ -616,32 +628,83 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	DqnRect clippedDrawRect = DqnRect_ClipRect(drawRect, clip);
 	DqnV2 clippedSize       = DqnRect_GetSizeV2(clippedDrawRect);
 
-	i32 texelX = (pos.x > 0) ? 0 : DQN_ABS(pos.x);
-	i32 texelY = (pos.y > 0) ? 0 : DQN_ABS(pos.y);
-
 	DTRDebug_PushText("ClippedRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", clippedDrawRect.min.x, clippedDrawRect.min.y, clippedDrawRect.max.x, clippedDrawRect.max.y);
 	DTRDebug_PushText("ClippedSize: (%5.2f, %5.2f)", clippedSize.w, clippedSize.h);
 	DTRDebug_PushText("DrawRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", drawRect.min.x, drawRect.min.y, drawRect.max.x, drawRect.max.y);
-	DTRDebug_PushText("TexelXY: (%d, %d)", texelX, texelY);
-	const i32 pitch  = bitmap->dim.w * bitmap->bytesPerPixel;
+	const i32 pitch = bitmap->dim.w * bitmap->bytesPerPixel;
+	u32 *const pixelPtr = (u32 *)bitmap->memory;
+
+	////////////////////////////////////////////////////////////////////////////
+	// Setup Texture Mapping
+	////////////////////////////////////////////////////////////////////////////
+	const DqnV2 rectBasis       = pList[RectPointsIndex_Basis];
+	const DqnV2 xAxisRelToBasis = pList[RectPointsIndex_XAxis] - rectBasis;
+	const DqnV2 yAxisRelToBasis = pList[RectPointsIndex_YAxis] - rectBasis;
+
+	const f32 invXAxisLenSq = 1 / DqnV2_LengthSquared(DqnV2_1f(0), xAxisRelToBasis);
+	const f32 invYAxisLenSq = 1 / DqnV2_LengthSquared(DqnV2_1f(0), yAxisRelToBasis);
 	for (i32 y = 0; y < (i32)clippedSize.h; y++)
 	{
-		u8 *const srcRow = bitmap->memory + ((texelY + y) * pitch);
-		i32 bufferY      = (i32)clippedDrawRect.min.y + y;
-
+		const i32 bufferY = (i32)clippedDrawRect.min.y + y;
 		for (i32 x = 0; x < (i32)clippedSize.w; x++)
 		{
-			u32 *pixelPtr = (u32 *)srcRow;
-			u32 pixel     = 0; // pixelPtr[texelX + x];
-			i32 bufferX   = (i32)clippedDrawRect.min.x + x;
+			const i32 bufferX = (i32)clippedDrawRect.min.x + x;
 
-			DqnV4 color = {};
-			color.a     = (f32)(pixel >> 24);
-			color.b     = (f32)((pixel >> 16) & 0xFF);
-			color.g     = (f32)((pixel >> 8) & 0xFF);
-			color.r     = (f32)((pixel >> 0) & 0xFF);
+			bool bufXYIsInside = true;
+			for (i32 pIndex = 0; pIndex < RECT_PLIST_SIZE; pIndex++)
+			{
+				DqnV2 origin = pList[pIndex];
+				DqnV2 axis   = pList[(pIndex + 1) % RECT_PLIST_SIZE] - origin;
+				DqnV2 testP  = DqnV2_2i(bufferX, bufferY)            - origin;
 
-			SetPixel(renderBuffer, bufferX, bufferY, color);
+				f32 dot = DqnV2_Dot(testP, axis);
+				if (dot < 0)
+				{
+					bufXYIsInside = false;
+					break;
+				}
+			}
+
+			if (bufXYIsInside)
+			{
+#if 0
+				u32 *pixelPtr = (u32 *)srcRow;
+				u32 pixel     = 0xFFFFFFFF; // pixelPtr[texelX + x];
+
+				DqnV4 color = {};
+				color.a     = (f32)(pixel >> 24);
+				color.b     = (f32)((pixel >> 16) & 0xFF);
+				color.g     = (f32)((pixel >> 8) & 0xFF);
+				color.r     = (f32)((pixel >> 0) & 0xFF);
+
+				SetPixel(renderBuffer, bufferX, bufferY, color);
+#else
+				DqnV2 bufPRelToBasis = DqnV2_2i(bufferX, bufferY) - rectBasis;
+
+				f32 u = DqnV2_Dot(bufPRelToBasis, xAxisRelToBasis) * invXAxisLenSq;
+				f32 v = DqnV2_Dot(bufPRelToBasis, yAxisRelToBasis) * invYAxisLenSq;
+				u     = DqnMath_Clampf(u, 0.0f, 1.0f);
+				v     = DqnMath_Clampf(v, 0.0f, 1.0f);
+
+				i32 texelX  = (i32)(u * (f32)(bitmap->dim.w - 1));
+				i32 texelY  = (i32)(v * (f32)(bitmap->dim.h - 1));
+				DQN_ASSERT(texelX >= 0 && texelX < bitmap->dim.w);
+				DQN_ASSERT(texelX >= 0 && texelY < bitmap->dim.h);
+
+#if 1
+				u32 pixel   = pixelPtr[texelX + (texelY * bitmap->dim.w)];
+				DqnV4 color = {};
+				color.a     = (f32)(pixel >> 24);
+				color.b     = (f32)((pixel >> 16) & 0xFF);
+				color.g     = (f32)((pixel >> 8) & 0xFF);
+				color.r     = (f32)((pixel >> 0) & 0xFF);
+
+				SetPixel(renderBuffer, bufferX, bufferY, color);
+#endif
+
+				int yo = 5;
+#endif
+			}
 		}
 	}
 

@@ -421,6 +421,7 @@ bool DqnArray_RemoveStable(DqnArray<T> *array, u64 index)
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE f32 DqnMath_Lerp(f32 a, f32 t, f32 b);
 DQN_FILE_SCOPE f32 DqnMath_Sqrtf(f32 a);
+DQN_FILE_SCOPE f32 DqnMath_Clampf(f32 val, f32 min, f32 max);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Vec2
@@ -1711,6 +1712,13 @@ DQN_FILE_SCOPE f32 DqnMath_Sqrtf(f32 a)
 	return result;
 }
 
+DQN_FILE_SCOPE f32 DqnMath_Clampf(f32 val, f32 min, f32 max)
+{
+	if (val < min) return min;
+	if (val > max) return max;
+	return val;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Vec2
 ////////////////////////////////////////////////////////////////////////////////
@@ -1826,13 +1834,17 @@ DQN_FILE_SCOPE f32 DqnV2_LengthSquared(DqnV2 a, DqnV2 b)
 DQN_FILE_SCOPE f32 DqnV2_Length(DqnV2 a, DqnV2 b)
 {
 	f32 lengthSq = DqnV2_LengthSquared(a, b);
-	f32 result   = DqnMath_Sqrtf(lengthSq);
+	if (lengthSq == 0) return 0;
+
+	f32 result = DqnMath_Sqrtf(lengthSq);
 	return result;
 }
 
 DQN_FILE_SCOPE DqnV2 DqnV2_Normalise(DqnV2 a)
 {
 	f32 magnitude = DqnV2_Length(DqnV2_2f(0, 0), a);
+	if (magnitude == 0) return DqnV2_1f(0.0f);
+
 	DqnV2 result  = DqnV2_2f(a.x, a.y);
 	result        = DqnV2_Scalef(a, 1 / magnitude);
 	return result;
