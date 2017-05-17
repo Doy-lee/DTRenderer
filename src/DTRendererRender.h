@@ -36,7 +36,7 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, Dq
                          DqnV4 color, const DqnV2 scale = DqnV2_1f(1.0f), const f32 rotation = 0, const DqnV2 anchor = DqnV2_1f(0.5f));
 void DTRRender_Triangle (PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV2 p2, DqnV2 p3,
                          DqnV4 color, const DqnV2 scale = DqnV2_1f(1.0f), const f32 rotation = 0, const DqnV2 anchor = DqnV2_1f(0.33f));
-void DTRRender_Bitmap   (PlatformRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2i pos,
+void DTRRender_Bitmap   (PlatformRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2 pos,
                          DTRRenderTransform transform = DTRRender_DefaultTransform());
 void DTRRender_Clear    (PlatformRenderBuffer *const renderBuffer, const DqnV3 color);
 

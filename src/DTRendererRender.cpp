@@ -53,9 +53,28 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
 	f32 destG = newG + (invANorm * srcG);
 	f32 destB = newB + (invANorm * srcB);
 
-	DQN_ASSERT(destR >= 0 && destR <= 255.0f);
-	DQN_ASSERT(destG >= 0 && destG <= 255.0f);
-	DQN_ASSERT(destB >= 0 && destB <= 255.0f);
+	DQN_ASSERT(destR >= 0);
+	DQN_ASSERT(destG >= 0);
+	DQN_ASSERT(destB >= 0);
+
+	const f32 COLOR_EPSILON = 0.1f;
+	if (destR > 255.0f)
+	{
+		DQN_ASSERT((destR - 255.0f) < COLOR_EPSILON);
+		destR = 255;
+	}
+
+	if (destG > 255.0f)
+	{
+		DQN_ASSERT((destG - 255.0f) < COLOR_EPSILON);
+		destG = 255;
+	}
+
+	if (destB > 255.0f)
+	{
+		DQN_ASSERT((destB - 255.0f) < COLOR_EPSILON);
+		destB = 255;
+	}
 
 	u32 pixel = ((u32)(destR) << 16 |
 	             (u32)(destG) << 8 |
@@ -599,7 +618,7 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 }
 
 void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
-                      DTRBitmap *const bitmap, DqnV2i pos,
+                      DTRBitmap *const bitmap, DqnV2 pos,
                       DTRRenderTransform transform)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
@@ -607,7 +626,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
-	DqnV2 min = DqnV2_V2i(pos);
+	DqnV2 min = pos;
 	DqnV2 max = min + DqnV2_V2i(bitmap->dim);
 	DTRDebug_PushText("OldRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", min.x, min.y, max.x, max.y);
 
@@ -631,8 +650,8 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	DTRDebug_PushText("ClippedRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", clippedDrawRect.min.x, clippedDrawRect.min.y, clippedDrawRect.max.x, clippedDrawRect.max.y);
 	DTRDebug_PushText("ClippedSize: (%5.2f, %5.2f)", clippedSize.w, clippedSize.h);
 	DTRDebug_PushText("DrawRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", drawRect.min.x, drawRect.min.y, drawRect.max.x, drawRect.max.y);
-	const i32 pitch = bitmap->dim.w * bitmap->bytesPerPixel;
-	u32 *const pixelPtr = (u32 *)bitmap->memory;
+	const i32 pitch      = bitmap->dim.w * bitmap->bytesPerPixel;
+	u8 *const bitmapPtr  = (u8 *)bitmap->memory;
 
 	////////////////////////////////////////////////////////////////////////////
 	// Setup Texture Mapping
@@ -686,23 +705,76 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 				u     = DqnMath_Clampf(u, 0.0f, 1.0f);
 				v     = DqnMath_Clampf(v, 0.0f, 1.0f);
 
-				i32 texelX  = (i32)(u * (f32)(bitmap->dim.w - 1));
-				i32 texelY  = (i32)(v * (f32)(bitmap->dim.h - 1));
-				DQN_ASSERT(texelX >= 0 && texelX < bitmap->dim.w);
-				DQN_ASSERT(texelX >= 0 && texelY < bitmap->dim.h);
+				f32 texelXf = u * (f32)(bitmap->dim.w - 1);
+				f32 texelYf = v * (f32)(bitmap->dim.h - 1);
+				DQN_ASSERT(texelXf >= 0 && texelXf < bitmap->dim.w);
+				DQN_ASSERT(texelYf >= 0 && texelYf < bitmap->dim.h);
 
-#if 1
-				u32 pixel   = pixelPtr[texelX + (texelY * bitmap->dim.w)];
-				DqnV4 color = {};
-				color.a     = (f32)(pixel >> 24);
-				color.b     = (f32)((pixel >> 16) & 0xFF);
-				color.g     = (f32)((pixel >> 8) & 0xFF);
-				color.r     = (f32)((pixel >> 0) & 0xFF);
+				i32 texelX           = (i32)texelXf;
+				i32 texelY           = (i32)texelYf;
+				f32 texelFractionalX = texelXf - texelX;
+				f32 texelFractionalY = texelYf - texelY;
+
+				i32 texel1X = texelX;
+				i32 texel1Y = texelY;
+
+				i32 texel2X = DQN_MIN((texelX + 1), bitmap->dim.w - 1);
+				i32 texel2Y = texelY;
+
+				i32 texel3X = texelX;
+				i32 texel3Y = DQN_MIN((texelY + 1), bitmap->dim.h - 1);
+
+				i32 texel4X = DQN_MIN((texelX + 1), bitmap->dim.w - 1);
+				i32 texel4Y = DQN_MIN((texelY + 1), bitmap->dim.h - 1);
+
+				u32 texel1  = *(u32 *)(bitmapPtr + ((texel1X * bitmap->bytesPerPixel) + (texel1Y * pitch)));
+				u32 texel2  = *(u32 *)(bitmapPtr + ((texel2X * bitmap->bytesPerPixel) + (texel2Y * pitch)));
+				u32 texel3  = *(u32 *)(bitmapPtr + ((texel3X * bitmap->bytesPerPixel) + (texel3Y * pitch)));
+				u32 texel4  = *(u32 *)(bitmapPtr + ((texel4X * bitmap->bytesPerPixel) + (texel4Y * pitch)));
+
+				DqnV4 color1;
+				color1.a      = (f32)(texel1 >> 24);
+				color1.b      = (f32)((texel1 >> 16) & 0xFF);
+				color1.g      = (f32)((texel1 >> 8) & 0xFF);
+				color1.r      = (f32)((texel1 >> 0) & 0xFF);
+
+				DqnV4 color2;
+				color2.a      = (f32)(texel2 >> 24);
+				color2.b      = (f32)((texel2 >> 16) & 0xFF);
+				color2.g      = (f32)((texel2 >> 8) & 0xFF);
+				color2.r      = (f32)((texel2 >> 0) & 0xFF);
+
+				DqnV4 color3;
+				color3.a      = (f32)(texel3 >> 24);
+				color3.b      = (f32)((texel3 >> 16) & 0xFF);
+				color3.g      = (f32)((texel3 >> 8) & 0xFF);
+				color3.r      = (f32)((texel3 >> 0) & 0xFF);
+
+				DqnV4 color4;
+				color4.a      = (f32)(texel4 >> 24);
+				color4.b      = (f32)((texel4 >> 16) & 0xFF);
+				color4.g      = (f32)((texel4 >> 8) & 0xFF);
+				color4.r      = (f32)((texel4 >> 0) & 0xFF);
+
+				DqnV4 color12;
+				color12.a = DqnMath_Lerp(color1.a, texelFractionalX, color2.a);
+				color12.b = DqnMath_Lerp(color1.b, texelFractionalX, color2.b);
+				color12.g = DqnMath_Lerp(color1.g, texelFractionalX, color2.g);
+				color12.r = DqnMath_Lerp(color1.r, texelFractionalX, color2.r);
+
+				DqnV4 color34;
+				color34.a = DqnMath_Lerp(color3.a, texelFractionalX, color4.a);
+				color34.b = DqnMath_Lerp(color3.b, texelFractionalX, color4.b);
+				color34.g = DqnMath_Lerp(color3.g, texelFractionalX, color4.g);
+				color34.r = DqnMath_Lerp(color3.r, texelFractionalX, color4.r);
+
+				DqnV4 color;
+				color.a = DqnMath_Lerp(color12.a, texelFractionalY, color34.a);
+				color.b = DqnMath_Lerp(color12.b, texelFractionalY, color34.b);
+				color.g = DqnMath_Lerp(color12.g, texelFractionalY, color34.g);
+				color.r = DqnMath_Lerp(color12.r, texelFractionalY, color34.r);
 
 				SetPixel(renderBuffer, bufferX, bufferY, color);
-#endif
-
-				int yo = 5;
 #endif
 			}
 		}

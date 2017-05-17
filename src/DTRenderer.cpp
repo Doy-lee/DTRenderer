@@ -183,11 +183,18 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 		state = (DTRState *)memory->context;
 		BitmapFontCreate(input->api, memory, &state->font, "Roboto-bold.ttf",
 		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 16);
-		BitmapLoad(input->api, &state->bitmap, "lune_logo.png",
+		BitmapLoad(input->api, &state->bitmap, "tree00.bmp",
 		           &memory->transientBuffer);
+
+		DTRBitmap test = {};
+		DqnTempBuffer tmp = DqnMemBuffer_BeginTempRegion(&memory->permanentBuffer);
+		BitmapLoad(input->api, &test, "byte_read_check.bmp",
+		           &memory->transientBuffer);
+		int x = 5;
+		DqnMemBuffer_EndTempRegion(tmp);
 	}
 
-	DTRRender_Clear(renderBuffer, DqnV3_3f(0, 0, 0));
+	DTRRender_Clear(renderBuffer, DqnV3_3f(128, 128, 128));
 	DqnV4 colorRed = DqnV4_4i(180, 0, 0, 255);
 	DqnV2i bufferMidP =
 	    DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
@@ -210,17 +217,22 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DqnV4 colorRedHalfA = DqnV4_4i(255, 0, 0, 64);
 	LOCAL_PERSIST f32 rotation = 0;
 	rotation += input->deltaForFrame * 0.25f;
-	DTRRender_Triangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA,
-	                   DqnV2_1f(1.0f), rotation, DqnV2_2f(0.33f, 0.33f));
+	DTRRender_Triangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA, DqnV2_1f(1.0f), rotation,
+	                   DqnV2_2f(0.33f, 0.33f));
 
-	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f),
-	              colorRed, DqnV2_1f(1.0f), 45 + rotation);
+	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f), colorRed,
+	                    DqnV2_1f(1.0f), 45 + rotation);
 
 	DqnV2 fontP = DqnV2_2i(200, 180);
 	DTRRender_Text(renderBuffer, state->font, fontP, "hello world!");
 
 	DTRRenderTransform transform = DTRRender_DefaultTransform();
-	transform.rotation           = rotation;
-	DTRRender_Bitmap(renderBuffer, &state->bitmap, DqnV2i_2i(200, 300), transform);
+	transform.rotation           = rotation * 2.0f;
+	transform.scale              = DqnV2_1f(5.0f);
+
+	LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(300, 250);
+	bitmapP.x += 3.0f * sinf((f32)input->timeNowInS * 0.5f);
+
+	DTRRender_Bitmap(renderBuffer, &state->bitmap, bitmapP, transform);
 	DTRDebug_Update(state, renderBuffer, input, memory);
 }
