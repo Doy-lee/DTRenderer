@@ -22,7 +22,8 @@ void DTRDebug_PushText(const char *const formatStr, ...)
 		}
 		va_end(argList);
 
-		DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str);
+		DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str,
+		               debug->displayColor);
 		debug->displayP.y += globalDebug.displayYOffset;
 	}
 }
@@ -57,7 +58,7 @@ FILE_SCOPE void PushMemBufferText(const char *const name,
 		            totalUsed, totalSize);
 
 		DTRRender_Text(globalDebug.renderBuffer, *globalDebug.font,
-		               globalDebug.displayP, str);
+		               globalDebug.displayP, str, globalDebug.displayColor);
 		globalDebug.displayP.y += globalDebug.displayYOffset;
 	}
 }
@@ -72,6 +73,7 @@ void DTRDebug_Update(DTRState *const state,
 
 		debug->renderBuffer = renderBuffer;
 		debug->font         = &state->font;
+		debug->displayColor = DqnV4_4f(1, 1, 1, 1);
 		if (debug->font->bitmap && debug->renderBuffer)
 		{
 			debug->displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);
@@ -85,7 +87,8 @@ void DTRDebug_Update(DTRState *const state,
 		{
 			char str[128] = {};
 			Dqn_sprintf(str, "%s: %'lld", "TotalSetPixels", debug->totalSetPixels);
-			DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str);
+			DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str,
+			               debug->displayColor);
 			debug->displayP.y += globalDebug.displayYOffset;
 		}
 
@@ -93,7 +96,8 @@ void DTRDebug_Update(DTRState *const state,
 		{
 			char str[128] = {};
 			Dqn_sprintf(str, "%s: %'lld", "SetPixelsPerFrame", debug->setPixelsPerFrame);
-			DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str);
+			DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str,
+			               debug->displayColor);
 			debug->displayP.y += globalDebug.displayYOffset;
 		}
 

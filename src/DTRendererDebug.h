@@ -4,6 +4,9 @@
 #include "dqn.h"
 
 #define DTR_DEBUG 1
+#ifdef DTR_DEBUG
+	#define DTR_DEBUG_RENDER 0
+#endif
 
 typedef struct PlatformRenderBuffer PlatformRenderBuffer;
 typedef struct DTRFont              DTRFont;
@@ -16,6 +19,7 @@ typedef struct DTRDebug
 	DTRFont              *font;
 	PlatformRenderBuffer *renderBuffer;
 
+	DqnV4 displayColor;
 	DqnV2 displayP;
 	i32   displayYOffset;
 

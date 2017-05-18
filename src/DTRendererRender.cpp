@@ -12,9 +12,9 @@
 	#include "external/stb_image_write.h"
 #endif
 
-#define DTRRENDER_INV_255 0.00392156862f;
+FILE_SCOPE const f32 COLOR_EPSILON = 0.9f;
 
-inline DqnV4 DTRRender_PreMultiplyAlpha1(const DqnV4 color)
+FILE_SCOPE inline DqnV4 PreMultiplyAlpha1(const DqnV4 color)
 {
 	DqnV4 result;
 	result.r = color.r * color.a;
@@ -29,10 +29,11 @@ inline DqnV4 DTRRender_PreMultiplyAlpha1(const DqnV4 color)
 	return result;
 }
 
-inline DqnV4 DTRRender_PreMultiplyAlpha255(const DqnV4 color)
+FILE_SCOPE inline DqnV4 PreMultiplyAlpha255(const DqnV4 color)
 {
 	DqnV4 result;
 	f32 normA = color.a * DTRRENDER_INV_255;
+	DQN_ASSERT(normA >= 0.0f && normA <= 1.0f + COLOR_EPSILON);
 	result.r  = color.r * normA;
 	result.g  = color.g * normA;
 	result.b  = color.b * normA;
@@ -41,56 +42,68 @@ inline DqnV4 DTRRender_PreMultiplyAlpha255(const DqnV4 color)
 	return result;
 }
 
-enum ColourSpace
+enum ColorSpace
 {
-	ColourSpace_SRGB,
-	ColourSpace_Linear,
+	ColorSpace_SRGB,
+	ColorSpace_Linear,
 };
 
 // NOTE(doyle): We are approximating the actual gamma correct value 2.2 to 2 as
 // a compromise.
-FILE_SCOPE inline f32 SRGB1ToLinearSpacef(f32 val)
+inline f32 DTRRender_SRGB1ToLinearSpacef(f32 val)
 {
+	DQN_ASSERT(val >= 0.0f && val <= 1.0f + COLOR_EPSILON);
 	f32 result = DQN_SQUARED(val);
 	return result;
 }
 
-FILE_SCOPE inline DqnV4 SRGB1ToLinearSpaceV4(DqnV4 color)
+inline DqnV4 DTRRender_SRGB1ToLinearSpaceV4(DqnV4 color)
 {
 	DqnV4 result = {};
-	result.r     = SRGB1ToLinearSpacef(color.r);
-	result.g     = SRGB1ToLinearSpacef(color.g);
-	result.b     = SRGB1ToLinearSpacef(color.b);
-	result.a     = SRGB1ToLinearSpacef(color.a);
+	result.r     = DTRRender_SRGB1ToLinearSpacef(color.r);
+	result.g     = DTRRender_SRGB1ToLinearSpacef(color.g);
+	result.b     = DTRRender_SRGB1ToLinearSpacef(color.b);
+	result.a     = color.a;
 
 	return result;
 }
 
-FILE_SCOPE inline f32 LinearToSRGB1Spacef(f32 val)
+inline f32 DTRRender_LinearToSRGB1Spacef(f32 val)
 {
+	DQN_ASSERT(val >= 0.0f && val <= 1.0f + COLOR_EPSILON);
 	if (val == 0) return 0;
 	f32 result = DqnMath_Sqrtf(val);
 	return result;
 }
 
-FILE_SCOPE inline DqnV4 LinearToSRGB1SpaceV4(DqnV4 color)
+inline DqnV4 DTRRender_LinearToSRGB1SpaceV4(DqnV4 color)
 {
 	DqnV4 result = {};
-	result.r     = LinearToSRGB1Spacef(color.r);
-	result.g     = LinearToSRGB1Spacef(color.g);
-	result.b     = LinearToSRGB1Spacef(color.b);
-	result.a     = LinearToSRGB1Spacef(color.a);
+	result.r     = DTRRender_LinearToSRGB1Spacef(color.r);
+	result.g     = DTRRender_LinearToSRGB1Spacef(color.g);
+	result.b     = DTRRender_LinearToSRGB1Spacef(color.b);
+	result.a     = color.a;
+
+	return result;
+}
+
+inline DqnV4 DTRRender_PreMultiplyAlphaSRGB1WithLinearConversion(DqnV4 color)
+{
+	DqnV4 result = color;
+	result       = DTRRender_SRGB1ToLinearSpaceV4(result);
+	result       = PreMultiplyAlpha1(result);
+	result       = DTRRender_LinearToSRGB1SpaceV4(result);
 
 	return result;
 }
 
 // IMPORTANT(doyle): Color is expected to be premultiplied already
 FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const i32 x, const i32 y,
-                                DqnV4 color, const enum ColourSpace colourSpace = ColourSpace_SRGB)
+                                DqnV4 color, const enum ColorSpace colorSpace = ColorSpace_SRGB)
 {
 	if (!renderBuffer) return;
-	if (x <= 0 || x > (renderBuffer->width - 1)) return;
-	if (y <= 0 || y > (renderBuffer->height - 1)) return;
+	if (x < 0 || x > (renderBuffer->width - 1)) return;
+	if (y < 0 || y > (renderBuffer->height - 1)) return;
 
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
@@ -99,11 +112,8 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const 
 	// new pixel is totally opaque or invisible then we're just flat out
 	// overwriting/keeping the state of the pixel so we can save cycles by skipping.
 #if 1
-	bool needGammaFix = (color.a > 0.0f || color.a < 1.0f) && (colourSpace == ColourSpace_SRGB);
-	if (needGammaFix)
-	{
-		color = SRGB1ToLinearSpaceV4(color);
-	}
+	bool needGammaFix = (color.a > 0.0f || color.a < 1.0f + COLOR_EPSILON) && (colorSpace == ColorSpace_SRGB);
+	if (needGammaFix) color = DTRRender_SRGB1ToLinearSpaceV4(color);
 #endif
 
 	u32 src  = bitmapPtr[x + (y * pitchInU32)];
@@ -111,9 +121,9 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const 
 	f32 srcG = (f32)((src >> 8) & 0xFF)  * DTRRENDER_INV_255;
 	f32 srcB = (f32)((src >> 0) & 0xFF)  * DTRRENDER_INV_255;
 
-	srcR = SRGB1ToLinearSpacef(srcR);
-	srcG = SRGB1ToLinearSpacef(srcG);
-	srcB = SRGB1ToLinearSpacef(srcB);
+	srcR = DTRRender_SRGB1ToLinearSpacef(srcR);
+	srcG = DTRRender_SRGB1ToLinearSpacef(srcG);
+	srcB = DTRRender_SRGB1ToLinearSpacef(srcB);
 
 	// NOTE(doyle): AlphaBlend equations is (alpha * new) + (1 - alpha) * src.
 	// IMPORTANT(doyle): We pre-multiply so we can take out the (alpha * new)
@@ -122,24 +132,14 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const 
 	f32 destG    = color.g + (invANorm * srcG);
 	f32 destB    = color.b + (invANorm * srcB);
 
-#if 1
-	if (needGammaFix || colourSpace == ColourSpace_Linear)
-	{
-		destR = LinearToSRGB1Spacef(destR);
-		destG = LinearToSRGB1Spacef(destG);
-		destB = LinearToSRGB1Spacef(destB);
-	}
-#endif
-
-	destR *= 255.0f;
-	destG *= 255.0f;
-	destB *= 255.0f;
+	destR = DTRRender_LinearToSRGB1Spacef(destR) * 255.0f;
+	destG = DTRRender_LinearToSRGB1Spacef(destG) * 255.0f;
+	destB = DTRRender_LinearToSRGB1Spacef(destB) * 255.0f;
 
 	DQN_ASSERT(destR >= 0);
 	DQN_ASSERT(destG >= 0);
 	DQN_ASSERT(destB >= 0);
 
-	const f32 COLOR_EPSILON = 0.1f;
 	if (destR > 255.0f)
 	{
 		DQN_ASSERT((destR - 255.0f) < COLOR_EPSILON);
@@ -176,7 +176,8 @@ void DTRRender_Text(PlatformRenderBuffer *const renderBuffer,
 	if (len == -1) len = Dqn_strlen(text);
 
 	i32 index = 0;
-	color     = DTRRender_PreMultiplyAlpha1(color);
+	color = DTRRender_SRGB1ToLinearSpaceV4(color);
+	color = PreMultiplyAlpha1(color);
 	while (index < len)
 	{
 		if (text[index] < font.codepointRange.min &&
@@ -228,7 +229,7 @@ void DTRRender_Text(PlatformRenderBuffer *const renderBuffer,
 				u8 srcA     = fontPtr[x + (yOffset * fontPitch)];
 				if (srcA == 0) continue;
 
-				f32 srcANorm = srcA / 255.0f;
+				f32 srcANorm      = srcA / 255.0f;
 				DqnV4 resultColor = {};
 				resultColor.r     = color.r * srcANorm;
 				resultColor.g     = color.g * srcANorm;
@@ -237,7 +238,7 @@ void DTRRender_Text(PlatformRenderBuffer *const renderBuffer,
 
 				i32 actualX = (i32)(screenRect.min.x + x);
 				i32 actualY = (i32)(screenRect.min.y + y - fontHeightOffset);
-				SetPixel(renderBuffer, actualX, actualY, resultColor);
+				SetPixel(renderBuffer, actualX, actualY, resultColor, ColorSpace_Linear);
 			}
 		}
 	}
@@ -265,7 +266,8 @@ void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
                     DqnV2i b, DqnV4 color)
 {
 	if (!renderBuffer) return;
-	color = DTRRender_PreMultiplyAlpha1(color);
+	color = DTRRender_SRGB1ToLinearSpaceV4(color);
+	color = PreMultiplyAlpha1(color);
 
 	bool yTallerThanX = false;
 	if (DQN_ABS(a.x - b.x) < DQN_ABS(a.y - b.y))
@@ -310,7 +312,7 @@ void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
 	for (i32 iterateX = 0; iterateX < numIterations; iterateX++)
 	{
 		newX = a.x + iterateX;
-		SetPixel(renderBuffer, *plotX, *plotY, color);
+		SetPixel(renderBuffer, *plotX, *plotY, color, ColorSpace_Linear);
 
 		distAccumulator += distFromPixelOrigin;
    		if (distAccumulator > run)
@@ -384,7 +386,8 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, Dq
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
-	color = DTRRender_PreMultiplyAlpha1(color);
+	color = DTRRender_SRGB1ToLinearSpaceV4(color);
+	color = PreMultiplyAlpha1(color);
 
 	RectPoints rectPoints     = TransformRectPoints(min, max, transform);
 	DqnV2 *const pList        = &rectPoints.pList[0];
@@ -430,7 +433,7 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, Dq
 					}
 				}
 
-				if (pIsInside) SetPixel(renderBuffer, bufferX, bufferY, color);
+				if (pIsInside) SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
 			}
 		}
 	}
@@ -442,7 +445,7 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, Dq
 			for (i32 x = 0; x < clippedSize.w; x++)
 			{
 				i32 bufferX = (i32)clippedRect.min.x + x;
-				SetPixel(renderBuffer, bufferX, bufferY, color);
+				SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
 			}
 		}
 	}
@@ -450,7 +453,7 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, Dq
 	////////////////////////////////////////////////////////////////////////////
 	// Debug
 	////////////////////////////////////////////////////////////////////////////
-	if (DTR_DEBUG)
+	if (DTR_DEBUG_RENDER)
 	{
 		// Draw Bounding box
 		{
@@ -491,7 +494,8 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	p2 = pList[1];
 	p3 = pList[2];
 
-	color = DTRRender_PreMultiplyAlpha1(color);
+	color = DTRRender_SRGB1ToLinearSpaceV4(color);
+	color = PreMultiplyAlpha1(color);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Calculate Bounding Box
@@ -647,7 +651,7 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 		{
 			if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
 			{
-				SetPixel(renderBuffer, scanP.x, scanP.y, color);
+				SetPixel(renderBuffer, scanP.x, scanP.y, color, ColorSpace_Linear);
 			}
 
 			signedArea1Row += signedArea1DeltaX;
@@ -663,7 +667,7 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	////////////////////////////////////////////////////////////////////////////
 	// Debug
 	////////////////////////////////////////////////////////////////////////////
-	if (DTR_DEBUG)
+	if (DTR_DEBUG_RENDER)
 	{
 		// Draw Bounding box
 		{
@@ -698,9 +702,13 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 
 void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
                       DTRBitmap *const bitmap, DqnV2 pos,
-                      const DTRRenderTransform transform)
+                      const DTRRenderTransform transform, DqnV4 color)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
+	DQN_ASSERT(color.a >= 0 && color.a <= 1.0f);
+	DQN_ASSERT(color.r >= 0 && color.r <= 1.0f);
+	DQN_ASSERT(color.g >= 0 && color.g <= 1.0f);
+	DQN_ASSERT(color.b >= 0 && color.b <= 1.0f);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
@@ -717,6 +725,8 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	min = bounds.min;
 	max = bounds.max;
 
+	color = DTRRender_SRGB1ToLinearSpaceV4(color);
+	color = PreMultiplyAlpha1(color);
 	////////////////////////////////////////////////////////////////////////////
 	// Clip drawing space
 	////////////////////////////////////////////////////////////////////////////
@@ -828,10 +838,10 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 				color3 *= DTRRENDER_INV_255;
 				color4 *= DTRRENDER_INV_255;
 
-				color1 = SRGB1ToLinearSpaceV4(color1);
-				color2 = SRGB1ToLinearSpaceV4(color2);
-				color3 = SRGB1ToLinearSpaceV4(color3);
-				color4 = SRGB1ToLinearSpaceV4(color4);
+				color1 = DTRRender_SRGB1ToLinearSpaceV4(color1);
+				color2 = DTRRender_SRGB1ToLinearSpaceV4(color2);
+				color3 = DTRRender_SRGB1ToLinearSpaceV4(color3);
+				color4 = DTRRender_SRGB1ToLinearSpaceV4(color4);
 
 				DqnV4 color12;
 				color12.a = DqnMath_Lerp(color1.a, texelFractionalX, color2.a);
@@ -845,22 +855,40 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 				color34.g = DqnMath_Lerp(color3.g, texelFractionalX, color4.g);
 				color34.r = DqnMath_Lerp(color3.r, texelFractionalX, color4.r);
 
-				DqnV4 color;
-				color.a = DqnMath_Lerp(color12.a, texelFractionalY, color34.a);
-				color.b = DqnMath_Lerp(color12.b, texelFractionalY, color34.b);
-				color.g = DqnMath_Lerp(color12.g, texelFractionalY, color34.g);
-				color.r = DqnMath_Lerp(color12.r, texelFractionalY, color34.r);
-				DQN_ASSERT(color.a >= 0 && color.a <= 1.0f);
-				DQN_ASSERT(color.r >= 0 && color.r <= 1.0f);
-				DQN_ASSERT(color.g >= 0 && color.g <= 1.0f);
-				DQN_ASSERT(color.b >= 0 && color.b <= 1.0f);
+				DqnV4 blend;
+				blend.a = DqnMath_Lerp(color12.a, texelFractionalY, color34.a);
+				blend.b = DqnMath_Lerp(color12.b, texelFractionalY, color34.b);
+				blend.g = DqnMath_Lerp(color12.g, texelFractionalY, color34.g);
+				blend.r = DqnMath_Lerp(color12.r, texelFractionalY, color34.r);
 
-				SetPixel(renderBuffer, bufferX, bufferY, color, ColourSpace_Linear);
+				DQN_ASSERT(blend.a >= 0 && blend.a <= 1.0f);
+				DQN_ASSERT(blend.r >= 0 && blend.r <= 1.0f);
+				DQN_ASSERT(blend.g >= 0 && blend.g <= 1.0f);
+				DQN_ASSERT(blend.b >= 0 && blend.b <= 1.0f);
+
+				// TODO(doyle): Color modulation does not work!!! By supplying
+				// colors [0->1] it'll reduce some of the coverage of a channel
+				// and once alpha blending is applied that reduced coverage will
+				// blend with the background and cause the bitmap to go
+				// transparent when it shouldn't.
+				blend.a *= color.a;
+				blend.r *= color.r;
+				blend.g *= color.g;
+				blend.b *= color.b;
+
+#if 0
+				blend.a = DqnMath_Clampf(blend.a, 0.0f, 1.0f);
+				blend.r = DqnMath_Clampf(blend.r, 0.0f, 1.0f);
+				blend.g = DqnMath_Clampf(blend.g, 0.0f, 1.0f);
+				blend.b = DqnMath_Clampf(blend.b, 0.0f, 1.0f);
+#endif
+
+				SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
 			}
 		}
 	}
 
-	if (DTR_DEBUG)
+	if (DTR_DEBUG_RENDER)
 	{
 		// Draw Bounding box
 		{
@@ -901,20 +929,23 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 }
 
 void DTRRender_Clear(PlatformRenderBuffer *const renderBuffer,
-                     const DqnV3 color)
+                     DqnV3 color)
 {
 	if (!renderBuffer) return;
 
 	DQN_ASSERT(color.r >= 0.0f && color.r <= 1.0f);
 	DQN_ASSERT(color.g >= 0.0f && color.g <= 1.0f);
 	DQN_ASSERT(color.b >= 0.0f && color.b <= 1.0f);
+	color *= 255.0f;
 
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	for (i32 y = 0; y < renderBuffer->height; y++)
 	{
 		for (i32 x = 0; x < renderBuffer->width; x++)
 		{
-			u32 pixel = ((i32)color.r << 16) | ((i32)color.g << 8) |
+			u32 pixel = ((i32)0       << 24) |
+			            ((i32)color.r << 16) |
+			            ((i32)color.g << 8)  |
 			            ((i32)color.b << 0);
 			bitmapPtr[x + (y * renderBuffer->width)] = pixel;
 		}

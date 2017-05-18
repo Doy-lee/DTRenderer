@@ -91,13 +91,16 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 		{
 			// NOTE: Bitmap from stb_truetype is 1BPP. So the actual color
 			// value represents its' alpha value but also its' color.
-			u32 index            = x + (y * bitmapDim.w);
-			f32 alpha            = (f32)(loadedFont.bitmap[index]) / 255.0f;
-			f32 color            = alpha;
-			f32 preMulAlphaColor = color * alpha;
-			DQN_ASSERT(preMulAlphaColor >= 0.0f && preMulAlphaColor <= 255.0f);
+			u32 index = x + (y * bitmapDim.w);
+			f32 alpha = (f32)(loadedFont.bitmap[index]) / 255.0f;
+			f32 color = alpha;
 
-			loadedFont.bitmap[index] = (u8)(preMulAlphaColor * 255.0f);
+			color = DTRRender_SRGB1ToLinearSpacef(color);
+			color = color * alpha;
+			color = DTRRender_LinearToSRGB1Spacef(color) * 255.0f;
+			DQN_ASSERT(color >= 0.0f && color <= 255.0f);
+
+			loadedFont.bitmap[index] = (u8)color;
 		}
 	}
 
@@ -152,7 +155,10 @@ FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
 			color.b     = (f32)((pixel >> 16) & 0xFF);
 			color.g     = (f32)((pixel >> 8) & 0xFF);
 			color.r     = (f32)((pixel >> 0) & 0xFF);
-			color       = DTRRender_PreMultiplyAlpha255(color);
+
+			color *= DTRRENDER_INV_255;
+			color = DTRRender_PreMultiplyAlphaSRGB1WithLinearConversion(color);
+			color *= 255.0f;
 
 			pixel = (((u32)color.a << 24) |
 			         ((u32)color.b << 16) |
@@ -1074,20 +1080,25 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DTRRender_Triangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
 	DTRRender_Triangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
 
-	DqnV4 colorRedHalfA = DqnV4_4f(1, 0, 0, 0.25f);
+	DqnV4 colorRedHalfA        = DqnV4_4f(1, 0, 0, 0.1f);
 	LOCAL_PERSIST f32 rotation = 0;
 	rotation += input->deltaForFrame * 0.25f;
-	DTRRenderTransform triTransform = DTRRender_DefaultTriangleTransform();
-	triTransform.rotation           = rotation;
-	DTRRender_Triangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA, triTransform);
 
 	DTRRenderTransform defaultTransform = DTRRender_DefaultTransform();
 	defaultTransform.rotation           = rotation + 45;
-	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f), colorRed,
+	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f), DqnV4_4f(0, 1.0f, 1.0f, 1.0f),
 	                    defaultTransform);
 
+	// Rotating triangle
+	{
+		DTRRenderTransform triTransform = DTRRender_DefaultTriangleTransform();
+		triTransform.rotation           = rotation;
+		DTRRender_Triangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA, triTransform);
+	}
+
+
 	DqnV2 fontP = DqnV2_2i(200, 180);
-	DTRRender_Text(renderBuffer, state->font, fontP, "hello world!");
+	DTRRender_Text(renderBuffer, state->font, fontP, "hello world!", DqnV4_4f(0, 0, 0, 1));
 
 	DTRRenderTransform transform = DTRRender_DefaultTransform();
 	transform.rotation           = rotation * 2.0f;
@@ -1096,7 +1107,11 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(300, 250);
 	bitmapP.x += 3.0f * sinf((f32)input->timeNowInS * 0.5f);
 
-	DTRRender_Bitmap(renderBuffer, &state->bitmap, bitmapP, transform);
+	f32 cAngle = (f32)input->timeNowInS;
+	DqnV4 color = DqnV4_4f(0.5f + 0.5f * sinf(cAngle), 0.5f + 0.5f * sinf(2.9f * cAngle),
+	                       0.5f + 0.5f * cosf(9.9f * cAngle), 1.0f);
+	DTRRender_Bitmap(renderBuffer, &state->bitmap, bitmapP, transform, color);
+
 #else
 	CompAssignment(renderBuffer, input, memory);
 #endif
