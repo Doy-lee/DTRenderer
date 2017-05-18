@@ -546,6 +546,7 @@ typedef union DqnV4
 // Create a vector using ints and typecast to floats
 DQN_FILE_SCOPE DqnV4 DqnV4_4i(i32 x, i32 y, i32 z, f32 w);
 DQN_FILE_SCOPE DqnV4 DqnV4_4f(f32 x, f32 y, f32 z, f32 w);
+DQN_FILE_SCOPE DqnV4 DqnV4_1f(f32 xyzw);
 
 DQN_FILE_SCOPE DqnV4 DqnV4_Add     (DqnV4 a, DqnV4 b);
 DQN_FILE_SCOPE DqnV4 DqnV4_Sub     (DqnV4 a, DqnV4 b);
@@ -2100,6 +2101,12 @@ DQN_FILE_SCOPE DqnV4 DqnV4_4f(f32 x, f32 y, f32 z, f32 w)
 DQN_FILE_SCOPE DqnV4 DqnV4_4i(i32 x, i32 y, i32 z, i32 w)
 {
 	DqnV4 result = DqnV4_4f((f32)x, (f32)y, (f32)z, (f32)w);
+	return result;
+}
+
+DQN_FILE_SCOPE DqnV4 DqnV4_1f(f32 xyzw)
+{
+	DqnV4 result = {xyzw, xyzw, xyzw, xyzw};
 	return result;
 }
 

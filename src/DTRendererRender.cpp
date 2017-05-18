@@ -12,10 +12,27 @@
 	#include "external/stb_image_write.h"
 #endif
 
-inline DqnV4 DTRRender_PreMultiplyAlpha(const DqnV4 color)
+#define DTRRENDER_INV_255 0.00392156862f;
+
+inline DqnV4 DTRRender_PreMultiplyAlpha1(const DqnV4 color)
 {
 	DqnV4 result;
-	f32 normA = color.a / 255.0f;
+	result.r = color.r * color.a;
+	result.g = color.g * color.a;
+	result.b = color.b * color.a;
+	result.a = color.a;
+
+	DQN_ASSERT(result.r >= 0.0f && result.r <= 1.0f);
+	DQN_ASSERT(result.g >= 0.0f && result.g <= 1.0f);
+	DQN_ASSERT(result.b >= 0.0f && result.b <= 1.0f);
+	DQN_ASSERT(result.a >= 0.0f && result.a <= 1.0f);
+	return result;
+}
+
+inline DqnV4 DTRRender_PreMultiplyAlpha255(const DqnV4 color)
+{
+	DqnV4 result;
+	f32 normA = color.a * DTRRENDER_INV_255;
 	result.r  = color.r * normA;
 	result.g  = color.g * normA;
 	result.b  = color.b * normA;
@@ -24,9 +41,52 @@ inline DqnV4 DTRRender_PreMultiplyAlpha(const DqnV4 color)
 	return result;
 }
 
+enum ColourSpace
+{
+	ColourSpace_SRGB,
+	ColourSpace_Linear,
+};
+
+// NOTE(doyle): We are approximating the actual gamma correct value 2.2 to 2 as
+// a compromise.
+FILE_SCOPE inline f32 SRGB1ToLinearSpacef(f32 val)
+{
+	f32 result = DQN_SQUARED(val);
+	return result;
+}
+
+FILE_SCOPE inline DqnV4 SRGB1ToLinearSpaceV4(DqnV4 color)
+{
+	DqnV4 result = {};
+	result.r     = SRGB1ToLinearSpacef(color.r);
+	result.g     = SRGB1ToLinearSpacef(color.g);
+	result.b     = SRGB1ToLinearSpacef(color.b);
+	result.a     = SRGB1ToLinearSpacef(color.a);
+
+	return result;
+}
+
+FILE_SCOPE inline f32 LinearToSRGB1Spacef(f32 val)
+{
+	if (val == 0) return 0;
+	f32 result = DqnMath_Sqrtf(val);
+	return result;
+}
+
+FILE_SCOPE inline DqnV4 LinearToSRGB1SpaceV4(DqnV4 color)
+{
+	DqnV4 result = {};
+	result.r     = LinearToSRGB1Spacef(color.r);
+	result.g     = LinearToSRGB1Spacef(color.g);
+	result.b     = LinearToSRGB1Spacef(color.b);
+	result.a     = LinearToSRGB1Spacef(color.a);
+
+	return result;
+}
+
 // IMPORTANT(doyle): Color is expected to be premultiplied already
-FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
-                                const i32 x, const i32 y, const DqnV4 color)
+FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const i32 x, const i32 y,
+                                DqnV4 color, const enum ColourSpace colourSpace = ColourSpace_SRGB)
 {
 	if (!renderBuffer) return;
 	if (x <= 0 || x > (renderBuffer->width - 1)) return;
@@ -35,23 +95,45 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer,
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
 
-	f32 newA     = color.a;
-	f32 newANorm = newA / 255.0f;
-	f32 newR     = color.r;
-	f32 newG     = color.g;
-	f32 newB     = color.b;
+	// If some alpha is involved, we need to apply gamma correction, but if the
+	// new pixel is totally opaque or invisible then we're just flat out
+	// overwriting/keeping the state of the pixel so we can save cycles by skipping.
+#if 1
+	bool needGammaFix = (color.a > 0.0f || color.a < 1.0f) && (colourSpace == ColourSpace_SRGB);
+	if (needGammaFix)
+	{
+		color = SRGB1ToLinearSpaceV4(color);
+	}
+#endif
 
 	u32 src  = bitmapPtr[x + (y * pitchInU32)];
-	f32 srcR = (f32)((src >> 16) & 0xFF);
-	f32 srcG = (f32)((src >> 8) & 0xFF);
-	f32 srcB = (f32)((src >> 0) & 0xFF);
+	f32 srcR = (f32)((src >> 16) & 0xFF) * DTRRENDER_INV_255;
+	f32 srcG = (f32)((src >> 8) & 0xFF)  * DTRRENDER_INV_255;
+	f32 srcB = (f32)((src >> 0) & 0xFF)  * DTRRENDER_INV_255;
+
+	srcR = SRGB1ToLinearSpacef(srcR);
+	srcG = SRGB1ToLinearSpacef(srcG);
+	srcB = SRGB1ToLinearSpacef(srcB);
 
 	// NOTE(doyle): AlphaBlend equations is (alpha * new) + (1 - alpha) * src.
 	// IMPORTANT(doyle): We pre-multiply so we can take out the (alpha * new)
-	f32 invANorm  = 1 - newANorm;
-	f32 destR = newR + (invANorm * srcR);
-	f32 destG = newG + (invANorm * srcG);
-	f32 destB = newB + (invANorm * srcB);
+	f32 invANorm = 1 - color.a;
+	f32 destR    = color.r + (invANorm * srcR);
+	f32 destG    = color.g + (invANorm * srcG);
+	f32 destB    = color.b + (invANorm * srcB);
+
+#if 1
+	if (needGammaFix || colourSpace == ColourSpace_Linear)
+	{
+		destR = LinearToSRGB1Spacef(destR);
+		destG = LinearToSRGB1Spacef(destG);
+		destB = LinearToSRGB1Spacef(destB);
+	}
+#endif
+
+	destR *= 255.0f;
+	destG *= 255.0f;
+	destB *= 255.0f;
 
 	DQN_ASSERT(destR >= 0);
 	DQN_ASSERT(destG >= 0);
@@ -94,7 +176,7 @@ void DTRRender_Text(PlatformRenderBuffer *const renderBuffer,
 	if (len == -1) len = Dqn_strlen(text);
 
 	i32 index = 0;
-	color     = DTRRender_PreMultiplyAlpha(color);
+	color     = DTRRender_PreMultiplyAlpha1(color);
 	while (index < len)
 	{
 		if (text[index] < font.codepointRange.min &&
@@ -183,7 +265,7 @@ void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
                     DqnV2i b, DqnV4 color)
 {
 	if (!renderBuffer) return;
-	color = DTRRender_PreMultiplyAlpha(color);
+	color = DTRRender_PreMultiplyAlpha1(color);
 
 	bool yTallerThanX = false;
 	if (DQN_ABS(a.x - b.x) < DQN_ABS(a.y - b.y))
@@ -259,20 +341,19 @@ typedef struct RectPoints
 // Apply rotation and scale around the anchored point. This is a helper function that expands the
 // min and max into the 4 vertexes of a rectangle then calls the normal transform routine.
 // anchor: A normalised [0->1] value the points should be positioned from
-FILE_SCOPE RectPoints TransformRectPoints(DqnV2 min, DqnV2 max, DqnV2 anchor, DqnV2 scale,
-                                          f32 rotation)
+FILE_SCOPE RectPoints TransformRectPoints(DqnV2 min, DqnV2 max, DTRRenderTransform transform)
 {
 	DqnV2 dim    = DqnV2_2f(max.x - min.x, max.y - min.y);
-	DqnV2 origin = DqnV2_2f(min.x + (anchor.x * dim.w), min.y + (anchor.y * dim.h));
+	DqnV2 origin = DqnV2_2f(min.x + (transform.anchor.x * dim.w), min.y + (transform.anchor.y * dim.h));
 	DQN_ASSERT(dim.w > 0 && dim.h > 0);
 
 	RectPoints result = {};
 	result.pList[RectPointsIndex_Basis] = min - origin;
-	result.pList[RectPointsIndex_XAxis]       = DqnV2_2f(max.x, min.y) - origin;
-	result.pList[RectPointsIndex_Point]       = max - origin;
-	result.pList[RectPointsIndex_YAxis]       = DqnV2_2f(min.x, max.y) - origin;
+	result.pList[RectPointsIndex_XAxis] = DqnV2_2f(max.x, min.y) - origin;
+	result.pList[RectPointsIndex_Point] = max - origin;
+	result.pList[RectPointsIndex_YAxis] = DqnV2_2f(min.x, max.y) - origin;
 
-	TransformPoints(origin, result.pList, DQN_ARRAY_COUNT(result.pList), scale, rotation);
+	TransformPoints(origin, result.pList, DQN_ARRAY_COUNT(result.pList), transform.scale, transform.rotation);
 
 	return result;
 }
@@ -297,16 +378,15 @@ FILE_SCOPE DqnRect GetBoundingBox(const DqnV2 *const pList, const i32 numP)
 	return result;
 }
 
-void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
-                         DqnV2 max, DqnV4 color, const DqnV2 scale,
-                         const f32 rotation, const DqnV2 anchor)
+void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 max,
+                         DqnV4 color, const DTRRenderTransform transform)
 {
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
-	color = DTRRender_PreMultiplyAlpha(color);
+	color = DTRRender_PreMultiplyAlpha1(color);
 
-	RectPoints rectPoints     = TransformRectPoints(min, max, anchor, scale, rotation);
+	RectPoints rectPoints     = TransformRectPoints(min, max, transform);
 	DqnV2 *const pList        = &rectPoints.pList[0];
 	const i32 RECT_PLIST_SIZE = DQN_ARRAY_COUNT(rectPoints.pList);
 
@@ -326,7 +406,7 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
 	////////////////////////////////////////////////////////////////////////////
 	// Render
 	////////////////////////////////////////////////////////////////////////////
-	if (rotation != 0)
+	if (transform.rotation != 0)
 	{
 		for (i32 y = 0; y < clippedSize.w; y++)
 		{
@@ -381,9 +461,9 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
 		}
 
 		// Draw rotating outline
-		if (rotation > 0)
+		if (transform.rotation > 0)
 		{
-			DqnV4 green = DqnV4_4f(0, 255, 0, 255);
+			DqnV4 green = DqnV4_4f(0, 1, 0, 1);
 			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[0]), DqnV2i_V2(pList[1]), green);
 			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[1]), DqnV2i_V2(pList[2]), green);
 			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[2]), DqnV2i_V2(pList[3]), green);
@@ -393,26 +473,25 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min,
 	}
 }
 
-void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
-                        DqnV2 p2, DqnV2 p3, DqnV4 color, const DqnV2 scale,
-                        const f32 rotation, const DqnV2 anchor)
+void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV2 p2, DqnV2 p3,
+                        DqnV4 color, const DTRRenderTransform transform)
 {
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
 	DqnV2 p1p2         = p2 - p1;
 	DqnV2 p1p3         = p3 - p1;
-	DqnV2 p1p2Anchored = p1p2 * anchor;
-	DqnV2 p1p3Anchored = p1p3 * anchor;
+	DqnV2 p1p2Anchored = p1p2 * transform.anchor;
+	DqnV2 p1p3Anchored = p1p3 * transform.anchor;
 
 	DqnV2 origin   = p1 + p1p2Anchored + p1p3Anchored;
 	DqnV2 pList[3] = {p1 - origin, p2 - origin, p3 - origin};
-	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), scale, rotation);
+	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale, transform.rotation);
 	p1 = pList[0];
 	p2 = pList[1];
 	p3 = pList[2];
 
-	color      = DTRRender_PreMultiplyAlpha(color);
+	color = DTRRender_PreMultiplyAlpha1(color);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Calculate Bounding Box
@@ -596,9 +675,9 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 
 		// Draw Triangle Coordinate Basis
 		{
-			DqnV2 xAxis = DqnV2_2f(cosf(rotation), sinf(rotation)) * scale.x;
-			DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x) * scale.y;
-			DqnV4 coordSysColor = DqnV4_4f(0, 255, 255, 255);
+			DqnV2 xAxis = DqnV2_2f(cosf(transform.rotation), sinf(transform.rotation)) * transform.scale.x;
+			DqnV2 yAxis         = DqnV2_2f(-xAxis.y, xAxis.x) * transform.scale.y;
+			DqnV4 coordSysColor = DqnV4_4f(0, 1, 1, 1);
 			i32 axisLen = 50;
 			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
 			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
@@ -606,9 +685,9 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 
 		// Draw axis point
 		{
-			DqnV4 green  = DqnV4_4f(0, 255, 0, 255);
-			DqnV4 blue   = DqnV4_4f(0, 0, 255, 255);
-			DqnV4 purple = DqnV4_4f(255, 0, 255, 255);
+			DqnV4 green  = DqnV4_4f(0, 1, 0, 1);
+			DqnV4 blue   = DqnV4_4f(0, 0, 1, 1);
+			DqnV4 purple = DqnV4_4f(1, 0, 1, 1);
 
 			DTRRender_Rectangle(renderBuffer, p1 - DqnV2_1f(5), p1 + DqnV2_1f(5), green);
 			DTRRender_Rectangle(renderBuffer, p2 - DqnV2_1f(5), p2 + DqnV2_1f(5), blue);
@@ -619,7 +698,7 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1,
 
 void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
                       DTRBitmap *const bitmap, DqnV2 pos,
-                      DTRRenderTransform transform)
+                      const DTRRenderTransform transform)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
 
@@ -630,7 +709,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	DqnV2 max = min + DqnV2_V2i(bitmap->dim);
 	DTRDebug_PushText("OldRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", min.x, min.y, max.x, max.y);
 
-	RectPoints rectPoints     = TransformRectPoints(min, max, transform.anchor, transform.scale, transform.rotation);
+	RectPoints rectPoints     = TransformRectPoints(min, max, transform);
 	const DqnV2 *const pList  = &rectPoints.pList[0];
 	const i32 RECT_PLIST_SIZE = DQN_ARRAY_COUNT(rectPoints.pList);
 
@@ -686,18 +765,6 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 
 			if (bufXYIsInside)
 			{
-#if 0
-				u32 *pixelPtr = (u32 *)srcRow;
-				u32 pixel     = 0xFFFFFFFF; // pixelPtr[texelX + x];
-
-				DqnV4 color = {};
-				color.a     = (f32)(pixel >> 24);
-				color.b     = (f32)((pixel >> 16) & 0xFF);
-				color.g     = (f32)((pixel >> 8) & 0xFF);
-				color.r     = (f32)((pixel >> 0) & 0xFF);
-
-				SetPixel(renderBuffer, bufferX, bufferY, color);
-#else
 				DqnV2 bufPRelToBasis = DqnV2_2i(bufferX, bufferY) - rectBasis;
 
 				f32 u = DqnV2_Dot(bufPRelToBasis, xAxisRelToBasis) * invXAxisLenSq;
@@ -756,6 +823,16 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 				color4.g      = (f32)((texel4 >> 8) & 0xFF);
 				color4.r      = (f32)((texel4 >> 0) & 0xFF);
 
+				color1 *= DTRRENDER_INV_255;
+				color2 *= DTRRENDER_INV_255;
+				color3 *= DTRRENDER_INV_255;
+				color4 *= DTRRENDER_INV_255;
+
+				color1 = SRGB1ToLinearSpaceV4(color1);
+				color2 = SRGB1ToLinearSpaceV4(color2);
+				color3 = SRGB1ToLinearSpaceV4(color3);
+				color4 = SRGB1ToLinearSpaceV4(color4);
+
 				DqnV4 color12;
 				color12.a = DqnMath_Lerp(color1.a, texelFractionalX, color2.a);
 				color12.b = DqnMath_Lerp(color1.b, texelFractionalX, color2.b);
@@ -773,9 +850,12 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 				color.b = DqnMath_Lerp(color12.b, texelFractionalY, color34.b);
 				color.g = DqnMath_Lerp(color12.g, texelFractionalY, color34.g);
 				color.r = DqnMath_Lerp(color12.r, texelFractionalY, color34.r);
+				DQN_ASSERT(color.a >= 0 && color.a <= 1.0f);
+				DQN_ASSERT(color.r >= 0 && color.r <= 1.0f);
+				DQN_ASSERT(color.g >= 0 && color.g <= 1.0f);
+				DQN_ASSERT(color.b >= 0 && color.b <= 1.0f);
 
-				SetPixel(renderBuffer, bufferX, bufferY, color);
-#endif
+				SetPixel(renderBuffer, bufferX, bufferY, color, ColourSpace_Linear);
 			}
 		}
 	}
@@ -784,7 +864,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	{
 		// Draw Bounding box
 		{
-			DqnV4 yellow = DqnV4_4f(255, 255, 0, 255);
+			DqnV4 yellow = DqnV4_4f(1, 1, 0, 1);
 			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, min.y), DqnV2i_2f(min.x, max.y), yellow);
 			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, max.y), DqnV2i_2f(max.x, max.y), yellow);
 			DTRRender_Line(renderBuffer, DqnV2i_2f(max.x, max.y), DqnV2i_2f(max.x, min.y), yellow);
@@ -794,7 +874,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 		// Draw rotating outline
 		if (transform.rotation > 0)
 		{
-			DqnV4 green = DqnV4_4f(0, 255, 0, 255);
+			DqnV4 green = DqnV4_4f(0, 1, 0, 1);
 			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[0]), DqnV2i_V2(pList[1]), green);
 			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[1]), DqnV2i_V2(pList[2]), green);
 			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[2]), DqnV2i_V2(pList[3]), green);
@@ -803,10 +883,10 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 
 		// Draw axis point
 		{
-			DqnV4 red    = DqnV4_4f(255, 0, 0, 255);
-			DqnV4 green  = DqnV4_4f(0, 255, 0, 255);
-			DqnV4 blue   = DqnV4_4f(0, 0, 255, 255);
-			DqnV4 purple = DqnV4_4f(255, 0, 255, 255);
+			DqnV4 red    = DqnV4_4f(1, 0, 0, 1);
+			DqnV4 green  = DqnV4_4f(0, 1, 0, 1);
+			DqnV4 blue   = DqnV4_4f(0, 0, 1, 1);
+			DqnV4 purple = DqnV4_4f(1, 0, 1, 1);
 
 			DqnV2 p1 = pList[0];
 			DqnV2 p2 = pList[1];
@@ -825,9 +905,9 @@ void DTRRender_Clear(PlatformRenderBuffer *const renderBuffer,
 {
 	if (!renderBuffer) return;
 
-	DQN_ASSERT(color.r >= 0.0f && color.r <= 255.0f);
-	DQN_ASSERT(color.g >= 0.0f && color.g <= 255.0f);
-	DQN_ASSERT(color.b >= 0.0f && color.b <= 255.0f);
+	DQN_ASSERT(color.r >= 0.0f && color.r <= 1.0f);
+	DQN_ASSERT(color.g >= 0.0f && color.g <= 1.0f);
+	DQN_ASSERT(color.b >= 0.0f && color.b <= 1.0f);
 
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	for (i32 y = 0; y < renderBuffer->height; y++)

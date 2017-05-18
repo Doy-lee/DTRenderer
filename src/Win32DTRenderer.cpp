@@ -427,8 +427,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	// when you blit to the screen blackness, the area that is being blitted to
 	// is slightly smaller than 800x600. Windows provides a function to help
 	// calculate the size you'd need by accounting for the window style.
-	const u32 MIN_WIDTH  = 800;
-	const u32 MIN_HEIGHT = 600;
+	const u32 MIN_WIDTH  = 1024;
+	const u32 MIN_HEIGHT = 768;
 	RECT rect   = {};
 	rect.right  = MIN_WIDTH;
 	rect.bottom = MIN_HEIGHT;
