@@ -160,9 +160,10 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const 
 		destB = 255;
 	}
 
-	u32 pixel = ((u32)(destR) << 16 |
+	u32 pixel = // ((u32)(destA) << 24 |
+	             (u32)(destR) << 16 |
 	             (u32)(destG) << 8 |
-	             (u32)(destB) << 0);
+	             (u32)(destB) << 0;
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
 
 	globalDebug.setPixelsPerFrame++;

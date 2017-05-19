@@ -83,29 +83,16 @@ void DTRDebug_Update(DTRState *const state,
 		debug->totalSetPixels += debug->setPixelsPerFrame;
 		debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
 
-		// totalSetPixels
-		{
-			char str[128] = {};
-			Dqn_sprintf(str, "%s: %'lld", "TotalSetPixels", debug->totalSetPixels);
-			DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str,
-			               debug->displayColor);
-			debug->displayP.y += globalDebug.displayYOffset;
-		}
-
-		// setPixelsPerFrame
-		{
-			char str[128] = {};
-			Dqn_sprintf(str, "%s: %'lld", "SetPixelsPerFrame", debug->setPixelsPerFrame);
-			DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str,
-			               debug->displayColor);
-			debug->displayP.y += globalDebug.displayYOffset;
-		}
+		DTRDebug_PushText("TotalSetPixels: %'lld",    debug->totalSetPixels);
+		DTRDebug_PushText("SetPixelsPerFrame: %'lld", debug->setPixelsPerFrame);
 
 		// memory
 		{
 			PushMemBufferText("PermBuffer", &memory->permanentBuffer);
 			PushMemBufferText("TransBuffer", &memory->transientBuffer);
 		}
+
+		DTRDebug_PushText("SSE2Support: %s", (input->canUseSSE2) ? "true" : "false");
 
 		debug->setPixelsPerFrame = 0;
 		debug->displayP =

@@ -3,7 +3,7 @@
 
 #include "dqn.h"
 
-#define DTRRENDER_INV_255 0.00392156862f;
+#define DTRRENDER_INV_255 1.0f/255.0f
 
 typedef struct PlatformRenderBuffer PlatformRenderBuffer;
 typedef struct DTRBitmap DTRBitmap;

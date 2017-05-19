@@ -1036,9 +1036,16 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
                            PlatformMemory *const memory)
 {
 	DTRState *state = (DTRState *)memory->context;
+	if (input->executableReloaded)
+	{
+		DTR_DEBUG_PROFILE_END();
+		DTR_DEBUG_PROFILE_START();
+	}
+
+	DTR_DEBUG_TIMED_FUNCTION();
 	if (!memory->isInit)
 	{
-		DTR_DEBUG_PROFILE_START();
+		DTR_DEBUG_TIMED_BLOCK("DTR_Update Memory Initialisation");
 		// NOTE(doyle): Do premultiply ourselves
 		stbi_set_unpremultiply_on_load(true);
 		stbi_set_flip_vertically_on_load(true);
@@ -1061,7 +1068,6 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 		int x = 5;
 		DqnMemBuffer_EndTempRegion(tmp);
 	}
-	DTR_DEBUG_TIMED_FUNCTION();
 
 	DTRRender_Clear(renderBuffer, DqnV3_3f(0, 0, 0));
 
@@ -1087,10 +1093,12 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	LOCAL_PERSIST f32 rotation = 0;
 	rotation += input->deltaForFrame * 0.25f;
 
+#if 1
 	DTRRenderTransform defaultTransform = DTRRender_DefaultTransform();
 	defaultTransform.rotation           = rotation + 45;
-	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 20.0f), DqnV4_4f(0, 1.0f, 1.0f, 1.0f),
+	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 100.0f), DqnV4_4f(0, 1.0f, 1.0f, 1.0f),
 	                    defaultTransform);
+#endif
 
 	// Rotating triangle
 	{
@@ -1104,7 +1112,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DTRRender_Text(renderBuffer, state->font, fontP, "hello world!", DqnV4_4f(0, 0, 0, 1));
 
 	DTRRenderTransform transform = DTRRender_DefaultTransform();
-	transform.rotation           = rotation * 2.0f;
+	transform.rotation           = 0;
 	transform.scale              = DqnV2_1f(2.0f);
 
 	LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(300, 250);
@@ -1112,7 +1120,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 
 	f32 cAngle = (f32)input->timeNowInS;
 	DqnV4 color = DqnV4_4f(0.5f + 0.5f * sinf(cAngle), 0.5f + 0.5f * sinf(2.9f * cAngle),
-	                       0.5f + 0.5f * cosf(9.9f * cAngle), 1.0f);
+	                       0.5f + 0.5f * cosf(10.0f * cAngle), 1.0f);
 	DTRRender_Bitmap(renderBuffer, &state->bitmap, bitmapP, transform, color);
 
 #else

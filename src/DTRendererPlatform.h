@@ -72,6 +72,7 @@ typedef struct PlatformInput
 	f32  deltaForFrame;
 	f64  timeNowInS;
 	bool executableReloaded;
+	bool canUseSSE2;
 
 	PlatformAPI api;
 	union {

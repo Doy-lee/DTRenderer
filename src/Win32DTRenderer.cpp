@@ -500,21 +500,28 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	}
 
 	////////////////////////////////////////////////////////////////////////////
-	// Update Loop
+	// Platform Data Pre-amble
 	////////////////////////////////////////////////////////////////////////////
 	DQN_ASSERT(DqnMemBuffer_Init(&globalPlatformMemory.permanentBuffer, DQN_MEGABYTE(1), true, 4) &&
 	           DqnMemBuffer_Init(&globalPlatformMemory.transientBuffer, DQN_MEGABYTE(1), true, 4));
-
-	const f32 TARGET_FRAMES_PER_S = 60.0f;
-	f32 targetSecondsPerFrame     = 1 / TARGET_FRAMES_PER_S;
-	f64 frameTimeInS              = 0.0f;
-	globalRunning                 = true;
 
 	PlatformAPI platformAPI = {};
 	platformAPI.FileOpen    = Platform_FileOpen;
 	platformAPI.FileRead    = Platform_FileRead;
 	platformAPI.FileClose   = Platform_FileClose;
 	platformAPI.Print       = Platform_Print;
+
+	PlatformInput platformInput = {};
+	platformInput.canUseSSE2    = IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE);
+	platformInput.api           = platformAPI;
+
+	////////////////////////////////////////////////////////////////////////////
+	// Update Loop
+	////////////////////////////////////////////////////////////////////////////
+	const f32 TARGET_FRAMES_PER_S = 60.0f;
+	f32 targetSecondsPerFrame     = 1 / TARGET_FRAMES_PER_S;
+	f64 frameTimeInS              = 0.0f;
+	globalRunning                 = true;
 
 	while (globalRunning)
 	{
@@ -523,7 +530,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		////////////////////////////////////////////////////////////////////////
 		f64 startFrameTimeInS = DqnTime_NowInS();
 
-		PlatformInput platformInput = {};
 		FILETIME lastWriteTime      = Win32GetLastWriteTime(dllPath);
 		if (CompareFileTime(&lastWriteTime, &dllCode.lastWriteTime) != 0)
 		{
@@ -535,7 +541,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		{
 			platformInput.timeNowInS    = DqnTime_NowInS();
 			platformInput.deltaForFrame = (f32)frameTimeInS;
-			platformInput.api           = platformAPI;
 			Win32ProcessMessages(mainWindow, &platformInput);
 
 			PlatformRenderBuffer platformBuffer = {};
