@@ -1038,6 +1038,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DTRState *state = (DTRState *)memory->context;
 	if (!memory->isInit)
 	{
+		DTR_DEBUG_PROFILE_START();
 		// NOTE(doyle): Do premultiply ourselves
 		stbi_set_unpremultiply_on_load(true);
 		stbi_set_flip_vertically_on_load(true);
@@ -1060,6 +1061,8 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 		int x = 5;
 		DqnMemBuffer_EndTempRegion(tmp);
 	}
+	DTR_DEBUG_TIMED_FUNCTION();
+
 	DTRRender_Clear(renderBuffer, DqnV3_3f(0, 0, 0));
 
 #if 1

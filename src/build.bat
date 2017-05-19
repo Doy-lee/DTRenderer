@@ -25,7 +25,7 @@ pushd ..\bin
 REM ////////////////////////////////////////////////////////////////////////////
 REM Compile Switches
 REM ////////////////////////////////////////////////////////////////////////////
-REM EHa-   disable exception handling (we don't use)
+REM EHa-   disable exception handling (currently it's on /EHsc since libraries need)
 REM GR-    disable c runtime type information (we don't use)
 REM MD     use dynamic runtime library
 REM MT     use static runtime library, so build and link it into exe
@@ -39,7 +39,7 @@ REM wd4100 unused argument parameters
 REM wd4201 nonstandard extension used: nameless struct/union
 REM wd4189 local variable is initialised but not referenced
 REM wd4505 unreferenced local function not used will be removed
-set CompileFlags=-EHa- -GR- -Oi -MT -Z7 -W4 -wd4100 -wd4201 -wd4189 -wd4505 -Od -FAsc
+set CompileFlags=-EHsc -GR- -Oi -MT -Z7 -W4 -wd4100 -wd4201 -wd4189 -wd4505 -Od -FAsc /I..\src\external\
 set DLLFlags=/Fm%ProjectName% /Fo%ProjectName% /Fa%ProjectName% /Fe%ProjectName%
 set Win32Flags=/FmWin32DTRenderer /FeWin32DTRenderer
 
@@ -61,7 +61,7 @@ REM Compile
 REM ////////////////////////////////////////////////////////////////////////////
 del *.pdb >NUL 2>NUL
 cl %CompileFlags% %Win32Flags% ..\src\Win32DTRenderer.cpp /link %LinkLibraries% %LinkFlags%
-cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
+cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link ..\src\external\easy\easy_profiler.lib /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
 
 popd
 set LastError=%ERRORLEVEL%

@@ -158,6 +158,10 @@ FILE_SCOPE Win32ExternalCode Win32LoadExternalDLL(const char *const srcPath,
 		    (DTR_UpdateFunction *)GetProcAddress(result.dll, "DTR_Update");
 		if (updateFunction) result.DTR_Update = updateFunction;
 	}
+	else
+	{
+		DqnWin32_DisplayLastError("LoadLibraryA failed");
+	}
 
 	return result;
 }

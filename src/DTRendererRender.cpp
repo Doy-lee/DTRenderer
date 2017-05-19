@@ -1,4 +1,5 @@
 #include "DTRendererRender.h"
+#include "DTRendererDebug.h"
 #include "DTRendererPlatform.h"
 
 #define STB_RECT_PACK_IMPLEMENTATION
@@ -104,6 +105,7 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const 
 	if (!renderBuffer) return;
 	if (x < 0 || x > (renderBuffer->width - 1)) return;
 	if (y < 0 || y > (renderBuffer->height - 1)) return;
+	DTR_DEBUG_TIMED_FUNCTION();
 
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
@@ -172,6 +174,7 @@ void DTRRender_Text(PlatformRenderBuffer *const renderBuffer,
 {
 	if (!text) return;
 	if (!font.bitmap || !font.atlas || !renderBuffer) return;
+	DTR_DEBUG_TIMED_FUNCTION();
 
 	if (len == -1) len = Dqn_strlen(text);
 
@@ -249,6 +252,7 @@ FILE_SCOPE void TransformPoints(const DqnV2 origin, DqnV2 *const pList,
                                 const f32 rotation)
 {
 	if (!pList || numP == 0) return;
+	DTR_DEBUG_TIMED_FUNCTION();
 
 	DqnV2 xAxis = (DqnV2_2f(cosf(rotation), sinf(rotation)));
 	DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x);
@@ -266,6 +270,8 @@ void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
                     DqnV2i b, DqnV4 color)
 {
 	if (!renderBuffer) return;
+	DTR_DEBUG_TIMED_FUNCTION();
+
 	color = DTRRender_SRGB1ToLinearSpaceV4(color);
 	color = PreMultiplyAlpha1(color);
 
@@ -383,6 +389,7 @@ FILE_SCOPE DqnRect GetBoundingBox(const DqnV2 *const pList, const i32 numP)
 void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 max,
                          DqnV4 color, const DTRRenderTransform transform)
 {
+	DTR_DEBUG_TIMED_FUNCTION();
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
@@ -479,6 +486,8 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, Dq
 void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV2 p2, DqnV2 p3,
                         DqnV4 color, const DTRRenderTransform transform)
 {
+	DTR_DEBUG_TIMED_FUNCTION();
+
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
@@ -705,10 +714,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
                       const DTRRenderTransform transform, DqnV4 color)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
-	DQN_ASSERT(color.a >= 0 && color.a <= 1.0f);
-	DQN_ASSERT(color.r >= 0 && color.r <= 1.0f);
-	DQN_ASSERT(color.g >= 0 && color.g <= 1.0f);
-	DQN_ASSERT(color.b >= 0 && color.b <= 1.0f);
+	DTR_DEBUG_TIMED_FUNCTION();
 
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
@@ -722,11 +728,16 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	const i32 RECT_PLIST_SIZE = DQN_ARRAY_COUNT(rectPoints.pList);
 
 	DqnRect bounds = GetBoundingBox(pList, RECT_PLIST_SIZE);
-	min = bounds.min;
-	max = bounds.max;
+	min            = bounds.min;
+	max            = bounds.max;
 
 	color = DTRRender_SRGB1ToLinearSpaceV4(color);
 	color = PreMultiplyAlpha1(color);
+	DQN_ASSERT(color.a >= 0 && color.a <= 1.0f);
+	DQN_ASSERT(color.r >= 0 && color.r <= 1.0f);
+	DQN_ASSERT(color.g >= 0 && color.g <= 1.0f);
+	DQN_ASSERT(color.b >= 0 && color.b <= 1.0f);
+
 	////////////////////////////////////////////////////////////////////////////
 	// Clip drawing space
 	////////////////////////////////////////////////////////////////////////////
@@ -775,6 +786,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 
 			if (bufXYIsInside)
 			{
+				DTR_DEBUG_TIMED_BLOCK("DTRRender_Bitmap TexelCalculation");
 				DqnV2 bufPRelToBasis = DqnV2_2i(bufferX, bufferY) - rectBasis;
 
 				f32 u = DqnV2_Dot(bufPRelToBasis, xAxisRelToBasis) * invXAxisLenSq;
@@ -804,86 +816,89 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 				i32 texel4X = DQN_MIN((texelX + 1), bitmap->dim.w - 1);
 				i32 texel4Y = DQN_MIN((texelY + 1), bitmap->dim.h - 1);
 
-				u32 texel1  = *(u32 *)(bitmapPtr + ((texel1X * bitmap->bytesPerPixel) + (texel1Y * pitch)));
-				u32 texel2  = *(u32 *)(bitmapPtr + ((texel2X * bitmap->bytesPerPixel) + (texel2Y * pitch)));
-				u32 texel3  = *(u32 *)(bitmapPtr + ((texel3X * bitmap->bytesPerPixel) + (texel3Y * pitch)));
-				u32 texel4  = *(u32 *)(bitmapPtr + ((texel4X * bitmap->bytesPerPixel) + (texel4Y * pitch)));
+				{
+					DTR_DEBUG_TIMED_BLOCK("DTRRender_Bitmap TexelBilinearInterpolation");
+					u32 texel1  = *(u32 *)(bitmapPtr + ((texel1X * bitmap->bytesPerPixel) + (texel1Y * pitch)));
+					u32 texel2  = *(u32 *)(bitmapPtr + ((texel2X * bitmap->bytesPerPixel) + (texel2Y * pitch)));
+					u32 texel3  = *(u32 *)(bitmapPtr + ((texel3X * bitmap->bytesPerPixel) + (texel3Y * pitch)));
+					u32 texel4  = *(u32 *)(bitmapPtr + ((texel4X * bitmap->bytesPerPixel) + (texel4Y * pitch)));
 
-				DqnV4 color1;
-				color1.a      = (f32)(texel1 >> 24);
-				color1.b      = (f32)((texel1 >> 16) & 0xFF);
-				color1.g      = (f32)((texel1 >> 8) & 0xFF);
-				color1.r      = (f32)((texel1 >> 0) & 0xFF);
+					DqnV4 color1;
+					color1.a      = (f32)(texel1 >> 24);
+					color1.b      = (f32)((texel1 >> 16) & 0xFF);
+					color1.g      = (f32)((texel1 >> 8) & 0xFF);
+					color1.r      = (f32)((texel1 >> 0) & 0xFF);
 
-				DqnV4 color2;
-				color2.a      = (f32)(texel2 >> 24);
-				color2.b      = (f32)((texel2 >> 16) & 0xFF);
-				color2.g      = (f32)((texel2 >> 8) & 0xFF);
-				color2.r      = (f32)((texel2 >> 0) & 0xFF);
+					DqnV4 color2;
+					color2.a      = (f32)(texel2 >> 24);
+					color2.b      = (f32)((texel2 >> 16) & 0xFF);
+					color2.g      = (f32)((texel2 >> 8) & 0xFF);
+					color2.r      = (f32)((texel2 >> 0) & 0xFF);
 
-				DqnV4 color3;
-				color3.a      = (f32)(texel3 >> 24);
-				color3.b      = (f32)((texel3 >> 16) & 0xFF);
-				color3.g      = (f32)((texel3 >> 8) & 0xFF);
-				color3.r      = (f32)((texel3 >> 0) & 0xFF);
+					DqnV4 color3;
+					color3.a      = (f32)(texel3 >> 24);
+					color3.b      = (f32)((texel3 >> 16) & 0xFF);
+					color3.g      = (f32)((texel3 >> 8) & 0xFF);
+					color3.r      = (f32)((texel3 >> 0) & 0xFF);
 
-				DqnV4 color4;
-				color4.a      = (f32)(texel4 >> 24);
-				color4.b      = (f32)((texel4 >> 16) & 0xFF);
-				color4.g      = (f32)((texel4 >> 8) & 0xFF);
-				color4.r      = (f32)((texel4 >> 0) & 0xFF);
+					DqnV4 color4;
+					color4.a      = (f32)(texel4 >> 24);
+					color4.b      = (f32)((texel4 >> 16) & 0xFF);
+					color4.g      = (f32)((texel4 >> 8) & 0xFF);
+					color4.r      = (f32)((texel4 >> 0) & 0xFF);
 
-				color1 *= DTRRENDER_INV_255;
-				color2 *= DTRRENDER_INV_255;
-				color3 *= DTRRENDER_INV_255;
-				color4 *= DTRRENDER_INV_255;
+					color1 *= DTRRENDER_INV_255;
+					color2 *= DTRRENDER_INV_255;
+					color3 *= DTRRENDER_INV_255;
+					color4 *= DTRRENDER_INV_255;
 
-				color1 = DTRRender_SRGB1ToLinearSpaceV4(color1);
-				color2 = DTRRender_SRGB1ToLinearSpaceV4(color2);
-				color3 = DTRRender_SRGB1ToLinearSpaceV4(color3);
-				color4 = DTRRender_SRGB1ToLinearSpaceV4(color4);
+					color1 = DTRRender_SRGB1ToLinearSpaceV4(color1);
+					color2 = DTRRender_SRGB1ToLinearSpaceV4(color2);
+					color3 = DTRRender_SRGB1ToLinearSpaceV4(color3);
+					color4 = DTRRender_SRGB1ToLinearSpaceV4(color4);
 
-				DqnV4 color12;
-				color12.a = DqnMath_Lerp(color1.a, texelFractionalX, color2.a);
-				color12.b = DqnMath_Lerp(color1.b, texelFractionalX, color2.b);
-				color12.g = DqnMath_Lerp(color1.g, texelFractionalX, color2.g);
-				color12.r = DqnMath_Lerp(color1.r, texelFractionalX, color2.r);
+					DqnV4 color12;
+					color12.a = DqnMath_Lerp(color1.a, texelFractionalX, color2.a);
+					color12.b = DqnMath_Lerp(color1.b, texelFractionalX, color2.b);
+					color12.g = DqnMath_Lerp(color1.g, texelFractionalX, color2.g);
+					color12.r = DqnMath_Lerp(color1.r, texelFractionalX, color2.r);
 
-				DqnV4 color34;
-				color34.a = DqnMath_Lerp(color3.a, texelFractionalX, color4.a);
-				color34.b = DqnMath_Lerp(color3.b, texelFractionalX, color4.b);
-				color34.g = DqnMath_Lerp(color3.g, texelFractionalX, color4.g);
-				color34.r = DqnMath_Lerp(color3.r, texelFractionalX, color4.r);
+					DqnV4 color34;
+					color34.a = DqnMath_Lerp(color3.a, texelFractionalX, color4.a);
+					color34.b = DqnMath_Lerp(color3.b, texelFractionalX, color4.b);
+					color34.g = DqnMath_Lerp(color3.g, texelFractionalX, color4.g);
+					color34.r = DqnMath_Lerp(color3.r, texelFractionalX, color4.r);
 
-				DqnV4 blend;
-				blend.a = DqnMath_Lerp(color12.a, texelFractionalY, color34.a);
-				blend.b = DqnMath_Lerp(color12.b, texelFractionalY, color34.b);
-				blend.g = DqnMath_Lerp(color12.g, texelFractionalY, color34.g);
-				blend.r = DqnMath_Lerp(color12.r, texelFractionalY, color34.r);
+					DqnV4 blend;
+					blend.a = DqnMath_Lerp(color12.a, texelFractionalY, color34.a);
+					blend.b = DqnMath_Lerp(color12.b, texelFractionalY, color34.b);
+					blend.g = DqnMath_Lerp(color12.g, texelFractionalY, color34.g);
+					blend.r = DqnMath_Lerp(color12.r, texelFractionalY, color34.r);
 
-				DQN_ASSERT(blend.a >= 0 && blend.a <= 1.0f);
-				DQN_ASSERT(blend.r >= 0 && blend.r <= 1.0f);
-				DQN_ASSERT(blend.g >= 0 && blend.g <= 1.0f);
-				DQN_ASSERT(blend.b >= 0 && blend.b <= 1.0f);
+					DQN_ASSERT(blend.a >= 0 && blend.a <= 1.0f);
+					DQN_ASSERT(blend.r >= 0 && blend.r <= 1.0f);
+					DQN_ASSERT(blend.g >= 0 && blend.g <= 1.0f);
+					DQN_ASSERT(blend.b >= 0 && blend.b <= 1.0f);
 
-				// TODO(doyle): Color modulation does not work!!! By supplying
-				// colors [0->1] it'll reduce some of the coverage of a channel
-				// and once alpha blending is applied that reduced coverage will
-				// blend with the background and cause the bitmap to go
-				// transparent when it shouldn't.
-				blend.a *= color.a;
-				blend.r *= color.r;
-				blend.g *= color.g;
-				blend.b *= color.b;
+					// TODO(doyle): Color modulation does not work!!! By supplying
+					// colors [0->1] it'll reduce some of the coverage of a channel
+					// and once alpha blending is applied that reduced coverage will
+					// blend with the background and cause the bitmap to go
+					// transparent when it shouldn't.
+					blend.a *= color.a;
+					blend.r *= color.r;
+					blend.g *= color.g;
+					blend.b *= color.b;
 
 #if 0
-				blend.a = DqnMath_Clampf(blend.a, 0.0f, 1.0f);
-				blend.r = DqnMath_Clampf(blend.r, 0.0f, 1.0f);
-				blend.g = DqnMath_Clampf(blend.g, 0.0f, 1.0f);
-				blend.b = DqnMath_Clampf(blend.b, 0.0f, 1.0f);
+					blend.a = DqnMath_Clampf(blend.a, 0.0f, 1.0f);
+					blend.r = DqnMath_Clampf(blend.r, 0.0f, 1.0f);
+					blend.g = DqnMath_Clampf(blend.g, 0.0f, 1.0f);
+					blend.b = DqnMath_Clampf(blend.b, 0.0f, 1.0f);
 #endif
 
-				SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+					SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+				}
 			}
 		}
 	}
