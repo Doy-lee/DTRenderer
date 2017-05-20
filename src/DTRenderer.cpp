@@ -11,6 +11,153 @@
 
 #include <math.h>
 
+typedef struct ModelFace
+{
+	i32  numVertex;
+	i32 *vertexIndex;
+	i32 *textureIndex;
+	i32 *normalIndex;
+} ModelFace;
+
+FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const memory,
+                                 const char *const path)
+{
+	if (!memory || ! path) return false;
+
+	PlatformFile file = {};
+	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
+		return false; // TODO(doyle): Logging
+
+	DqnTempBuffer tmpMemRegion = DqnMemBuffer_BeginTempRegion(&memory->transientBuffer);
+	u8 *rawBytes               = (u8 *)DqnMemBuffer_Allocate(&memory->transientBuffer, file.size);
+	size_t bytesRead           = api.FileRead(&file, rawBytes, file.size);
+	size_t fileSize            = file.size;
+	api.FileClose(&file);
+	if (bytesRead != file.size)
+	{
+		// TODO(doyle): Logging
+		DqnMemBuffer_EndTempRegion(tmpMemRegion);
+		return false;
+	}
+
+#if 0
+	DqnV3     *vertex;
+	ModelFace *face;
+#endif
+
+	enum WavefrontVertexType {
+		WavefrontVertexType_Invalid,
+		WavefrontVertexType_Geometric,
+		WavefrontVertexType_Texture,
+		WavefrontVertexType_Normal,
+	};
+
+	DqnArray<DqnV4> vGeometricArray = {};
+	DqnArray<DqnV3> vTextureArray   = {};
+	DqnArray<DqnV3> vNormalArray    = {};
+	DQN_ASSERT(DqnArray_Init(&vGeometricArray, 1000) && DqnArray_Init(&vTextureArray, 1000) &&
+	           DqnArray_Init(&vNormalArray, 1000));
+
+	for (char *scan = (char *)rawBytes; scan;)
+	{
+		switch (*scan)
+		{
+			// Vertex Format: v[ |t|n|p] f32 f32 f32 [f32]
+			case 'v':
+			{
+				scan++;
+				DQN_ASSERT(scan);
+
+				enum WavefrontVertexType type = WavefrontVertexType_Invalid;
+
+				if      (*scan == ' ') type = WavefrontVertexType_Geometric;
+				else if (*scan == 't' || *scan == 'n')
+				{
+					scan++;
+					if (*scan == 't') type = WavefrontVertexType_Texture;
+					else              type = WavefrontVertexType_Normal;
+				}
+				else                   DQN_ASSERT(DQN_INVALID_CODE_PATH);
+
+				i32 vIndex = 0;
+				DqnV4 v4   = {0, 0, 0, 1.0f};
+
+				// Progress to first non space character after vertex identifier
+				for (; scan && *scan == ' '; scan++)
+					if (!scan) DQN_ASSERT(DQN_INVALID_CODE_PATH);
+
+				for (;;)
+				{
+					char *f32StartPtr = scan;
+					for (; *scan != ' ' && *scan != '\n';)
+					{
+						DQN_ASSERT(DqnChar_IsDigit(*scan) || (*scan == '.') || (*scan == '-') ||
+						           *scan == 'e');
+						scan++;
+					}
+
+					i32 f32Len = (i32)((size_t)scan - (size_t)f32StartPtr);
+					v4.e[vIndex++] = Dqn_StrToF32(f32StartPtr, f32Len);
+					DQN_ASSERT(vIndex < DQN_ARRAY_COUNT(v4.e));
+
+					while (scan && (*scan == ' ' || *scan == '\n')) scan++;
+
+					if (!scan) break;
+					if (!(DqnChar_IsDigit(*scan) || *scan == '-')) break;
+				}
+
+				DQN_ASSERT(vIndex == 3 || vIndex == 4);
+				if (type == WavefrontVertexType_Geometric)
+				{
+					DqnArray_Push(&vGeometricArray, v4);
+				}
+				else if (type == WavefrontVertexType_Texture)
+				{
+					DqnArray_Push(&vTextureArray, v4.xyz);
+				}
+				else if (type == WavefrontVertexType_Normal)
+				{
+					DqnArray_Push(&vNormalArray, v4.xyz);
+				}
+				else
+				{
+					DQN_ASSERT(DQN_INVALID_CODE_PATH);
+				}
+			}
+			break;
+
+			// Face Format: i32/i32/i32 i32/i32/i32 i32/i32/i32
+			case 'f':
+			{
+			}
+			break;
+
+			// Comment
+			case '#':
+			{
+				// Skip comment line until new line
+				while (scan && *scan != '\n')
+					scan++;
+
+				// Skip new lines and any leading white spaces
+				while (scan && (*scan == '\n' || *scan == ' '))
+					scan++;
+			}
+			break;
+
+			default:
+			{
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+			break;
+		}
+	}
+
+	DqnMemBuffer_EndTempRegion(tmpMemRegion);
+
+	return true;
+}
+
 FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
                                  PlatformMemory *const memory,
                                  DTRFont *const font, const char *const path,
@@ -1031,6 +1178,78 @@ void CompAssignment(PlatformRenderBuffer *const renderBuffer, PlatformInput *con
 	}
 }
 
+FILE_SCOPE void TestStrToF32Converter()
+{
+	const f32 EPSILON = 0.001f;
+	const char a[]    = "-0.66248";
+	f32 vA            = Dqn_StrToF32(a, DQN_ARRAY_COUNT(a));
+	DQN_ASSERT(DQN_ABS(vA) - DQN_ABS(-0.66248f) < EPSILON);
+
+	const char b[] = "-0.632053";
+	f32 vB         = Dqn_StrToF32(b, DQN_ARRAY_COUNT(b));
+	DQN_ASSERT(DQN_ABS(vB) - DQN_ABS(-0.632053f) < EPSILON);
+
+	const char c[] = "-0.244271";
+	f32 vC         = Dqn_StrToF32(c, DQN_ARRAY_COUNT(c));
+	DQN_ASSERT(DQN_ABS(vC) - DQN_ABS(-0.244271f) < EPSILON);
+
+	const char d[] = "-0.511812";
+	f32 vD         = Dqn_StrToF32(d, DQN_ARRAY_COUNT(d));
+	DQN_ASSERT(DQN_ABS(vD) - DQN_ABS(-0.511812f) < EPSILON);
+
+	const char e[] = "-0.845392";
+	f32 vE         = Dqn_StrToF32(e, DQN_ARRAY_COUNT(e));
+	DQN_ASSERT(DQN_ABS(vE) - DQN_ABS(-0.845392f) < EPSILON);
+
+	const char f[] = "0.127809";
+	f32 vF         = Dqn_StrToF32(f, DQN_ARRAY_COUNT(f));
+	DQN_ASSERT(DQN_ABS(vF) - DQN_ABS(-0.127809f) < EPSILON);
+
+	const char g[] = "0.532";
+	f32 vG         = Dqn_StrToF32(g, DQN_ARRAY_COUNT(g));
+	DQN_ASSERT(DQN_ABS(vG) - DQN_ABS(-0.532f) < EPSILON);
+
+	const char h[] = "0.923";
+	f32 vH         = Dqn_StrToF32(h, DQN_ARRAY_COUNT(h));
+	DQN_ASSERT(DQN_ABS(vH) - DQN_ABS(-0.923f) < EPSILON);
+
+	const char i[] = "0.000";
+	f32 vI         = Dqn_StrToF32(i, DQN_ARRAY_COUNT(i));
+	DQN_ASSERT(DQN_ABS(vI) - DQN_ABS(-0.000f) < EPSILON);
+
+	const char j[] = "0.000283538";
+	f32 vJ         = Dqn_StrToF32(j, DQN_ARRAY_COUNT(j));
+	DQN_ASSERT(DQN_ABS(vJ) - DQN_ABS(-0.000283538f) < EPSILON);
+
+	const char k[] = "-1.25";
+	f32 vK         = Dqn_StrToF32(k, DQN_ARRAY_COUNT(k));
+	DQN_ASSERT(DQN_ABS(vK) - DQN_ABS(-1.25f) < EPSILON);
+
+	const char l[] = "0.286843";
+	f32 vL         = Dqn_StrToF32(l, DQN_ARRAY_COUNT(l));
+	DQN_ASSERT(DQN_ABS(vL) - DQN_ABS(-0.286843f) < EPSILON);
+
+	const char m[] = "-0.406";
+	f32 vM         = Dqn_StrToF32(m, DQN_ARRAY_COUNT(m));
+	DQN_ASSERT(DQN_ABS(vM) - DQN_ABS(-0.406f) < EPSILON);
+
+	const char n[] = "-0.892";
+	f32 vN         = Dqn_StrToF32(n, DQN_ARRAY_COUNT(n));
+	DQN_ASSERT(DQN_ABS(vN) - DQN_ABS(-0.892f) < EPSILON);
+
+	const char o[] = "0.201";
+	f32 vO         = Dqn_StrToF32(o, DQN_ARRAY_COUNT(o));
+	DQN_ASSERT(DQN_ABS(vO) - DQN_ABS(-0.201f) < EPSILON);
+
+	const char p[] = "1.25";
+	f32 vP         = Dqn_StrToF32(p, DQN_ARRAY_COUNT(p));
+	DQN_ASSERT(DQN_ABS(vP) - DQN_ABS(1.25f) < EPSILON);
+
+	const char q[] = "9.64635e-05";
+	f32 vQ         = Dqn_StrToF32(q, DQN_ARRAY_COUNT(q));
+	DQN_ASSERT(DQN_ABS(vQ) - DQN_ABS(9.64635e-05) < EPSILON);
+}
+
 extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
                            PlatformInput *const input,
                            PlatformMemory *const memory)
@@ -1045,6 +1264,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DTR_DEBUG_TIMED_FUNCTION();
 	if (!memory->isInit)
 	{
+		TestStrToF32Converter();
 		DTR_DEBUG_TIMED_BLOCK("DTR_Update Memory Initialisation");
 		// NOTE(doyle): Do premultiply ourselves
 		stbi_set_unpremultiply_on_load(true);
@@ -1067,8 +1287,9 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 		           &memory->transientBuffer);
 		int x = 5;
 		DqnMemBuffer_EndTempRegion(tmp);
-	}
 
+		ObjWavefrontLoad(input->api, memory, "african_head.obj");
+	}
 	DTRRender_Clear(renderBuffer, DqnV3_3f(0, 0, 0));
 
 #if 1

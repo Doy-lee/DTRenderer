@@ -28,9 +28,9 @@ typedef uint32_t u32;
 typedef uint16_t u16;
 typedef uint8_t  u8;
 
-typedef int32_t i64;
+typedef int64_t i64;
 typedef int32_t i32;
-typedef int64_t i16;
+typedef int16_t i16;
 
 typedef double f64;
 typedef float  f32;
@@ -419,8 +419,8 @@ bool DqnArray_RemoveStable(DqnArray<T> *array, u64 index)
 ////////////////////////////////////////////////////////////////////////////////
 // Math
 ////////////////////////////////////////////////////////////////////////////////
-DQN_FILE_SCOPE f32 DqnMath_Lerp(f32 a, f32 t, f32 b);
-DQN_FILE_SCOPE f32 DqnMath_Sqrtf(f32 a);
+DQN_FILE_SCOPE f32 DqnMath_Lerp  (f32 a, f32 t, f32 b);
+DQN_FILE_SCOPE f32 DqnMath_Sqrtf (f32 a);
 DQN_FILE_SCOPE f32 DqnMath_Clampf(f32 val, f32 min, f32 max);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -535,11 +535,14 @@ DQN_FILE_SCOPE inline bool   operator==(DqnV3  a, DqnV3 b) { return      DqnV3_E
 ////////////////////////////////////////////////////////////////////////////////
 // Vec4
 ////////////////////////////////////////////////////////////////////////////////
-typedef union DqnV4
-{
+typedef union DqnV4 {
 	struct { f32 x, y, z, w; };
+	DqnV3 xyz;
+
 	struct { f32 r, g, b, a; };
-	f32 e[4];
+	DqnV3 rgb;
+
+	f32    e[4];
 	DqnV2 v2[2];
 } DqnV4;
 
@@ -626,11 +629,15 @@ DQN_FILE_SCOPE i32  Dqn_StrFindFirstOccurence(const char *const src, const i32 s
 DQN_FILE_SCOPE bool Dqn_StrHasSubstring      (const char *const src, const i32 srcLen, const char *const find, const i32 findLen);
 
 #define DQN_32BIT_NUM_MAX_STR_SIZE 11
-#define DQN_64BIT_NUM_MAX_STR_SIZE 20
+#define DQN_64BIT_NUM_MAX_STR_SIZE 21
 // Return the len of the derived string. If buf is NULL and or bufSize is 0 the
 // function returns the required string length for the integer.
 DQN_FILE_SCOPE i32   Dqn_I64ToStr(i64 value, char *const buf, const i32 bufSize);
+
 DQN_FILE_SCOPE i64   Dqn_StrToI64(const char *const buf, const i32 bufSize);
+
+// WARNING: Not robust, precision errors and whatnot but good enough!
+DQN_FILE_SCOPE f32   Dqn_StrToF32(const char *const buf, const i32 bufSize);
 
 // Both return the number of bytes read, return 0 if invalid codepoint or UTF8
 DQN_FILE_SCOPE u32 Dqn_UCSToUTF8(u32 *dest, u32 character);
@@ -2535,7 +2542,6 @@ DQN_FILE_SCOPE i32 Dqn_I64ToStr(i64 value, char *const buf, const i32 bufSize)
 		return 1;
 	}
 	
-	// NOTE(doyle): Max 32bit integer (+-)2147483647
 	i32 charIndex = 0;
 	bool negative           = false;
 	if (value < 0) negative = true;
@@ -2546,12 +2552,30 @@ DQN_FILE_SCOPE i32 Dqn_I64ToStr(i64 value, char *const buf, const i32 bufSize)
 		charIndex++;
 	}
 
-	i32 val = DQN_ABS(value);
+	bool lastDigitDecremented = false;
+	i64 val = DQN_ABS(value);
+	if (val < 0)
+	{
+		// TODO(doyle): This will occur if we are checking the smallest number
+		// possible in i64 since the range of negative numbers is one more than
+		// it is for positives, so ABS will fail.
+		lastDigitDecremented = true;
+		val                  = DQN_ABS(val - 1);
+		DQN_ASSERT(val >= 0);
+	}
+
 	if (validBuffer)
 	{
+		if (lastDigitDecremented)
+		{
+			i64 rem = (val % 10) + 1;
+			buf[charIndex++] = (u8)rem + '0';
+			val /= 10;
+		}
+
 		while (val != 0 && charIndex < bufSize)
 		{
-			i32 rem        = val % 10;
+			i64 rem          = val % 10;
 			buf[charIndex++] = (u8)rem + '0';
 			val /= 10;
 		}
@@ -2611,6 +2635,92 @@ DQN_FILE_SCOPE i64 Dqn_StrToI64(const char *const buf, const i32 bufSize)
 		}
 	}
 
+	if (isNegative) result *= -1;
+
+	return result;
+}
+
+DQN_FILE_SCOPE f32 Dqn_StrToF32(const char *const buf, const i32 bufSize)
+{
+	if (!buf || bufSize == 0) return 0;
+
+	i32 index       = 0;
+	bool isNegative = false;
+	if (buf[index] == '-')
+	{
+		index++;
+		isNegative = true;
+	}
+
+	bool isPastDecimal        = false;
+	i32 numDigitsAfterDecimal = 0;
+	i32 rawNumber             = 0;
+
+	f32 digitShiftValue      = 1.0f;
+	f32 digitShiftMultiplier = 0.1f;
+	for (i32 i = index; i < bufSize; i++)
+	{
+		char ch = buf[i];
+		if (ch == '.')
+		{
+			isPastDecimal = true;
+			continue;
+		}
+		// Handle scientific notation
+		else if (ch == 'e')
+		{
+			bool digitShiftIsPositive = true;
+			if (i < bufSize)
+			{
+				if (buf[i + 1] == '-') digitShiftIsPositive = false;
+				DQN_ASSERT(buf[i + 1] == '-' || buf[i + 1] == '+');
+				i += 2;
+			}
+
+			i32 exponentPow         = 0;
+			bool scientificNotation = false;
+			while (i < bufSize)
+			{
+				scientificNotation = true;
+				char exponentCh    = buf[i];
+				if (DqnChar_IsDigit(exponentCh))
+				{
+					exponentPow *= 10;
+					exponentPow += (buf[i] - '0');
+				}
+				else
+				{
+					i = bufSize;
+				}
+
+				i++;
+			}
+
+			// NOTE(doyle): If exponent not specified but this branch occurred,
+			// the float string has a malformed scientific notation in the
+			// string, i.e. "e" followed by no number.
+			DQN_ASSERT(scientificNotation);
+
+			numDigitsAfterDecimal += exponentPow;
+			if (digitShiftIsPositive) digitShiftMultiplier = 10.0f;
+		}
+		else if (DqnChar_IsDigit(ch))
+		{
+			numDigitsAfterDecimal += (i32)isPastDecimal;
+			rawNumber *= 10;
+			rawNumber += (ch - '0');
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	for (i32 i = 0; i < numDigitsAfterDecimal; i++)
+		digitShiftValue *= digitShiftMultiplier;
+
+	f32 result = (f32)rawNumber;
+	if (numDigitsAfterDecimal > 0) result *= digitShiftValue;
 	if (isNegative) result *= -1;
 
 	return result;
