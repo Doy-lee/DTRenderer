@@ -71,9 +71,9 @@ FILE_SCOPE bool ObjWaveFrontInit(WavefrontObj *const obj, const i32 vertexInitCa
 }
 
 FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const memory,
-                                 const char *const path)
+                                 const char *const path, WavefrontObj *const obj)
 {
-	if (!memory || ! path) return false;
+	if (!memory || !path || !obj) return false;
 
 	PlatformFile file = {};
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
@@ -98,8 +98,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 		WavefrontVertexType_Normal,
 	};
 
-	WavefrontObj obj = {};
-	if (!ObjWaveFrontInit(&obj))
+	if (!ObjWaveFrontInit(obj))
 	{
 		DqnMemStack_EndTempRegion(tmpMemRegion);
 		return false;
@@ -160,15 +159,15 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 				DQN_ASSERT(vIndex == 3 || vIndex == 4);
 				if (type == WavefrontVertexType_Geometric)
 				{
-					DqnArray_Push(&obj.geometryArray, v4);
+					DqnArray_Push(&obj->geometryArray, v4);
 				}
 				else if (type == WavefrontVertexType_Texture)
 				{
-					DqnArray_Push(&obj.texUVArray, v4.xyz);
+					DqnArray_Push(&obj->texUVArray, v4.xyz);
 				}
 				else if (type == WavefrontVertexType_Normal)
 				{
-					DqnArray_Push(&obj.normalArray, v4.xyz);
+					DqnArray_Push(&obj->normalArray, v4.xyz);
 				}
 				else
 				{
@@ -239,7 +238,9 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 						i32 numLen = (i32)((size_t)scan - (size_t)numStartPtr);
 						if (numLen > 0)
 						{
-							i32 index = (i32)Dqn_StrToI64(numStartPtr, numLen);
+							// NOTE(doyle): Obj format starts indexing from 1,
+							// so offset by -1 to make it zero-based indexes.
+							i32 index = (i32)Dqn_StrToI64(numStartPtr, numLen) - 1;
 
 							if (type == WavefrontVertexType_Geometric)
 							{
@@ -274,13 +275,13 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 						}
 					}
 
-					if (obj.model.faces.count == 7470 || obj.model.faces.count == 2491)
+					if (obj->model.faces.count == 7470 || obj->model.faces.count == 2491)
 					{
 						int x = 5;
 					}
 				}
 				DQN_ASSERT(numVertexesParsed >= 3);
-				DQN_ASSERT(DqnArray_Push(&obj.model.faces, face));
+				DQN_ASSERT(DqnArray_Push(&obj->model.faces, face));
 			}
 			break;
 
@@ -307,14 +308,14 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 				if (scan)
 				{
 					i32 nameLen = (i32)((size_t)scan - (size_t)namePtr);
-					DQN_ASSERT(obj.model.groupNameIndex + 1 < DQN_ARRAY_COUNT(obj.model.groupName));
+					DQN_ASSERT(obj->model.groupNameIndex + 1 < DQN_ARRAY_COUNT(obj->model.groupName));
 
-					DQN_ASSERT(!obj.model.groupName[obj.model.groupNameIndex]);
-					obj.model.groupName[obj.model.groupNameIndex++] = (char *)DqnMemStack_Allocate(
+					DQN_ASSERT(!obj->model.groupName[obj->model.groupNameIndex]);
+					obj->model.groupName[obj->model.groupNameIndex++] = (char *)DqnMemStack_Allocate(
 					    &memory->permMemStack, (nameLen + 1) * sizeof(char));
 
 					for (i32 i = 0; i < nameLen; i++)
-						obj.model.groupName[obj.model.groupNameIndex - 1][i] = namePtr[i];
+						obj->model.groupName[obj->model.groupNameIndex - 1][i] = namePtr[i];
 
 					while (scan && (*scan == ' ' || *scan == '\n'))
 						scan++;
@@ -342,7 +343,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 
 					i32 numLen               = (i32)((size_t)scan - (size_t)numStartPtr);
 					i32 groupSmoothing       = (i32)Dqn_StrToI64(numStartPtr, numLen);
-					obj.model.groupSmoothing = groupSmoothing;
+					obj->model.groupSmoothing = groupSmoothing;
 				}
 
 				while (scan && *scan == ' ' || *scan == '\n') scan++;
@@ -1479,6 +1480,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	}
 
 	DTR_DEBUG_TIMED_FUNCTION();
+	LOCAL_PERSIST WavefrontObj waveObj = {};
 	if (!memory->isInit)
 	{
 		TestStrToF32Converter();
@@ -1505,10 +1507,70 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 		int x = 5;
 		DqnMemStack_EndTempRegion(tmp);
 
-		ObjWavefrontLoad(input->api, memory, "african_head.obj");
+#if 0
+		DQN_ASSERT(ObjWavefrontLoad(input->api, memory, "african_head.obj", &waveObj));
+#endif
 	}
 	DTRRender_Clear(renderBuffer, DqnV3_3f(0, 0, 0));
 
+#if 1
+	DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
+	for (i32 i = 0; i < waveObj.model.faces.count; i++)
+	{
+		WavefrontModelFace face = waveObj.model.faces.data[i];
+		DQN_ASSERT(face.vertexArray.count == 3);
+
+#if 0
+		i32 vertAIndex = face.vertexArray.data[0];
+		i32 vertBIndex = face.vertexArray.data[1];
+		i32 vertCIndex = face.vertexArray.data[2];
+
+		DqnV4 vertA = waveObj.geometryArray.data[vertAIndex];
+		DqnV4 vertB = waveObj.geometryArray.data[vertBIndex];
+		DqnV4 vertC = waveObj.geometryArray.data[vertCIndex];
+
+		vertA.x *= (renderBuffer->width * 0.5f);
+		vertA.y *= (renderBuffer->height * 0.5f);
+
+		vertB.x *= (renderBuffer->width * 0.5f);
+		vertB.y *= (renderBuffer->height * 0.5f);
+
+		vertC.x *= (renderBuffer->width * 0.5f);
+		vertC.y *= (renderBuffer->height * 0.5f);
+
+		vertA.x += (renderBuffer->width * 0.5f);
+		vertA.y += (renderBuffer->height * 0.5f);
+
+		vertB.x += (renderBuffer->width * 0.5f);
+		vertB.y += (renderBuffer->height * 0.5f);
+
+		vertC.x += (renderBuffer->width * 0.5f);
+		vertC.y += (renderBuffer->height * 0.5f);
+
+		DTRRender_Triangle(renderBuffer, vertA.xy, vertB.xy, vertC.xy, modelCol);
+#else
+		const i32 NUM_VERTEXES = 3;
+		for (i32 j = 0; j < NUM_VERTEXES; j++)
+		{
+			i32 vertAIndex = face.vertexArray.data[j];
+			i32 vertBIndex = face.vertexArray.data[(j + 1) % NUM_VERTEXES];
+
+			DqnV4 vertA = waveObj.geometryArray.data[vertAIndex];
+			DqnV4 vertB = waveObj.geometryArray.data[vertBIndex];
+
+			vertA.x = (vertA.x * (renderBuffer->width * 0.5f)) + renderBuffer->width * 0.5f;
+			vertA.y = (vertA.y * (renderBuffer->height * 0.5f)) + renderBuffer->height * 0.5f;
+
+			vertB.x = (vertB.x * (renderBuffer->width * 0.5f)) + renderBuffer->width * 0.5f;
+			vertB.y = (vertB.y * (renderBuffer->height * 0.5f)) + renderBuffer->height * 0.5f;
+
+			DTRRender_Line(renderBuffer, DqnV2i_V2(vertA.xy), DqnV2i_V2(vertB.xy), modelCol);
+		}
+#endif
+	}
+#endif
+
+#if 0
 #if 1
 	DqnV4 colorRed = DqnV4_4f(0.8f, 0, 0, 1);
 	DqnV2i bufferMidP =
@@ -1563,6 +1625,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 
 #else
 	CompAssignment(renderBuffer, input, memory);
+#endif
 #endif
 	DTRDebug_Update(state, renderBuffer, input, memory);
 }

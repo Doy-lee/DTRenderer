@@ -4,7 +4,7 @@
 #include "dqn.h"
 #define DTR_DEBUG 1
 #ifdef DTR_DEBUG
-	#define DTR_DEBUG_RENDER             1
+	#define DTR_DEBUG_RENDER             0
 
 	#define DTR_DEBUG_PROFILING          1
 	#ifdef DTR_DEBUG_PROFILING
