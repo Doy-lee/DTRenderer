@@ -110,8 +110,8 @@ typedef struct PlatformInput
 
 typedef struct PlatformMemory
 {
-	DqnMemBuffer permanentBuffer;
-	DqnMemBuffer transientBuffer;
+	DqnMemStack permMemStack;
+	DqnMemStack transMemStack;
 	bool  isInit;
 	void *context;
 } PlatformMemory;

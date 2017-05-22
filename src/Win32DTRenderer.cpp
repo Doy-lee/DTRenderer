@@ -257,21 +257,21 @@ FILE_SCOPE void Win32HandleMenuMessages(HWND window, MSG msg,
 
 		case Win32Menu_FileFlushMemory:
 		{
-			DqnMemBuffer permBuffer  = globalPlatformMemory.permanentBuffer;
-			DqnMemBuffer transBuffer = globalPlatformMemory.transientBuffer;
-			while (permBuffer.block->prevBlock)
-				DqnMemBuffer_FreeLastBlock(&permBuffer);
+			DqnMemStack permMemStack  = globalPlatformMemory.permMemStack;
+			DqnMemStack transMemStack = globalPlatformMemory.transMemStack;
+			while (permMemStack.block->prevBlock)
+				DqnMemStack_FreeLastBlock(&permMemStack);
 
-			while (transBuffer.block->prevBlock)
-				DqnMemBuffer_FreeLastBlock(&transBuffer);
+			while (transMemStack.block->prevBlock)
+				DqnMemStack_FreeLastBlock(&transMemStack);
 
-			DqnMemBuffer_ClearCurrBlock(&transBuffer, true);
-			DqnMemBuffer_ClearCurrBlock(&permBuffer, true);
+			DqnMemStack_ClearCurrBlock(&transMemStack, true);
+			DqnMemStack_ClearCurrBlock(&permMemStack, true);
 
-			PlatformMemory empty                 = {};
-			globalPlatformMemory                 = empty;
-			globalPlatformMemory.permanentBuffer = permBuffer;
-			globalPlatformMemory.transientBuffer = transBuffer;
+			PlatformMemory empty               = {};
+			globalPlatformMemory               = empty;
+			globalPlatformMemory.permMemStack  = permMemStack;
+			globalPlatformMemory.transMemStack = transMemStack;
 		}
 		break;
 
@@ -502,8 +502,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	////////////////////////////////////////////////////////////////////////////
 	// Platform Data Pre-amble
 	////////////////////////////////////////////////////////////////////////////
-	DQN_ASSERT(DqnMemBuffer_Init(&globalPlatformMemory.permanentBuffer, DQN_MEGABYTE(1), true, 4) &&
-	           DqnMemBuffer_Init(&globalPlatformMemory.transientBuffer, DQN_MEGABYTE(1), true, 4));
+	DQN_ASSERT(DqnMemStack_Init(&globalPlatformMemory.permMemStack, DQN_MEGABYTE(1), true, 4) &&
+	           DqnMemStack_Init(&globalPlatformMemory.transMemStack, DQN_MEGABYTE(1), true, 4));
 
 	PlatformAPI platformAPI = {};
 	platformAPI.FileOpen    = Platform_FileOpen;

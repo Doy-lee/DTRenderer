@@ -28,19 +28,19 @@ void DTRDebug_PushText(const char *const formatStr, ...)
 	}
 }
 
-FILE_SCOPE void PushMemBufferText(const char *const name,
-                                  const DqnMemBuffer *const buffer)
+FILE_SCOPE void PushMemStackText(const char *const name,
+                                  const DqnMemStack *const stack)
 {
 	if (DTR_DEBUG)
 	{
-		if (!buffer) return;
+		if (!stack) return;
 
 		size_t totalUsed   = 0;
 		size_t totalSize   = 0;
 		size_t totalWasted = 0;
 		i32 numBlocks      = 0;
 
-		DqnMemBufferBlock *blockPtr = buffer->block;
+		DqnMemStackBlock *blockPtr = stack->block;
 		while (blockPtr)
 		{
 			totalUsed += blockPtr->used;
@@ -88,8 +88,8 @@ void DTRDebug_Update(DTRState *const state,
 
 		// memory
 		{
-			PushMemBufferText("PermBuffer", &memory->permanentBuffer);
-			PushMemBufferText("TransBuffer", &memory->transientBuffer);
+			PushMemStackText("PermBuffer", &memory->permMemStack);
+			PushMemStackText("TransBuffer", &memory->transMemStack);
 		}
 
 		DTRDebug_PushText("SSE2Support: %s", (input->canUseSSE2) ? "true" : "false");

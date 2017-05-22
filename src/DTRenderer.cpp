@@ -79,15 +79,15 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
 		return false; // TODO(doyle): Logging
 
-	DqnTempBuffer tmpMemRegion = DqnMemBuffer_BeginTempRegion(&memory->transientBuffer);
-	u8 *rawBytes               = (u8 *)DqnMemBuffer_Allocate(&memory->transientBuffer, file.size);
+	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
+	u8 *rawBytes               = (u8 *)DqnMemStack_Allocate(&memory->transMemStack, file.size);
 	size_t bytesRead           = api.FileRead(&file, rawBytes, file.size);
 	size_t fileSize            = file.size;
 	api.FileClose(&file);
 	if (bytesRead != file.size)
 	{
 		// TODO(doyle): Logging
-		DqnMemBuffer_EndTempRegion(tmpMemRegion);
+		DqnMemStack_EndTempRegion(tmpMemRegion);
 		return false;
 	}
 
@@ -101,7 +101,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 	WavefrontObj obj = {};
 	if (!ObjWaveFrontInit(&obj))
 	{
-		DqnMemBuffer_EndTempRegion(tmpMemRegion);
+		DqnMemStack_EndTempRegion(tmpMemRegion);
 		return false;
 	}
 
@@ -310,8 +310,8 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 					DQN_ASSERT(obj.model.groupNameIndex + 1 < DQN_ARRAY_COUNT(obj.model.groupName));
 
 					DQN_ASSERT(!obj.model.groupName[obj.model.groupNameIndex]);
-					obj.model.groupName[obj.model.groupNameIndex++] = (char *)DqnMemBuffer_Allocate(
-					    &memory->permanentBuffer, (nameLen + 1) * sizeof(char));
+					obj.model.groupName[obj.model.groupNameIndex++] = (char *)DqnMemStack_Allocate(
+					    &memory->permMemStack, (nameLen + 1) * sizeof(char));
 
 					for (i32 i = 0; i < nameLen; i++)
 						obj.model.groupName[obj.model.groupNameIndex - 1][i] = namePtr[i];
@@ -370,7 +370,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 		}
 	}
 
-	DqnMemBuffer_EndTempRegion(tmpMemRegion);
+	DqnMemStack_EndTempRegion(tmpMemRegion);
 
 	return true;
 }
@@ -396,14 +396,14 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
 		return false; // TODO(doyle): Logging
 
-	DqnTempBuffer tmpMemRegion = DqnMemBuffer_BeginTempRegion(&memory->transientBuffer);
-	u8 *fontBuf                = (u8 *)DqnMemBuffer_Allocate(&memory->transientBuffer, file.size);
+	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
+	u8 *fontBuf                = (u8 *)DqnMemStack_Allocate(&memory->transMemStack, file.size);
 	size_t bytesRead           = api.FileRead(&file, fontBuf, file.size);
 	api.FileClose(&file);
 	if (bytesRead != file.size)
 	{
 		// TODO(doyle): Logging
-		DqnMemBuffer_EndTempRegion(tmpMemRegion);
+		DqnMemStack_EndTempRegion(tmpMemRegion);
 		return false;
 	}
 
@@ -418,8 +418,8 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 	////////////////////////////////////////////////////////////////////////////
 	// Pack font data to bitmap
 	////////////////////////////////////////////////////////////////////////////
-	loadedFont.bitmap = (u8 *)DqnMemBuffer_Allocate(
-	    &memory->permanentBuffer,
+	loadedFont.bitmap = (u8 *)DqnMemStack_Allocate(
+	    &memory->permMemStack,
 	    (size_t)(loadedFont.bitmapDim.w * loadedFont.bitmapDim.h));
 
 	stbtt_pack_context fontPackContext = {};
@@ -431,18 +431,18 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 		i32 numCodepoints =
 		    (i32)((codepointRange.max + 1) - codepointRange.min);
 
-		loadedFont.atlas = (stbtt_packedchar *)DqnMemBuffer_Allocate(
-		    &memory->permanentBuffer, numCodepoints * sizeof(stbtt_packedchar));
+		loadedFont.atlas = (stbtt_packedchar *)DqnMemStack_Allocate(
+		    &memory->permMemStack, numCodepoints * sizeof(stbtt_packedchar));
 		stbtt_PackFontRange(&fontPackContext, fontBuf, 0,
 		                    STBTT_POINT_SIZE(sizeInPt), (i32)codepointRange.min,
 		                    numCodepoints, loadedFont.atlas);
 		stbtt_PackEnd(&fontPackContext);
-		DqnMemBuffer_EndTempRegion(tmpMemRegion);
+		DqnMemStack_EndTempRegion(tmpMemRegion);
 	}
 	else
 	{
 		DQN_ASSERT(DQN_INVALID_CODE_PATH);
-		DqnMemBuffer_EndTempRegion(tmpMemRegion);
+		DqnMemStack_EndTempRegion(tmpMemRegion);
 		return false;
 	}
 
@@ -478,7 +478,7 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 
 FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
                            const char *const path,
-                           DqnMemBuffer *const transientBuffer)
+                           DqnMemStack *const transMemStack)
 {
 	if (!bitmap) return false;
 
@@ -486,23 +486,23 @@ FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
 		return false;
 
-	DqnTempBuffer tempBuffer = DqnMemBuffer_BeginTempRegion(transientBuffer);
+	DqnTempMemStack tempBuffer = DqnMemStack_BeginTempRegion(transMemStack);
 	{
 		u8 *const rawData =
-		    (u8 *)DqnMemBuffer_Allocate(transientBuffer, file.size);
+		    (u8 *)DqnMemStack_Allocate(transMemStack, file.size);
 		size_t bytesRead = api.FileRead(&file, rawData, file.size);
 		api.FileClose(&file);
 
 		if (bytesRead != file.size)
 		{
-			DqnMemBuffer_EndTempRegion(tempBuffer);
+			DqnMemStack_EndTempRegion(tempBuffer);
 			return false;
 		}
 
 		bitmap->memory = stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w,
 		                                       &bitmap->dim.h, &bitmap->bytesPerPixel, 4);
 	}
-	DqnMemBuffer_EndTempRegion(tempBuffer);
+	DqnMemStack_EndTempRegion(tempBuffer);
 	if (!bitmap->memory) return false;
 
 	const i32 pitch = bitmap->dim.w * bitmap->bytesPerPixel;
@@ -1489,21 +1489,21 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 
 		memory->isInit = true;
 		memory->context =
-		    DqnMemBuffer_Allocate(&memory->permanentBuffer, sizeof(DTRState));
+		    DqnMemStack_Allocate(&memory->permMemStack, sizeof(DTRState));
 		DQN_ASSERT(memory->context);
 
 		state = (DTRState *)memory->context;
 		BitmapFontCreate(input->api, memory, &state->font, "Roboto-bold.ttf",
 		                 DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 12);
 		BitmapLoad(input->api, &state->bitmap, "tree00.bmp",
-		           &memory->transientBuffer);
+		           &memory->transMemStack);
 
 		DTRBitmap test = {};
-		DqnTempBuffer tmp = DqnMemBuffer_BeginTempRegion(&memory->permanentBuffer);
+		DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->permMemStack);
 		BitmapLoad(input->api, &test, "byte_read_check.bmp",
-		           &memory->transientBuffer);
+		           &memory->transMemStack);
 		int x = 5;
-		DqnMemBuffer_EndTempRegion(tmp);
+		DqnMemStack_EndTempRegion(tmp);
 
 		ObjWavefrontLoad(input->api, memory, "african_head.obj");
 	}
