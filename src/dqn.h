@@ -507,8 +507,15 @@ typedef union DqnV3
 	f32 e[3];
 } DqnV3;
 
-// Create a vector using ints and typecast to floats
-DQN_FILE_SCOPE DqnV3 DqnV3_3i(i32 x, i32 y, i32 z);
+typedef union DqnV3i
+{
+	struct { i32 x, y, z; };
+    struct { i32 r, g, b; };
+	i32 e[3];
+} DqnV3i;
+
+// DqnV3
+DQN_FILE_SCOPE DqnV3 DqnV3_3i(i32 x, i32 y, i32 z); // Create a vector using ints and typecast to floats
 DQN_FILE_SCOPE DqnV3 DqnV3_3f(f32 x, f32 y, f32 z);
 
 DQN_FILE_SCOPE DqnV3 DqnV3_Add     (DqnV3 a, DqnV3 b);
@@ -531,6 +538,10 @@ DQN_FILE_SCOPE inline DqnV3 &operator*=(DqnV3 &a, i32   b) { return (a = DqnV3_S
 DQN_FILE_SCOPE inline DqnV3 &operator-=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Sub     (a, b)); }
 DQN_FILE_SCOPE inline DqnV3 &operator+=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Add     (a, b)); }
 DQN_FILE_SCOPE inline bool   operator==(DqnV3  a, DqnV3 b) { return      DqnV3_Equals  (a, b);  }
+
+// DqnV3i
+DQN_FILE_SCOPE DqnV3i DqnV3i_3i(i32 x, i32 y, i32 z);
+DQN_FILE_SCOPE DqnV3i DqnV3i_3f(f32 x, f32 y, f32 z);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Vec4
@@ -2093,6 +2104,18 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Cross(DqnV3 a, DqnV3 b)
 	result.e[0] = (a.e[1] * b.e[2]) - (a.e[2] * b.e[1]);
 	result.e[1] = (a.e[2] * b.e[0]) - (a.e[0] * b.e[2]);
 	result.e[2] = (a.e[0] * b.e[1]) - (a.e[1] * b.e[0]);
+	return result;
+}
+
+DQN_FILE_SCOPE DqnV3i DqnV3i_3i(i32 x, i32 y, i32 z)
+{
+	DqnV3i result = {x, y, z};
+	return result;
+}
+
+DQN_FILE_SCOPE DqnV3i DqnV3i_3f(f32 x, f32 y, f32 z)
+{
+	DqnV3i result = {(i32)x, (i32)y, (i32)z};
 	return result;
 }
 

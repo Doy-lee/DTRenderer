@@ -11,13 +11,64 @@
 
 #include <math.h>
 
-typedef struct ModelFace
+typedef struct WavefrontModelFace
 {
-	i32  numVertex;
-	i32 *vertexIndex;
-	i32 *textureIndex;
-	i32 *normalIndex;
-} ModelFace;
+	DqnArray<i32> vertexArray;
+	DqnArray<i32> textureArray;
+	DqnArray<i32> normalArray;
+} WavefrontModelFace;
+
+FILE_SCOPE inline WavefrontModelFace ObjWavefrontModelFaceInit(i32 capacity = 3)
+{
+	WavefrontModelFace result = {};
+	DQN_ASSERT(DqnArray_Init(&result.vertexArray,  capacity));
+	DQN_ASSERT(DqnArray_Init(&result.textureArray, capacity));
+	DQN_ASSERT(DqnArray_Init(&result.normalArray,  capacity));
+
+	return result;
+}
+
+typedef struct WavefrontModel
+{
+	// TODO(doyle): Fixed size
+	char *groupName[16];
+	i32 groupNameIndex;
+	i32 groupSmoothing;
+
+	DqnArray<WavefrontModelFace> faces;
+} WavefrontModel;
+
+typedef struct WavefrontObj
+{
+	DqnArray<DqnV4> geometryArray;
+	DqnArray<DqnV3> texUVArray;
+	DqnArray<DqnV3> normalArray;
+
+	WavefrontModel model;
+} WavefrontObj;
+
+FILE_SCOPE bool ObjWaveFrontInit(WavefrontObj *const obj, const i32 vertexInitCapacity = 1000,
+                                 const i32 faceInitCapacity = 200)
+{
+	if (!obj) return false;
+
+	bool initialised = false;
+
+	initialised |= DqnArray_Init(&obj->geometryArray, vertexInitCapacity);
+	initialised |= DqnArray_Init(&obj->texUVArray,    vertexInitCapacity);
+	initialised |= DqnArray_Init(&obj->normalArray,   vertexInitCapacity);
+	initialised |= DqnArray_Init(&obj->model.faces,   faceInitCapacity);
+
+	if (!initialised)
+	{
+		DqnArray_Free(&obj->geometryArray);
+		DqnArray_Free(&obj->texUVArray);
+		DqnArray_Free(&obj->normalArray);
+		DqnArray_Free(&obj->model.faces);
+	}
+
+	return initialised;
+}
 
 FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const memory,
                                  const char *const path)
@@ -40,11 +91,6 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 		return false;
 	}
 
-#if 0
-	DqnV3     *vertex;
-	ModelFace *face;
-#endif
-
 	enum WavefrontVertexType {
 		WavefrontVertexType_Invalid,
 		WavefrontVertexType_Geometric,
@@ -52,17 +98,21 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 		WavefrontVertexType_Normal,
 	};
 
-	DqnArray<DqnV4> vGeometricArray = {};
-	DqnArray<DqnV3> vTextureArray   = {};
-	DqnArray<DqnV3> vNormalArray    = {};
-	DQN_ASSERT(DqnArray_Init(&vGeometricArray, 1000) && DqnArray_Init(&vTextureArray, 1000) &&
-	           DqnArray_Init(&vNormalArray, 1000));
-
-	for (char *scan = (char *)rawBytes; scan;)
+	WavefrontObj obj = {};
+	if (!ObjWaveFrontInit(&obj))
 	{
-		switch (*scan)
+		DqnMemBuffer_EndTempRegion(tmpMemRegion);
+		return false;
+	}
+
+	for (char *scan = (char *)rawBytes; scan && scan < ((char *)rawBytes + fileSize);)
+	{
+		switch (DqnChar_ToLower(*scan))
 		{
-			// Vertex Format: v[ |t|n|p] f32 f32 f32 [f32]
+			////////////////////////////////////////////////////////////////////
+			// Polygonal Free Form Statement
+			////////////////////////////////////////////////////////////////////
+			// Vertex Format: v[ |t|n|p] x y z [w]
 			case 'v':
 			{
 				scan++;
@@ -70,14 +120,15 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 
 				enum WavefrontVertexType type = WavefrontVertexType_Invalid;
 
-				if      (*scan == ' ') type = WavefrontVertexType_Geometric;
-				else if (*scan == 't' || *scan == 'n')
+				char identifier = DqnChar_ToLower(*scan);
+				if      (identifier == ' ') type = WavefrontVertexType_Geometric;
+				else if (identifier == 't' || identifier == 'n')
 				{
 					scan++;
-					if (*scan == 't') type = WavefrontVertexType_Texture;
-					else              type = WavefrontVertexType_Normal;
+					if (identifier == 't') type = WavefrontVertexType_Texture;
+					else                   type = WavefrontVertexType_Normal;
 				}
-				else                   DQN_ASSERT(DQN_INVALID_CODE_PATH);
+				else DQN_ASSERT(DQN_INVALID_CODE_PATH);
 
 				i32 vIndex = 0;
 				DqnV4 v4   = {0, 0, 0, 1.0f};
@@ -109,15 +160,15 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 				DQN_ASSERT(vIndex == 3 || vIndex == 4);
 				if (type == WavefrontVertexType_Geometric)
 				{
-					DqnArray_Push(&vGeometricArray, v4);
+					DqnArray_Push(&obj.geometryArray, v4);
 				}
 				else if (type == WavefrontVertexType_Texture)
 				{
-					DqnArray_Push(&vTextureArray, v4.xyz);
+					DqnArray_Push(&obj.texUVArray, v4.xyz);
 				}
 				else if (type == WavefrontVertexType_Normal)
 				{
-					DqnArray_Push(&vNormalArray, v4.xyz);
+					DqnArray_Push(&obj.normalArray, v4.xyz);
 				}
 				else
 				{
@@ -126,9 +177,175 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 			}
 			break;
 
-			// Face Format: i32/i32/i32 i32/i32/i32 i32/i32/i32
+			////////////////////////////////////////////////////////////////////
+			// Polygonal Geometry
+			////////////////////////////////////////////////////////////////////
+			// Vertex numbers can be negative to reference a relative offset to
+			// the vertex which means the relative order of the vertices
+			// specified in the file, i.e.
+
+			// v 0.000000 2.000000 2.000000
+			// v 0.000000 0.000000 2.000000
+			// v 2.000000 0.000000 2.000000
+			// v 2.000000 2.000000 2.000000
+			// f -4 -3 -2 -1
+
+			// Point Format: p v1 v2 v3 ...
+			// Each point is one vertex.
+			case 'p':
+			{
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+			break;
+
+			// Line Format: l v1/vt1 v2/vt2 v3/vt3 ...
+			// Texture vertex is optional. Minimum of two vertex numbers, no
+			// limit on maximum.
+			case 'l':
+			{
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+			break;
+
+			// Face Format: f v1/vt1/vn1 v2/vt2/vn2 v3/vt3/vn3 ...
+			// Minimum of three vertexes, no limit on maximum. vt, vn are
+			// optional. But specification of vt, vn must be consistent if given
+			// across all the vertices for the line.
+
+			// For example, to specify only the vertex and vertex normal
+			// reference numbers, you would enter:
+			
+			// f 1//1 2//2 3//3 4//4
 			case 'f':
 			{
+				scan++;
+				while (scan && (*scan == ' ' || *scan == '\n')) scan++;
+				if (!scan) continue;
+
+				WavefrontModelFace face  = ObjWavefrontModelFaceInit();
+				i32 numVertexesParsed    = 0;
+				bool moreVertexesToParse = true;
+				while (moreVertexesToParse)
+				{
+					enum WavefrontVertexType type = WavefrontVertexType_Geometric;
+
+					// Read a vertexes 3 attributes v, vt, vn
+					for (i32 i = 0; i < 3; i++)
+					{
+						char *numStartPtr = scan;
+						while (scan && DqnChar_IsDigit(*scan))
+							scan++;
+
+						i32 numLen = (i32)((size_t)scan - (size_t)numStartPtr);
+						if (numLen > 0)
+						{
+							i32 index = (i32)Dqn_StrToI64(numStartPtr, numLen);
+
+							if (type == WavefrontVertexType_Geometric)
+							{
+								DQN_ASSERT(DqnArray_Push(&face.vertexArray, index));
+							}
+							else if (type == WavefrontVertexType_Texture)
+							{
+								DQN_ASSERT(DqnArray_Push(&face.textureArray, index));
+							}
+							else if (type == WavefrontVertexType_Normal)
+							{
+								DQN_ASSERT(DqnArray_Push(&face.normalArray, index));
+							}
+						}
+
+						if (scan) scan++;
+						type = (enum WavefrontVertexType)((i32)type + 1);
+					}
+					numVertexesParsed++;
+
+					if (scan)
+					{
+						// Move to next "non-empty" character
+						while (scan && (*scan == ' ' || *scan == '\n'))
+							scan++;
+
+						// If it isn't a digit, then we've read all the
+						// vertexes for this face
+						if (!scan || (scan && !DqnChar_IsDigit(*scan)))
+						{
+							moreVertexesToParse = false;
+						}
+					}
+
+					if (obj.model.faces.count == 7470 || obj.model.faces.count == 2491)
+					{
+						int x = 5;
+					}
+				}
+				DQN_ASSERT(numVertexesParsed >= 3);
+				DQN_ASSERT(DqnArray_Push(&obj.model.faces, face));
+			}
+			break;
+
+			////////////////////////////////////////////////////////////////////
+			// Misc
+			////////////////////////////////////////////////////////////////////
+
+			// Group Name Format: g group_name1 group_name2
+			// This is optional, if multiple groups are specified, then the
+			// following elements belong to all groups. The default group name
+			// is "default"
+			case 'g':
+			{
+				scan++;
+				while (scan && (*scan == ' ' || *scan == '\n')) scan++;
+
+				if (!scan) continue;
+
+				// Iterate to end of the name, i.e. move ptr to first space
+				char *namePtr = scan;
+				while (scan && (*scan != ' ' && *scan != '\n'))
+					scan++;
+
+				if (scan)
+				{
+					i32 nameLen = (i32)((size_t)scan - (size_t)namePtr);
+					DQN_ASSERT(obj.model.groupNameIndex + 1 < DQN_ARRAY_COUNT(obj.model.groupName));
+
+					DQN_ASSERT(!obj.model.groupName[obj.model.groupNameIndex]);
+					obj.model.groupName[obj.model.groupNameIndex++] = (char *)DqnMemBuffer_Allocate(
+					    &memory->permanentBuffer, (nameLen + 1) * sizeof(char));
+
+					for (i32 i = 0; i < nameLen; i++)
+						obj.model.groupName[obj.model.groupNameIndex - 1][i] = namePtr[i];
+
+					while (scan && (*scan == ' ' || *scan == '\n'))
+						scan++;
+				}
+			}
+			break;
+
+			// Smoothing Group: s group_number
+			// Sets the smoothing group for the elements that follow it. If it's
+			// not to be used it can be specified as "off" or a value of 0.
+			case 's':
+			{
+				// Advance to first non space char after identifier
+				scan++;
+				while (scan && *scan == ' ' || *scan == '\n') scan++;
+
+				if (scan && DqnChar_IsDigit(*scan))
+				{
+					char *numStartPtr = scan;
+					while (scan && (*scan != ' ' && *scan != '\n'))
+					{
+						DQN_ASSERT(DqnChar_IsDigit(*scan));
+						scan++;
+					}
+
+					i32 numLen               = (i32)((size_t)scan - (size_t)numStartPtr);
+					i32 groupSmoothing       = (i32)Dqn_StrToI64(numStartPtr, numLen);
+					obj.model.groupSmoothing = groupSmoothing;
+				}
+
+				while (scan && *scan == ' ' || *scan == '\n') scan++;
 			}
 			break;
 
