@@ -502,8 +502,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	////////////////////////////////////////////////////////////////////////////
 	// Platform Data Pre-amble
 	////////////////////////////////////////////////////////////////////////////
-	DQN_ASSERT(DqnMemStack_Init(&globalPlatformMemory.permMemStack, DQN_MEGABYTE(1), true, 4) &&
-	           DqnMemStack_Init(&globalPlatformMemory.transMemStack, DQN_MEGABYTE(1), true, 4));
+	DQN_ASSERT(DqnMemStack_Init(&globalPlatformMemory.permMemStack, DQN_MEGABYTE(4), true, 4) &&
+	           DqnMemStack_Init(&globalPlatformMemory.transMemStack, DQN_MEGABYTE(4), true, 4));
 
 	PlatformAPI platformAPI = {};
 	platformAPI.FileOpen    = Platform_FileOpen;

@@ -75,7 +75,7 @@ DQN_FILE_SCOPE void  DqnMem_Free   (void *memory);
 
 // When an allocation requires a larger amount of memory than available in the
 // block then the MemStack will allocate a new block of sufficient size for
-// you in DqnMemStack_Allocate(..). This _DOES_ mean that there will be wasted
+// you in DqnMemStack_Push(..). This _DOES_ mean that there will be wasted
 // space at the end of each block and is a tradeoff for memory locality against
 // optimal space usage.
 
@@ -88,7 +88,7 @@ DQN_FILE_SCOPE void  DqnMem_Free   (void *memory);
 //    - InitWithFixedSize() allows you to to disable dynamic allocations and
 //      sub-allocate from the initial MemStack allocation size only.
 
-// 2. Use DqnMemStack_Allocate(..) to allocate memory for use.
+// 2. Use DqnMemStack_Push(..) to allocate memory for use.
 //    - "Freeing" memory is dealt by creating temporary MemStacks or using the
 //      BeginTempRegion and EndTempRegion functions. Specifically freeing
 //      individual items is typically not generalisable in this scheme.
@@ -129,12 +129,12 @@ DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem (DqnMemStack *const stack, u8 *
 DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedSize(DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4); // Single allocation from platform, no further allocations, returns NULL of allocate if out of space
 DQN_FILE_SCOPE bool DqnMemStack_Init             (DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4); // Allocates from platform dynamically as space runs out
 
-DQN_FILE_SCOPE void *DqnMemStack_Allocate       (DqnMemStack *const stack, size_t size);             // Returns NULL if out of space and stack is using fixed memory/size, or platform allocation fails
-DQN_FILE_SCOPE bool  DqnMemStack_Pop            (DqnMemStack *const stack, void *ptr, size_t size);  // Frees the given ptr. It MUST be the last allocated item in the stack
-DQN_FILE_SCOPE void  DqnMemStack_Free           (DqnMemStack *const stack);                          // Frees all blocks belonging to this stack
-DQN_FILE_SCOPE bool  DqnMemStack_FreeStackBlock (DqnMemStack *const stack, DqnMemStackBlock *block); // Frees the specified block, returns false if block doesn't belong
-DQN_FILE_SCOPE bool  DqnMemStack_FreeLastBlock  (DqnMemStack *const stack);                          // Frees the last-most memory block. If last block, free that block, next allocate will attach a block.
-DQN_FILE_SCOPE void  DqnMemStack_ClearCurrBlock (DqnMemStack *const stack, const bool zeroClear);    // Reset the current memory block usage to 0
+DQN_FILE_SCOPE void *DqnMemStack_Push          (DqnMemStack *const stack, size_t size);             // Returns NULL if out of space and stack is using fixed memory/size, or platform allocation fails
+DQN_FILE_SCOPE bool  DqnMemStack_Pop           (DqnMemStack *const stack, void *ptr, size_t size);  // Frees the given ptr. It MUST be the last allocated item in the stack
+DQN_FILE_SCOPE void  DqnMemStack_Free          (DqnMemStack *const stack);                          // Frees all blocks belonging to this stack
+DQN_FILE_SCOPE bool  DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemStackBlock *block); // Frees the specified block, returns false if block doesn't belong
+DQN_FILE_SCOPE bool  DqnMemStack_FreeLastBlock (DqnMemStack *const stack);                          // Frees the last-most memory block. If last block, free that block, next allocate will attach a block.
+DQN_FILE_SCOPE void  DqnMemStack_ClearCurrBlock(DqnMemStack *const stack, const bool zeroClear);    // Reset the current memory block usage to 0
 
 // TempMemStack is only required for the function. Once BeginTempRegion() is called, subsequent allocation calls can be made using the original stack.
 // Upon EndTempRegion() the original stack will free any additional blocks it allocated during the temp region and revert to the original
@@ -1453,7 +1453,7 @@ DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedSize(DqnMemStack *const stack,
 	return false;
 }
 
-DQN_FILE_SCOPE void *DqnMemStack_Allocate(DqnMemStack *const stack, size_t size)
+DQN_FILE_SCOPE void *DqnMemStack_Push(DqnMemStack *const stack, size_t size)
 {
 	if (!stack || size == 0) return NULL;
 

@@ -54,8 +54,8 @@ FILE_SCOPE void PushMemStackText(const char *const name,
 		size_t totalWastedKb = totalWasted / 1024;
 
 		char str[128] = {};
-		Dqn_sprintf(str, "%s: %d block(s): %_$lld/%_$lld", name, numBlocks,
-		            totalUsed, totalSize);
+		Dqn_sprintf(str, "%s: %d block(s): %_$lld/%_$lld: wasted: %_$lld", name, numBlocks,
+		            totalUsed, totalSize, totalWastedKb);
 
 		DTRRender_Text(globalDebug.renderBuffer, *globalDebug.font,
 		               globalDebug.displayP, str, globalDebug.displayColor);
@@ -64,7 +64,7 @@ FILE_SCOPE void PushMemStackText(const char *const name,
 }
 
 void DTRDebug_Update(DTRState *const state,
-                     PlatformRenderBuffer *const renderBuffer,
+                     DTRRenderBuffer *const renderBuffer,
                      PlatformInput *const input, PlatformMemory *const memory)
 {
 	if (DTR_DEBUG)
@@ -80,11 +80,13 @@ void DTRDebug_Update(DTRState *const state,
 			DQN_ASSERT(globalDebug.displayYOffset < 0);
 		}
 
-		debug->totalSetPixels += debug->setPixelsPerFrame;
+		debug->totalSetPixels += debug->counter[DTRDebugCounter_SetPixels];
 		debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
 
 		DTRDebug_PushText("TotalSetPixels: %'lld",    debug->totalSetPixels);
-		DTRDebug_PushText("SetPixelsPerFrame: %'lld", debug->setPixelsPerFrame);
+		DTRDebug_PushText("SetPixelsPerFrame: %'lld", debug->counter[DTRDebugCounter_SetPixels]);
+		DTRDebug_PushText("TrianglesRendered: %'lld", debug->counter[DTRDebugCounter_RenderTriangle]);
+		DTRDebug_PushText("");
 
 		// memory
 		{
@@ -94,9 +96,11 @@ void DTRDebug_Update(DTRState *const state,
 
 		DTRDebug_PushText("SSE2Support: %s", (input->canUseSSE2) ? "true" : "false");
 
-		debug->setPixelsPerFrame = 0;
 		debug->displayP =
 			DqnV2_2i(0, debug->renderBuffer->height + globalDebug.displayYOffset);
+
+		for (i32 i = 0; i < DQN_ARRAY_COUNT(debug->counter); i++)
+			debug->counter[i] = 0;
 	}
 }
 

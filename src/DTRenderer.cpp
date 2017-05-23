@@ -52,8 +52,9 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
 		return false; // TODO(doyle): Logging
 
+	// TODO(doyle): Make arrays use given memory not malloc
 	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
-	u8 *rawBytes               = (u8 *)DqnMemStack_Allocate(&memory->transMemStack, file.size);
+	u8 *rawBytes               = (u8 *)DqnMemStack_Push(&memory->transMemStack, file.size);
 	size_t bytesRead           = api.FileRead(&file, rawBytes, file.size);
 	size_t fileSize            = file.size;
 	api.FileClose(&file);
@@ -284,7 +285,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 					DQN_ASSERT(obj->model.groupNameIndex + 1 < DQN_ARRAY_COUNT(obj->model.groupName));
 
 					DQN_ASSERT(!obj->model.groupName[obj->model.groupNameIndex]);
-					obj->model.groupName[obj->model.groupNameIndex++] = (char *)DqnMemStack_Allocate(
+					obj->model.groupName[obj->model.groupNameIndex++] = (char *)DqnMemStack_Push(
 					    &memory->permMemStack, (nameLen + 1) * sizeof(char));
 
 					for (i32 i = 0; i < nameLen; i++)
@@ -371,7 +372,7 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 		return false; // TODO(doyle): Logging
 
 	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
-	u8 *fontBuf                = (u8 *)DqnMemStack_Allocate(&memory->transMemStack, file.size);
+	u8 *fontBuf                = (u8 *)DqnMemStack_Push(&memory->transMemStack, file.size);
 	size_t bytesRead           = api.FileRead(&file, fontBuf, file.size);
 	api.FileClose(&file);
 	if (bytesRead != file.size)
@@ -392,7 +393,7 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 	////////////////////////////////////////////////////////////////////////////
 	// Pack font data to bitmap
 	////////////////////////////////////////////////////////////////////////////
-	loadedFont.bitmap = (u8 *)DqnMemStack_Allocate(
+	loadedFont.bitmap = (u8 *)DqnMemStack_Push(
 	    &memory->permMemStack,
 	    (size_t)(loadedFont.bitmapDim.w * loadedFont.bitmapDim.h));
 
@@ -405,7 +406,7 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 		i32 numCodepoints =
 		    (i32)((codepointRange.max + 1) - codepointRange.min);
 
-		loadedFont.atlas = (stbtt_packedchar *)DqnMemStack_Allocate(
+		loadedFont.atlas = (stbtt_packedchar *)DqnMemStack_Push(
 		    &memory->permMemStack, numCodepoints * sizeof(stbtt_packedchar));
 		stbtt_PackFontRange(&fontPackContext, fontBuf, 0,
 		                    STBTT_POINT_SIZE(sizeInPt), (i32)codepointRange.min,
@@ -463,7 +464,7 @@ FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
 	DqnTempMemStack tempBuffer = DqnMemStack_BeginTempRegion(transMemStack);
 	{
 		u8 *const rawData =
-		    (u8 *)DqnMemStack_Allocate(transMemStack, file.size);
+		    (u8 *)DqnMemStack_Push(transMemStack, file.size);
 		size_t bytesRead = api.FileRead(&file, rawData, file.size);
 		api.FileClose(&file);
 
@@ -511,7 +512,7 @@ FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
 }
 
 // #include <algorithm>
-void CompAssignment(PlatformRenderBuffer *const renderBuffer, PlatformInput *const input,
+void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const input,
                     PlatformMemory *const memory)
 {
 #if 1
@@ -1441,10 +1442,13 @@ FILE_SCOPE void TestStrToF32Converter()
 	DQN_ASSERT(DQN_ABS(vQ) - DQN_ABS(9.64635e-05) < EPSILON);
 }
 
-extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
+extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
                            PlatformInput *const input,
                            PlatformMemory *const memory)
 {
+	////////////////////////////////////////////////////////////////////////////
+	// Initialisation
+	////////////////////////////////////////////////////////////////////////////
 	DTRState *state = (DTRState *)memory->context;
 	if (input->executableReloaded)
 	{
@@ -1463,7 +1467,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 
 		memory->isInit = true;
 		memory->context =
-		    DqnMemStack_Allocate(&memory->permMemStack, sizeof(DTRState));
+		    DqnMemStack_Push(&memory->permMemStack, sizeof(DTRState));
 		DQN_ASSERT(memory->context);
 
 		state = (DTRState *)memory->context;
@@ -1473,126 +1477,149 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 		           &memory->transMemStack);
 
 		DTRBitmap test = {};
-		DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->permMemStack);
+		DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->transMemStack);
 		BitmapLoad(input->api, &test, "byte_read_check.bmp",
 		           &memory->transMemStack);
 		DqnMemStack_EndTempRegion(tmp);
 
 		DQN_ASSERT(ObjWavefrontLoad(input->api, memory, "african_head.obj", &state->obj));
 	}
-	DTRRender_Clear(renderBuffer, DqnV3_3f(0.0f, 0.0f, 0.0f));
 
-	const DqnV3 LIGHT           = DqnV3_3i(0, 0, -1);
-	const f32 MODEL_SCALE       = DQN_MIN(renderBuffer->width, renderBuffer->height) * 0.5f;
-	WavefrontObj *const waveObj = &state->obj;
-	DqnV2 modelP                = DqnV2_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
+	DqnTempMemStack transMemTmpRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
 
-	for (i32 i = 0; i < waveObj->model.faces.count; i++)
+	DTRRenderBuffer renderBuffer = {};
+	renderBuffer.width           = platformRenderBuffer->width;
+	renderBuffer.height          = platformRenderBuffer->height;
+	renderBuffer.bytesPerPixel   = platformRenderBuffer->bytesPerPixel;
+	renderBuffer.memory          = (u8 *)platformRenderBuffer->memory;
+	renderBuffer.zBuffer         = (f32 *)DqnMemStack_Push(
+	    &memory->transMemStack,
+	    platformRenderBuffer->width * platformRenderBuffer->height * sizeof(*renderBuffer.zBuffer));
+
+	////////////////////////////////////////////////////////////////////////////
+	// Update and Render
+	////////////////////////////////////////////////////////////////////////////
+	DTRRender_Clear(&renderBuffer, DqnV3_3f(0.0f, 0.0f, 0.0f));
+
+#if 1
+	DqnV4 colorRed    = DqnV4_4f(0.8f, 0, 0, 1);
+	DqnV2i bufferMidP = DqnV2i_2f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f);
+	f32 rotation      = (f32)input->timeNowInS * 0.25f;
+
+	// Triangle Drawing
 	{
-		WavefrontModelFace face = waveObj->model.faces.data[i];
-		DQN_ASSERT(face.vertexArray.count == 3);
-		i32 vertAIndex = face.vertexArray.data[0];
-		i32 vertBIndex = face.vertexArray.data[1];
-		i32 vertCIndex = face.vertexArray.data[2];
+		DqnV4 redTransparent = DqnV4_4f(1, 0, 0, 0.5f);
 
-		DqnV4 vertA = waveObj->geometryArray.data[vertAIndex];
-		DqnV4 vertB = waveObj->geometryArray.data[vertBIndex];
-		DqnV4 vertC = waveObj->geometryArray.data[vertCIndex];
+		i32 boundsOffset = 100;
+		DqnV3 t0[3] = {DqnV3_3i(10, 70, 0), DqnV3_3i(50, 160, 0), DqnV3_3i(70, 80, 0)};
+		DqnV3 t1[3] = {DqnV3_3i(180, 50, 0), DqnV3_3i(150, 1, 0), DqnV3_3i(70, 180, 0)};
+		DqnV3 t2[3] = {DqnV3_3i(180, 150, 0), DqnV3_3i(120, 160, 0), DqnV3_3i(130, 180, 0)};
+		DqnV3 t3[3] = {DqnV3_3i(boundsOffset, boundsOffset, 0),
+		               DqnV3_3i(bufferMidP.w, renderBuffer.height - boundsOffset, 0),
+		               DqnV3_3i(renderBuffer.width - boundsOffset, boundsOffset, 0)};
+		DqnV3 t4[3] = {DqnV3_3i(100, 150, 0), DqnV3_3i(200, 150, 0), DqnV3_3i(200, 250, 0)};
+		DqnV3 t5[3] = {DqnV3_3i(300, 150, 0), DqnV3_3i(201, 150, 0), DqnV3_3i(200, 250, 0)};
 
-		DqnV4 vertAB = vertB - vertA;
-		DqnV4 vertAC = vertC - vertA;
-		DqnV3 normal = DqnV3_Cross(vertAC.xyz, vertAB.xyz);
+		DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
+		rotatingXform.rotation           = rotation;
 
-		f32 intensity  = DqnV3_Dot(DqnV3_Normalise(normal), LIGHT);
-		if (intensity > 0)
+		DTRRender_Triangle(&renderBuffer, t0[0], t0[1], t0[2], colorRed);
+		DTRRender_Triangle(&renderBuffer, t1[0], t1[1], t1[2], colorRed);
+		DTRRender_Triangle(&renderBuffer, t3[0], t3[1], t3[2], colorRed, rotatingXform);
+		DTRRender_Triangle(&renderBuffer, t2[0], t2[1], t2[2], colorRed);
+		DTRRender_Triangle(&renderBuffer, t4[0], t4[1], t4[2], colorRed);
+		DTRRender_Triangle(&renderBuffer, t5[0], t5[1], t5[2], colorRed);
+
+		////////////////////////////////////////////////////////////////////////
+		// Draw Loaded Model
+		////////////////////////////////////////////////////////////////////////
+		const DqnV3 LIGHT           = DqnV3_3i(0, 0, -1);
+		const f32 MODEL_SCALE       = DQN_MIN(renderBuffer.width, renderBuffer.height) * 0.5f;
+		WavefrontObj *const waveObj = &state->obj;
+		DqnV3 modelP = DqnV3_3f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f, 0);
+
+		for (i32 i = 0; i < waveObj->model.faces.count; i++)
 		{
-			DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
-			modelCol.rgb *= intensity;
+			WavefrontModelFace face = waveObj->model.faces.data[i];
+			DQN_ASSERT(face.vertexArray.count == 3);
+			i32 vertAIndex = face.vertexArray.data[0];
+			i32 vertBIndex = face.vertexArray.data[1];
+			i32 vertCIndex = face.vertexArray.data[2];
 
-			DqnV2 screenVertA = (vertA.xy * MODEL_SCALE) + modelP;
-			DqnV2 screenVertB = (vertB.xy * MODEL_SCALE) + modelP;
-			DqnV2 screenVertC = (vertC.xy * MODEL_SCALE) + modelP;
+			DqnV4 vertA = waveObj->geometryArray.data[vertAIndex];
+			DqnV4 vertB = waveObj->geometryArray.data[vertBIndex];
+			DqnV4 vertC = waveObj->geometryArray.data[vertCIndex];
 
-			// TODO(doyle): Why do we need rounding here? Maybe it's because
-			// I don't do any interpolation in the triangle routine for jagged
-			// edges.
-			screenVertA.x = (f32)(i32)(screenVertA.x + 0.5f);
-			screenVertA.y = (f32)(i32)(screenVertA.y + 0.5f);
-			screenVertB.x = (f32)(i32)(screenVertB.x + 0.5f);
-			screenVertB.y = (f32)(i32)(screenVertB.y + 0.5f);
-			screenVertC.x = (f32)(i32)(screenVertC.x + 0.5f);
-			screenVertC.y = (f32)(i32)(screenVertC.y + 0.5f);
+			DqnV4 vertAB = vertB - vertA;
+			DqnV4 vertAC = vertC - vertA;
+			DqnV3 normal = DqnV3_Cross(vertAC.xyz, vertAB.xyz);
 
-			DTRRender_Triangle(renderBuffer, screenVertA, screenVertB, screenVertC, modelCol);
+			f32 intensity = DqnV3_Dot(DqnV3_Normalise(normal), LIGHT);
+			if (intensity > 0)
+			{
+				DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
+				modelCol.rgb *= intensity;
+
+				DqnV3 screenVA = (vertA.xyz * MODEL_SCALE) + modelP;
+				DqnV3 screenVB = (vertB.xyz * MODEL_SCALE) + modelP;
+				DqnV3 screenVC = (vertC.xyz * MODEL_SCALE) + modelP;
+
+				// TODO(doyle): Why do we need rounding here? Maybe it's because
+				// I don't do any interpolation in the triangle routine for jagged
+				// edges.
+				screenVA.x = (f32)(i32)(screenVA.x + 0.5f);
+				screenVA.y = (f32)(i32)(screenVA.y + 0.5f);
+				screenVB.x = (f32)(i32)(screenVB.x + 0.5f);
+				screenVB.y = (f32)(i32)(screenVB.y + 0.5f);
+				screenVC.x = (f32)(i32)(screenVC.x + 0.5f);
+				screenVC.y = (f32)(i32)(screenVC.y + 0.5f);
+
+				DTRRender_Triangle(&renderBuffer, screenVA, screenVB, screenVC, modelCol);
 
 #if 0
-			DqnV4 wireColor = DqnV4_1f(1.0f);
-			for (i32 j = 0; j < 3; j++)
-			{
-				DTRRender_Line(renderBuffer, DqnV2i_V2(screenVertA), DqnV2i_V2(screenVertB), wireColor);
-			}
+				DqnV4 wireColor = DqnV4_1f(1.0f);
+				for (i32 j = 0; j < 3; j++)
+				{
+					DTRRender_Line(renderBuffer, DqnV2i_V2(screenVertA), DqnV2i_V2(screenVertB), wireColor);
+				}
 #endif
+			}
 		}
 	}
 
-#if 1
-	DqnV4 colorRed = DqnV4_4f(0.8f, 0, 0, 1);
-	DqnV2i bufferMidP =
-	    DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
-	i32 boundsOffset = 100;
-
-	DqnV2 t0[3] = {DqnV2_2i(10, 70),   DqnV2_2i(50, 160),  DqnV2_2i(70, 80)};
-	DqnV2 t1[3] = {DqnV2_2i(180, 50),  DqnV2_2i(150, 1),   DqnV2_2i(70, 180)};
-	DqnV2 t2[3] = {DqnV2_2i(180, 150), DqnV2_2i(120, 160), DqnV2_2i(130, 180)};
-	LOCAL_PERSIST DqnV2 t3[3] = {
-	    DqnV2_2i(boundsOffset, boundsOffset),
-	    DqnV2_2i(bufferMidP.w, renderBuffer->height - boundsOffset),
-	    DqnV2_2i(renderBuffer->width - boundsOffset, boundsOffset)};
-
-	DTRRender_Triangle(renderBuffer, t0[0], t0[1], t0[2], colorRed);
-	DTRRender_Triangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
-	DTRRender_Triangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
-
-	DqnV2 t4[3] = {DqnV2_2i(100, 150), DqnV2_2i(200, 150), DqnV2_2i(200, 250)};
-	DqnV2 t5[3] = {DqnV2_2i(300, 150), DqnV2_2i(201, 150), DqnV2_2i(200, 250)};
-	DTRRender_Triangle(renderBuffer, t4[0], t4[1], t4[2], colorRed);
-	DTRRender_Triangle(renderBuffer, t5[0], t5[1], t5[2], colorRed);
-
-	DqnV4 colorRedHalfA        = DqnV4_4f(1, 0, 0, 0.1f);
-	LOCAL_PERSIST f32 rotation = 0;
-	rotation += input->deltaForFrame * 0.25f;
-
-	DTRRenderTransform defaultTransform = DTRRender_DefaultTransform();
-	defaultTransform.rotation           = rotation + 45;
-
-	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 100.0f), DqnV4_4f(0, 1.0f, 1.0f, 1.0f),
-	                    defaultTransform);
-
-	// Rotating triangle
+	// Rect drawing
 	{
-		DTRRenderTransform triTransform = DTRRender_DefaultTriangleTransform();
-		triTransform.rotation           = rotation;
-		DTRRender_Triangle(renderBuffer, t3[0], t3[1], t3[2], colorRedHalfA, triTransform);
+		DTRRenderTransform transform = DTRRender_DefaultTransform();
+		transform.rotation           = rotation + 45;
+
+		DTRRender_Rectangle(&renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 100.0f),
+		                    DqnV4_4f(0, 1.0f, 1.0f, 1.0f), transform);
 	}
 
+	// Bitmap drawing
+	{
+		DTRRenderTransform transform = DTRRender_DefaultTransform();
+		transform.scale              = DqnV2_1f(2.0f);
 
-	DqnV2 fontP = DqnV2_2i(200, 180);
-	DTRRender_Text(renderBuffer, state->font, fontP, "hello world!", DqnV4_4f(0, 0, 0, 1));
+		LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(300, 250);
+		bitmapP.x += 3.0f * sinf((f32)input->timeNowInS * 0.5f);
 
-	DTRRenderTransform transform = DTRRender_DefaultTransform();
-	transform.rotation           = 0;
-	transform.scale              = DqnV2_1f(2.0f);
-
-	LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(300, 250);
-	bitmapP.x += 3.0f * sinf((f32)input->timeNowInS * 0.5f);
-
-	f32 cAngle = (f32)input->timeNowInS;
-	DqnV4 color = DqnV4_4f(0.5f + 0.5f * sinf(cAngle), 0.5f + 0.5f * sinf(2.9f * cAngle),
-	                       0.5f + 0.5f * cosf(10.0f * cAngle), 1.0f);
-	DTRRender_Bitmap(renderBuffer, &state->bitmap, bitmapP, transform, color);
+		f32 cAngle  = (f32)input->timeNowInS;
+		DqnV4 color = DqnV4_4f(0.5f + 0.5f * sinf(cAngle), 0.5f + 0.5f * sinf(2.9f * cAngle),
+		                       0.5f + 0.5f * cosf(10.0f * cAngle), 1.0f);
+		DTRRender_Bitmap(&renderBuffer, &state->bitmap, bitmapP, transform, color);
+	}
 
 #else
 	// CompAssignment(renderBuffer, input, memory);
 #endif
-	DTRDebug_Update(state, renderBuffer, input, memory);
+
+	DTRDebug_Update(state, &renderBuffer, input, memory);
+
+	////////////////////////////////////////////////////////////////////////////
+	// End Update
+	////////////////////////////////////////////////////////////////////////////
+	DqnMemStack_EndTempRegion(transMemTmpRegion);
+	DQN_ASSERT(memory->transMemStack.tempStackCount == 0);
+	DQN_ASSERT(memory->permMemStack.tempStackCount == 0);
 }

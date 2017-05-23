@@ -30,22 +30,29 @@
 
 #endif
 
-typedef struct PlatformRenderBuffer PlatformRenderBuffer;
-typedef struct DTRFont              DTRFont;
-typedef struct DTRState             DTRState;
-typedef struct PlatformInput        PlatformInput;
-typedef struct PlatformMemory       PlatformMemory;
+typedef struct DTRRenderBuffer DTRRenderBuffer;
+typedef struct DTRFont         DTRFont;
+typedef struct DTRState        DTRState;
+typedef struct PlatformInput   PlatformInput;
+typedef struct PlatformMemory  PlatformMemory;
+
+enum DTRDebugCounter
+{
+	DTRDebugCounter_SetPixels,
+	DTRDebugCounter_RenderTriangle,
+	DTRDebugCounter_Count,
+};
 
 typedef struct DTRDebug
 {
-	DTRFont              *font;
-	PlatformRenderBuffer *renderBuffer;
+	DTRFont         *font;
+	DTRRenderBuffer *renderBuffer;
 
 	DqnV4 displayColor;
 	DqnV2 displayP;
 	i32   displayYOffset;
 
-	u64 setPixelsPerFrame;
+	u64 counter[DTRDebugCounter_Count];
 	u64 totalSetPixels;
 } DTRDebug;
 
@@ -53,6 +60,16 @@ extern DTRDebug globalDebug;
 
 void DTRDebug_PushText(const char *const formatStr, ...);
 void DTRDebug_Update(DTRState *const state,
-                     PlatformRenderBuffer *const renderBuffer,
+                     DTRRenderBuffer *const renderBuffer,
                      PlatformInput *const input, PlatformMemory *const memory);
+
+void inline DTRDebug_CounterIncrement(enum DTRDebugCounter tag)
+{
+	if (DTR_DEBUG)
+	{
+		DQN_ASSERT(tag >= 0 && tag < DTRDebugCounter_Count);
+		globalDebug.counter[tag]++;
+	}
+}
+
 #endif

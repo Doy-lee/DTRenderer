@@ -99,7 +99,7 @@ inline DqnV4 DTRRender_PreMultiplyAlphaSRGB1WithLinearConversion(DqnV4 color)
 }
 
 // IMPORTANT(doyle): Color is expected to be premultiplied already
-FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const i32 x, const i32 y,
+FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x, const i32 y,
                                 DqnV4 color, const enum ColorSpace colorSpace = ColorSpace_SRGB)
 {
 	if (!renderBuffer) return;
@@ -166,10 +166,10 @@ FILE_SCOPE inline void SetPixel(PlatformRenderBuffer *const renderBuffer, const 
 	             (u32)(destB) << 0;
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
 
-	globalDebug.setPixelsPerFrame++;
+	DTRDebug_CounterIncrement(DTRDebugCounter_SetPixels);
 }
 
-void DTRRender_Text(PlatformRenderBuffer *const renderBuffer,
+void DTRRender_Text(DTRRenderBuffer *const renderBuffer,
                     const DTRFont font, DqnV2 pos, const char *const text,
                     DqnV4 color, i32 len)
 {
@@ -267,7 +267,7 @@ FILE_SCOPE void TransformPoints(const DqnV2 origin, DqnV2 *const pList,
 	}
 }
 
-void DTRRender_Line(PlatformRenderBuffer *const renderBuffer, DqnV2i a,
+void DTRRender_Line(DTRRenderBuffer *const renderBuffer, DqnV2i a,
                     DqnV2i b, DqnV4 color)
 {
 	if (!renderBuffer) return;
@@ -387,7 +387,7 @@ FILE_SCOPE DqnRect GetBoundingBox(const DqnV2 *const pList, const i32 numP)
 	return result;
 }
 
-void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 max,
+void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 max,
                          DqnV4 color, const DTRRenderTransform transform)
 {
 	DTR_DEBUG_TIMED_FUNCTION();
@@ -484,7 +484,7 @@ void DTRRender_Rectangle(PlatformRenderBuffer *const renderBuffer, DqnV2 min, Dq
 	}
 }
 
-void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV2 p2, DqnV2 p3,
+void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
                         DqnV4 color, const DTRRenderTransform transform)
 {
 	DTR_DEBUG_TIMED_FUNCTION();
@@ -492,17 +492,18 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
-	DqnV2 p1p2         = p2 - p1;
-	DqnV2 p1p3         = p3 - p1;
-	DqnV2 p1p2Anchored = p1p2 * transform.anchor;
-	DqnV2 p1p3Anchored = p1p3 * transform.anchor;
+	DqnV3 p1p2 = p2 - p1;
+	DqnV3 p1p3 = p3 - p1;
 
-	DqnV2 origin   = p1 + p1p2Anchored + p1p3Anchored;
-	DqnV2 pList[3] = {p1 - origin, p2 - origin, p3 - origin};
+	// TODO(doyle): Transform is only in 2d right now
+	DqnV2 p1p2Anchored = p1p2.xy * transform.anchor;
+	DqnV2 p1p3Anchored = p1p3.xy * transform.anchor;
+	DqnV2 origin       = p1.xy + p1p2Anchored + p1p3Anchored;
+	DqnV2 pList[3]     = {p1.xy - origin, p2.xy - origin, p3.xy - origin};
 	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale, transform.rotation);
-	p1 = pList[0];
-	p2 = pList[1];
-	p3 = pList[2];
+	p1.xy = pList[0];
+	p2.xy = pList[1];
+	p3.xy = pList[2];
 
 	color = DTRRender_SRGB1ToLinearSpaceV4(color);
 	color = PreMultiplyAlpha1(color);
@@ -625,12 +626,12 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	if (area2Times > 0)
 	{
 		// Clockwise swap any point to make it clockwise
-		DQN_SWAP(DqnV2, p2, p3);
+		DQN_SWAP(DqnV3, p2, p3);
 	}
 
-	const DqnV2 a = p1;
-	const DqnV2 b = p2;
-	const DqnV2 c = p3;
+	const DqnV3 a = p1;
+	const DqnV3 b = p2;
+	const DqnV3 c = p3;
 
 	DqnV2i startP = min;
 	f32 signedArea1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
@@ -678,6 +679,7 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	////////////////////////////////////////////////////////////////////////////
 	// Debug
 	////////////////////////////////////////////////////////////////////////////
+	DTRDebug_CounterIncrement(DTRDebugCounter_RenderTriangle);
 	if (DTR_DEBUG_RENDER)
 	{
 		// Draw Bounding box
@@ -704,14 +706,14 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 			DqnV4 blue   = DqnV4_4f(0, 0, 1, 1);
 			DqnV4 purple = DqnV4_4f(1, 0, 1, 1);
 
-			DTRRender_Rectangle(renderBuffer, p1 - DqnV2_1f(5), p1 + DqnV2_1f(5), green);
-			DTRRender_Rectangle(renderBuffer, p2 - DqnV2_1f(5), p2 + DqnV2_1f(5), blue);
-			DTRRender_Rectangle(renderBuffer, p3 - DqnV2_1f(5), p3 + DqnV2_1f(5), purple);
+			DTRRender_Rectangle(renderBuffer, p1.xy - DqnV2_1f(5), p1.xy + DqnV2_1f(5), green);
+			DTRRender_Rectangle(renderBuffer, p2.xy - DqnV2_1f(5), p2.xy + DqnV2_1f(5), blue);
+			DTRRender_Rectangle(renderBuffer, p3.xy - DqnV2_1f(5), p3.xy + DqnV2_1f(5), purple);
 		}
 	}
 }
 
-void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
+void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer,
                       DTRBitmap *const bitmap, DqnV2 pos,
                       const DTRRenderTransform transform, DqnV4 color)
 {
@@ -723,7 +725,6 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	////////////////////////////////////////////////////////////////////////////
 	DqnV2 min = pos;
 	DqnV2 max = min + DqnV2_V2i(bitmap->dim);
-	DTRDebug_PushText("OldRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", min.x, min.y, max.x, max.y);
 
 	RectPoints rectPoints     = TransformRectPoints(min, max, transform);
 	const DqnV2 *const pList  = &rectPoints.pList[0];
@@ -748,16 +749,12 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 
 	DqnRect clippedDrawRect = DqnRect_ClipRect(drawRect, clip);
 	DqnV2 clippedSize       = DqnRect_GetSizeV2(clippedDrawRect);
-
-	DTRDebug_PushText("ClippedRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", clippedDrawRect.min.x, clippedDrawRect.min.y, clippedDrawRect.max.x, clippedDrawRect.max.y);
-	DTRDebug_PushText("ClippedSize: (%5.2f, %5.2f)", clippedSize.w, clippedSize.h);
-	DTRDebug_PushText("DrawRect: (%5.2f, %5.2f), (%5.2f, %5.2f)", drawRect.min.x, drawRect.min.y, drawRect.max.x, drawRect.max.y);
-	const i32 pitch      = bitmap->dim.w * bitmap->bytesPerPixel;
-	u8 *const bitmapPtr  = (u8 *)bitmap->memory;
-
 	////////////////////////////////////////////////////////////////////////////
 	// Setup Texture Mapping
 	////////////////////////////////////////////////////////////////////////////
+	const i32 pitch      = bitmap->dim.w * bitmap->bytesPerPixel;
+	u8 *const bitmapPtr  = (u8 *)bitmap->memory;
+
 	const DqnV2 rectBasis       = pList[RectPointsIndex_Basis];
 	const DqnV2 xAxisRelToBasis = pList[RectPointsIndex_XAxis] - rectBasis;
 	const DqnV2 yAxisRelToBasis = pList[RectPointsIndex_YAxis] - rectBasis;
@@ -945,7 +942,7 @@ void DTRRender_Bitmap(PlatformRenderBuffer *const renderBuffer,
 	}
 }
 
-void DTRRender_Clear(PlatformRenderBuffer *const renderBuffer,
+void DTRRender_Clear(DTRRenderBuffer *const renderBuffer,
                      DqnV3 color)
 {
 	if (!renderBuffer) return;
