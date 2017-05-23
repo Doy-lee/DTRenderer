@@ -2,6 +2,7 @@
 #define DRENDERER_PLATFORM_H
 
 #include "dqn.h"
+#include <intrin.h>
 
 enum PlatformFilePermissionFlag
 {
@@ -73,6 +74,7 @@ typedef struct PlatformInput
 	f64  timeNowInS;
 	bool executableReloaded;
 	bool canUseSSE2;
+	bool canUseRdtsc;
 
 	PlatformAPI api;
 	union {

@@ -1452,15 +1452,15 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	DTRState *state = (DTRState *)memory->context;
 	if (input->executableReloaded)
 	{
-		DTR_DEBUG_PROFILE_END();
-		DTR_DEBUG_PROFILE_START();
+		DTR_DEBUG_EP_PROFILE_END();
+		DTR_DEBUG_EP_PROFILE_START();
 	}
 
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 	if (!memory->isInit)
 	{
 		TestStrToF32Converter();
-		DTR_DEBUG_TIMED_BLOCK("DTR_Update Memory Initialisation");
+		DTR_DEBUG_EP_TIMED_BLOCK("DTR_Update Memory Initialisation");
 		// NOTE(doyle): Do premultiply ourselves
 		stbi_set_unpremultiply_on_load(true);
 		stbi_set_flip_vertically_on_load(true);
@@ -1492,9 +1492,12 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	renderBuffer.height          = platformRenderBuffer->height;
 	renderBuffer.bytesPerPixel   = platformRenderBuffer->bytesPerPixel;
 	renderBuffer.memory          = (u8 *)platformRenderBuffer->memory;
-	renderBuffer.zBuffer         = (f32 *)DqnMemStack_Push(
-	    &memory->transMemStack,
-	    platformRenderBuffer->width * platformRenderBuffer->height * sizeof(*renderBuffer.zBuffer));
+
+	u32 zBufferSize = platformRenderBuffer->width * platformRenderBuffer->height;
+	renderBuffer.zBuffer = (f32 *)DqnMemStack_Push(&memory->transMemStack,
+	                                               zBufferSize * sizeof(*renderBuffer.zBuffer));
+
+	for (u32 i = 0; i < zBufferSize; i++) renderBuffer.zBuffer[i] = DQN_F32_MIN;
 
 	////////////////////////////////////////////////////////////////////////////
 	// Update and Render

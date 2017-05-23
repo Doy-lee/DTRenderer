@@ -20,6 +20,7 @@
 #endif
 
 #include <stdint.h> // For standard types
+#include <float.h>
 #define LOCAL_PERSIST static
 #define FILE_SCOPE    static
 
@@ -34,6 +35,8 @@ typedef int16_t i16;
 
 typedef double f64;
 typedef float  f32;
+
+#define DQN_F32_MIN FLT_MIN
 
 #define DQN_TERABYTE(val) (DQN_GIGABYTE(val) * 1024LL)
 #define DQN_GIGABYTE(val) (DQN_MEGABYTE(val) * 1024LL)

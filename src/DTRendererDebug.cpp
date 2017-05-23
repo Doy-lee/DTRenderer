@@ -28,8 +28,29 @@ void DTRDebug_PushText(const char *const formatStr, ...)
 	}
 }
 
-FILE_SCOPE void PushMemStackText(const char *const name,
-                                  const DqnMemStack *const stack)
+void inline DTRDebug_BeginCycleCount(enum DTRDebugCycleCount tag)
+{
+	if (DTR_DEBUG_PROFILING)
+	{
+		if (globalDebug.input && globalDebug.input->canUseRdtsc)
+		{
+			globalDebug.cycleCount[tag] = __rdtsc();
+		}
+	}
+}
+
+void inline DTRDebug_EndCycleCount(enum DTRDebugCycleCount tag)
+{
+	if (DTR_DEBUG_PROFILING)
+	{
+		if (globalDebug.input && globalDebug.input->canUseRdtsc)
+		{
+			globalDebug.cycleCount[tag] = __rdtsc() - globalDebug.cycleCount[tag];
+		}
+	}
+}
+
+FILE_SCOPE void PushMemStackText(const char *const name, const DqnMemStack *const stack)
 {
 	if (DTR_DEBUG)
 	{
@@ -72,6 +93,7 @@ void DTRDebug_Update(DTRState *const state,
 		DTRDebug *const debug = &globalDebug;
 
 		debug->renderBuffer = renderBuffer;
+		debug->input        = input;
 		debug->font         = &state->font;
 		debug->displayColor = DqnV4_4f(1, 1, 1, 1);
 		if (debug->font->bitmap && debug->renderBuffer)
@@ -88,6 +110,12 @@ void DTRDebug_Update(DTRState *const state,
 		DTRDebug_PushText("TrianglesRendered: %'lld", debug->counter[DTRDebugCounter_RenderTriangle]);
 		DTRDebug_PushText("");
 
+		for (i32 i = 0; i < DQN_ARRAY_COUNT(debug->cycleCount); i++)
+		{
+			DTRDebug_PushText("%d: %'lld cycles", i, debug->cycleCount[i]);
+		}
+		DTRDebug_PushText("");
+
 		// memory
 		{
 			PushMemStackText("PermBuffer", &memory->permMemStack);
@@ -95,6 +123,7 @@ void DTRDebug_Update(DTRState *const state,
 		}
 
 		DTRDebug_PushText("SSE2Support: %s", (input->canUseSSE2) ? "true" : "false");
+		DTRDebug_PushText("SSE2Support: %s", (input->canUseRdtsc) ? "true" : "false");
 
 		debug->displayP =
 			DqnV2_2i(0, debug->renderBuffer->height + globalDebug.displayYOffset);

@@ -105,7 +105,7 @@ FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x
 	if (!renderBuffer) return;
 	if (x < 0 || x > (renderBuffer->width - 1)) return;
 	if (y < 0 || y > (renderBuffer->height - 1)) return;
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 
 	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
 	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
@@ -175,7 +175,7 @@ void DTRRender_Text(DTRRenderBuffer *const renderBuffer,
 {
 	if (!text) return;
 	if (!font.bitmap || !font.atlas || !renderBuffer) return;
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 
 	if (len == -1) len = Dqn_strlen(text);
 
@@ -253,7 +253,7 @@ FILE_SCOPE void TransformPoints(const DqnV2 origin, DqnV2 *const pList,
                                 const f32 rotation)
 {
 	if (!pList || numP == 0) return;
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 
 	DqnV2 xAxis = (DqnV2_2f(cosf(rotation), sinf(rotation)));
 	DqnV2 yAxis = DqnV2_2f(-xAxis.y, xAxis.x);
@@ -271,7 +271,7 @@ void DTRRender_Line(DTRRenderBuffer *const renderBuffer, DqnV2i a,
                     DqnV2i b, DqnV4 color)
 {
 	if (!renderBuffer) return;
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 
 	color = DTRRender_SRGB1ToLinearSpaceV4(color);
 	color = PreMultiplyAlpha1(color);
@@ -390,7 +390,7 @@ FILE_SCOPE DqnRect GetBoundingBox(const DqnV2 *const pList, const i32 numP)
 void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 max,
                          DqnV4 color, const DTRRenderTransform transform)
 {
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
@@ -487,7 +487,7 @@ void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 m
 void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
                         DqnV4 color, const DTRRenderTransform transform)
 {
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
@@ -527,6 +527,10 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 	   Given two points that form a line and an extra point to test, we can
 	   determine whether a point lies on the line, or is to the left or right of
 	   a the line.
+
+	   We can do this using the PerpDotProduct conceptually known as the cross
+	   product in 2D. This can be expressed using the determinant and is the
+	   method we are using.
 
 	   First forming a 3x3 matrix of our terms with a, b being from the triangle
 	   and test point c, we can derive a 2x2 matrix by subtracting the 1st
@@ -646,15 +650,18 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 	f32 signedArea3DeltaX = c.y - a.y;
 	f32 signedArea3DeltaY = a.x - c.x;
 
-	f32 invSignedAreaParallelogram = 1 / ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+	f32 signedAreaParallelogram = ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+	if (signedAreaParallelogram == 0) return;
+	f32 invSignedAreaParallelogram = 1 / signedAreaParallelogram;
 
+	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	color.rgb *= 0.1f;
+	const u32 zBufferPitch        = renderBuffer->width;
+	const f32 BARYCENTRIC_EPSILON = 0.1f;
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
 	{
-
 		f32 signedArea1Row = signedArea1;
 		f32 signedArea2Row = signedArea2;
 		f32 signedArea3Row = signedArea3;
@@ -663,7 +670,30 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 		{
 			if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
 			{
+#if 1
+				f32 barycentricA = signedArea2Row * invSignedAreaParallelogram;
+				f32 barycentricB = signedArea3Row * invSignedAreaParallelogram;
+				f32 barycentricC = signedArea1Row * invSignedAreaParallelogram;
+
+				if (DTR_DEBUG)
+				{
+					f32 barycentricSum = barycentricA + barycentricB + barycentricC;
+					DQN_ASSERT((1.0f - barycentricSum) < BARYCENTRIC_EPSILON);
+				}
+
+				f32 pixelZValue =
+				    (a.z * barycentricA) + (b.z * barycentricB) + (c.z * barycentricC);
+
+				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
+				f32 currZValue   = renderBuffer->zBuffer[zBufferIndex];
+				if (pixelZValue > currZValue)
+				{
+					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+					SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
+				}
+#else
 				SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
+#endif
 			}
 
 			signedArea1Row += signedArea1DeltaX;
@@ -675,6 +705,7 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 		signedArea2 += signedArea2DeltaY;
 		signedArea3 += signedArea3DeltaY;
 	}
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Debug
@@ -718,7 +749,7 @@ void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer,
                       const DTRRenderTransform transform, DqnV4 color)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
-	DTR_DEBUG_TIMED_FUNCTION();
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
@@ -785,7 +816,7 @@ void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer,
 
 			if (bufXYIsInside)
 			{
-				DTR_DEBUG_TIMED_BLOCK("DTRRender_Bitmap TexelCalculation");
+				DTR_DEBUG_EP_TIMED_BLOCK("DTRRender_Bitmap TexelCalculation");
 				DqnV2 bufPRelToBasis = DqnV2_2i(bufferX, bufferY) - rectBasis;
 
 				f32 u = DqnV2_Dot(bufPRelToBasis, xAxisRelToBasis) * invXAxisLenSq;
@@ -816,7 +847,7 @@ void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer,
 				i32 texel4Y = DQN_MIN((texelY + 1), bitmap->dim.h - 1);
 
 				{
-					DTR_DEBUG_TIMED_BLOCK("DTRRender_Bitmap TexelBilinearInterpolation");
+					DTR_DEBUG_EP_TIMED_BLOCK("DTRRender_Bitmap TexelBilinearInterpolation");
 					u32 texel1  = *(u32 *)(bitmapPtr + ((texel1X * bitmap->bytesPerPixel) + (texel1Y * pitch)));
 					u32 texel2  = *(u32 *)(bitmapPtr + ((texel2X * bitmap->bytesPerPixel) + (texel2Y * pitch)));
 					u32 texel3  = *(u32 *)(bitmapPtr + ((texel3X * bitmap->bytesPerPixel) + (texel3Y * pitch)));

@@ -513,6 +513,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 	PlatformInput platformInput = {};
 	platformInput.canUseSSE2    = IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE);
+	platformInput.canUseRdtsc   = IsProcessorFeaturePresent(PF_RDTSC_INSTRUCTION_AVAILABLE);
 	platformInput.api           = platformAPI;
 
 	////////////////////////////////////////////////////////////////////////////
