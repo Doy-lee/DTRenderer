@@ -580,7 +580,7 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	   = (bx - ax)(1)         = (bx - ax)
 
 	   Then we can see that when we progress along x, we only need to change by
-	   the value of SignedArea by (ay - by) and similarly for y, (bx - ay)
+	   the value of SignedArea by (ay - by) and similarly for y, (bx - ax)
 
 	   /////////////////////////////////////////////////////////////////////////
 	   // Barycentric Coordinates
@@ -632,16 +632,16 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	const DqnV2 b = p2;
 	const DqnV2 c = p3;
 
-	DqnV2i scanP          = DqnV2i_2i(min.x, min.y);
-	f32 signedArea1       = ((b.x - a.x) * (scanP.y - a.y)) - ((b.y - a.y) * (scanP.x - a.x));
+	DqnV2i startP = min;
+	f32 signedArea1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
 	f32 signedArea1DeltaX = a.y - b.y;
 	f32 signedArea1DeltaY = b.x - a.x;
 
-	f32 signedArea2       = ((c.x - b.x) * (scanP.y - b.y)) - ((c.y - b.y) * (scanP.x - b.x));
+	f32 signedArea2       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
 	f32 signedArea2DeltaX = b.y - c.y;
 	f32 signedArea2DeltaY = c.x - b.x;
 
-	f32 signedArea3       = ((a.x - c.x) * (scanP.y - c.y)) - ((a.y - c.y) * (scanP.x - c.x));
+	f32 signedArea3       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
 	f32 signedArea3DeltaX = c.y - a.y;
 	f32 signedArea3DeltaY = a.x - c.x;
 
@@ -650,18 +650,19 @@ void DTRRender_Triangle(PlatformRenderBuffer *const renderBuffer, DqnV2 p1, DqnV
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	for (scanP.y = min.y; scanP.y < max.y; scanP.y++)
+	color.rgb *= 0.1f;
+	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
 	{
 
 		f32 signedArea1Row = signedArea1;
 		f32 signedArea2Row = signedArea2;
 		f32 signedArea3Row = signedArea3;
 
-		for (scanP.x = min.x; scanP.x < max.x; scanP.x++)
+		for (i32 bufferX = min.x; bufferX < max.x; bufferX++)
 		{
 			if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
 			{
-				SetPixel(renderBuffer, scanP.x, scanP.y, color, ColorSpace_Linear);
+				SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
 			}
 
 			signedArea1Row += signedArea1DeltaX;

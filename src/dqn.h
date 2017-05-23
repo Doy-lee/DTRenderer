@@ -504,6 +504,8 @@ DQN_FILE_SCOPE inline bool    operator==(DqnV2i  a, DqnV2i b) { return      DqnV
 typedef union DqnV3
 {
 	struct { f32 x, y, z; };
+    DqnV2 xy;
+
     struct { f32 r, g, b; };
 	f32 e[3];
 } DqnV3;
@@ -527,6 +529,8 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Hadamard(DqnV3 a, DqnV3 b);
 DQN_FILE_SCOPE f32   DqnV3_Dot     (DqnV3 a, DqnV3 b);
 DQN_FILE_SCOPE bool  DqnV3_Equals  (DqnV3 a, DqnV3 b);
 DQN_FILE_SCOPE DqnV3 DqnV3_Cross   (DqnV3 a, DqnV3 b);
+
+DQN_FILE_SCOPE DqnV3 DqnV3_Normalise(DqnV3 a);
 
 DQN_FILE_SCOPE inline DqnV3  operator- (DqnV3  a, DqnV3 b) { return      DqnV3_Sub     (a, b);  }
 DQN_FILE_SCOPE inline DqnV3  operator+ (DqnV3  a, DqnV3 b) { return      DqnV3_Add     (a, b);  }
@@ -575,17 +579,18 @@ DQN_FILE_SCOPE DqnV4 DqnV4_Hadamard(DqnV4 a, DqnV4 b);
 DQN_FILE_SCOPE f32   DqnV4_Dot     (DqnV4 a, DqnV4 b);
 DQN_FILE_SCOPE bool  DqnV4_Equals  (DqnV4 a, DqnV4 b);
 
-DQN_FILE_SCOPE inline DqnV4  operator- (DqnV4  a, DqnV4 b) { return      DqnV4_Sub     (a, b);  }
-DQN_FILE_SCOPE inline DqnV4  operator+ (DqnV4  a, DqnV4 b) { return      DqnV4_Add     (a, b);  }
-DQN_FILE_SCOPE inline DqnV4  operator* (DqnV4  a, DqnV4 b) { return      DqnV4_Hadamard(a, b);  }
-DQN_FILE_SCOPE inline DqnV4  operator* (DqnV4  a, f32   b) { return      DqnV4_Scalef  (a, b);  }
-DQN_FILE_SCOPE inline DqnV4  operator* (DqnV4  a, i32   b) { return      DqnV4_Scalei  (a, b);  }
-DQN_FILE_SCOPE inline DqnV4 &operator*=(DqnV4 &a, DqnV4 b) { return (a = DqnV4_Hadamard(a, b)); }
-DQN_FILE_SCOPE inline DqnV4 &operator*=(DqnV4 &a, f32   b) { return (a = DqnV4_Scalef  (a, b)); }
-DQN_FILE_SCOPE inline DqnV4 &operator*=(DqnV4 &a, i32   b) { return (a = DqnV4_Scalei  (a, b)); }
-DQN_FILE_SCOPE inline DqnV4 &operator-=(DqnV4 &a, DqnV4 b) { return (a = DqnV4_Sub     (a, b)); }
-DQN_FILE_SCOPE inline DqnV4 &operator+=(DqnV4 &a, DqnV4 b) { return (a = DqnV4_Add     (a, b)); }
-DQN_FILE_SCOPE inline bool   operator==(DqnV4  a, DqnV4 b) { return      DqnV4_Equals  (a, b);  }
+DQN_FILE_SCOPE inline DqnV4  operator- (DqnV4  a, DqnV4 b) { return      DqnV4_Sub     (a, b);            }
+DQN_FILE_SCOPE inline DqnV4  operator+ (DqnV4  a, DqnV4 b) { return      DqnV4_Add     (a, b);            }
+DQN_FILE_SCOPE inline DqnV4  operator+ (DqnV4  a, f32   b) { return      DqnV4_Add     (a, DqnV4_1f(b));  }
+DQN_FILE_SCOPE inline DqnV4  operator* (DqnV4  a, DqnV4 b) { return      DqnV4_Hadamard(a, b);            }
+DQN_FILE_SCOPE inline DqnV4  operator* (DqnV4  a, f32   b) { return      DqnV4_Scalef  (a, b);            }
+DQN_FILE_SCOPE inline DqnV4  operator* (DqnV4  a, i32   b) { return      DqnV4_Scalei  (a, b);            }
+DQN_FILE_SCOPE inline DqnV4 &operator*=(DqnV4 &a, DqnV4 b) { return (a = DqnV4_Hadamard(a, b));           }
+DQN_FILE_SCOPE inline DqnV4 &operator*=(DqnV4 &a, f32   b) { return (a = DqnV4_Scalef  (a, b));           }
+DQN_FILE_SCOPE inline DqnV4 &operator*=(DqnV4 &a, i32   b) { return (a = DqnV4_Scalei  (a, b));           }
+DQN_FILE_SCOPE inline DqnV4 &operator-=(DqnV4 &a, DqnV4 b) { return (a = DqnV4_Sub     (a, b));           }
+DQN_FILE_SCOPE inline DqnV4 &operator+=(DqnV4 &a, DqnV4 b) { return (a = DqnV4_Add     (a, b));           }
+DQN_FILE_SCOPE inline bool   operator==(DqnV4  a, DqnV4 b) { return      DqnV4_Equals  (a, b);            }
 
 ////////////////////////////////////////////////////////////////////////////////
 // 4D Matrix Mat4
@@ -2122,6 +2127,15 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Cross(DqnV3 a, DqnV3 b)
 	result.e[0] = (a.e[1] * b.e[2]) - (a.e[2] * b.e[1]);
 	result.e[1] = (a.e[2] * b.e[0]) - (a.e[0] * b.e[2]);
 	result.e[2] = (a.e[0] * b.e[1]) - (a.e[1] * b.e[0]);
+	return result;
+}
+
+DQN_FILE_SCOPE DqnV3 DqnV3_Normalise(DqnV3 a)
+{
+	f32 length    = DqnMath_Sqrtf(DQN_SQUARED(a.x) + DQN_SQUARED(a.y) + DQN_SQUARED(a.z));
+	f32 invLength = 1 / length;
+	DqnV3 result  = a * invLength;
+
 	return result;
 }
 

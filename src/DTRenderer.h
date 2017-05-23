@@ -8,6 +8,32 @@ typedef void DTR_UpdateFunction(struct PlatformRenderBuffer *const renderBuffer,
                                 struct PlatformInput        *const input,
                                 struct PlatformMemory       *const memory);
 
+typedef struct WavefrontModelFace
+{
+	DqnArray<i32> vertexArray;
+	DqnArray<i32> textureArray;
+	DqnArray<i32> normalArray;
+} WavefrontModelFace;
+
+typedef struct WavefrontModel
+{
+	// TODO(doyle): Fixed size
+	char *groupName[16];
+	i32 groupNameIndex;
+	i32 groupSmoothing;
+
+	DqnArray<WavefrontModelFace> faces;
+} WavefrontModel;
+
+typedef struct WavefrontObj
+{
+	DqnArray<DqnV4> geometryArray;
+	DqnArray<DqnV3> texUVArray;
+	DqnArray<DqnV3> normalArray;
+
+	WavefrontModel model;
+} WavefrontObj;
+
 typedef struct DTRFont
 {
 	u8    *bitmap;
@@ -27,7 +53,8 @@ typedef struct DTRBitmap
 
 typedef struct DTRState
 {
-	DTRFont   font;
-	DTRBitmap bitmap;
+	DTRFont           font;
+	DTRBitmap         bitmap;
+	WavefrontObj obj;
 } DTRState;
 #endif

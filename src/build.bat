@@ -61,7 +61,8 @@ REM Compile
 REM ////////////////////////////////////////////////////////////////////////////
 del *.pdb >NUL 2>NUL
 cl %CompileFlags% %Win32Flags% ..\src\Win32DTRenderer.cpp /link %LinkLibraries% %LinkFlags%
-cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link ..\src\external\easy\easy_profiler.lib /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
+REM cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link ..\src\external\easy\easy_profiler.lib /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
+cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
 
 popd
 set LastError=%ERRORLEVEL%

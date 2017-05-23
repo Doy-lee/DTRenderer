@@ -11,42 +11,15 @@
 
 #include <math.h>
 
-typedef struct WavefrontModelFace
-{
-	DqnArray<i32> vertexArray;
-	DqnArray<i32> textureArray;
-	DqnArray<i32> normalArray;
-} WavefrontModelFace;
-
 FILE_SCOPE inline WavefrontModelFace ObjWavefrontModelFaceInit(i32 capacity = 3)
 {
 	WavefrontModelFace result = {};
-	DQN_ASSERT(DqnArray_Init(&result.vertexArray,  capacity));
+	DQN_ASSERT(DqnArray_Init(&result.vertexArray, capacity));
 	DQN_ASSERT(DqnArray_Init(&result.textureArray, capacity));
-	DQN_ASSERT(DqnArray_Init(&result.normalArray,  capacity));
+	DQN_ASSERT(DqnArray_Init(&result.normalArray, capacity));
 
 	return result;
 }
-
-typedef struct WavefrontModel
-{
-	// TODO(doyle): Fixed size
-	char *groupName[16];
-	i32 groupNameIndex;
-	i32 groupSmoothing;
-
-	DqnArray<WavefrontModelFace> faces;
-} WavefrontModel;
-
-typedef struct WavefrontObj
-{
-	DqnArray<DqnV4> geometryArray;
-	DqnArray<DqnV3> texUVArray;
-	DqnArray<DqnV3> normalArray;
-
-	WavefrontModel model;
-} WavefrontObj;
-
 FILE_SCOPE bool ObjWaveFrontInit(WavefrontObj *const obj, const i32 vertexInitCapacity = 1000,
                                  const i32 faceInitCapacity = 200)
 {
@@ -147,7 +120,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 					}
 
 					i32 f32Len = (i32)((size_t)scan - (size_t)f32StartPtr);
-					v4.e[vIndex++] = Dqn_StrToF32(f32StartPtr, f32Len);
+					v4.e[vIndex++] = (f32)atof(f32StartPtr); // Dqn_StrToF32(f32StartPtr, f32Len);
 					DQN_ASSERT(vIndex < DQN_ARRAY_COUNT(v4.e));
 
 					while (scan && (*scan == ' ' || *scan == '\n')) scan++;
@@ -1480,7 +1453,6 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	}
 
 	DTR_DEBUG_TIMED_FUNCTION();
-	LOCAL_PERSIST WavefrontObj waveObj = {};
 	if (!memory->isInit)
 	{
 		TestStrToF32Converter();
@@ -1504,80 +1476,72 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 		DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->permMemStack);
 		BitmapLoad(input->api, &test, "byte_read_check.bmp",
 		           &memory->transMemStack);
-		int x = 5;
 		DqnMemStack_EndTempRegion(tmp);
 
-#if 0
-		DQN_ASSERT(ObjWavefrontLoad(input->api, memory, "african_head.obj", &waveObj));
-#endif
+		DQN_ASSERT(ObjWavefrontLoad(input->api, memory, "african_head.obj", &state->obj));
 	}
-	DTRRender_Clear(renderBuffer, DqnV3_3f(0, 0, 0));
+	DTRRender_Clear(renderBuffer, DqnV3_3f(0.0f, 0.0f, 0.0f));
 
-#if 1
-	DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
-	for (i32 i = 0; i < waveObj.model.faces.count; i++)
+	const DqnV3 LIGHT           = DqnV3_3i(0, 0, -1);
+	const f32 MODEL_SCALE       = DQN_MIN(renderBuffer->width, renderBuffer->height) * 0.5f;
+	WavefrontObj *const waveObj = &state->obj;
+	DqnV2 modelP                = DqnV2_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
+
+	for (i32 i = 0; i < waveObj->model.faces.count; i++)
 	{
-		WavefrontModelFace face = waveObj.model.faces.data[i];
+		WavefrontModelFace face = waveObj->model.faces.data[i];
 		DQN_ASSERT(face.vertexArray.count == 3);
-
-#if 0
 		i32 vertAIndex = face.vertexArray.data[0];
 		i32 vertBIndex = face.vertexArray.data[1];
 		i32 vertCIndex = face.vertexArray.data[2];
 
-		DqnV4 vertA = waveObj.geometryArray.data[vertAIndex];
-		DqnV4 vertB = waveObj.geometryArray.data[vertBIndex];
-		DqnV4 vertC = waveObj.geometryArray.data[vertCIndex];
+		DqnV4 vertA = waveObj->geometryArray.data[vertAIndex];
+		DqnV4 vertB = waveObj->geometryArray.data[vertBIndex];
+		DqnV4 vertC = waveObj->geometryArray.data[vertCIndex];
 
-		vertA.x *= (renderBuffer->width * 0.5f);
-		vertA.y *= (renderBuffer->height * 0.5f);
+		DqnV4 vertAB = vertB - vertA;
+		DqnV4 vertAC = vertC - vertA;
+		DqnV3 normal = DqnV3_Cross(vertAC.xyz, vertAB.xyz);
 
-		vertB.x *= (renderBuffer->width * 0.5f);
-		vertB.y *= (renderBuffer->height * 0.5f);
-
-		vertC.x *= (renderBuffer->width * 0.5f);
-		vertC.y *= (renderBuffer->height * 0.5f);
-
-		vertA.x += (renderBuffer->width * 0.5f);
-		vertA.y += (renderBuffer->height * 0.5f);
-
-		vertB.x += (renderBuffer->width * 0.5f);
-		vertB.y += (renderBuffer->height * 0.5f);
-
-		vertC.x += (renderBuffer->width * 0.5f);
-		vertC.y += (renderBuffer->height * 0.5f);
-
-		DTRRender_Triangle(renderBuffer, vertA.xy, vertB.xy, vertC.xy, modelCol);
-#else
-		const i32 NUM_VERTEXES = 3;
-		for (i32 j = 0; j < NUM_VERTEXES; j++)
+		f32 intensity  = DqnV3_Dot(DqnV3_Normalise(normal), LIGHT);
+		if (intensity > 0)
 		{
-			i32 vertAIndex = face.vertexArray.data[j];
-			i32 vertBIndex = face.vertexArray.data[(j + 1) % NUM_VERTEXES];
+			DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
+			modelCol.rgb *= intensity;
 
-			DqnV4 vertA = waveObj.geometryArray.data[vertAIndex];
-			DqnV4 vertB = waveObj.geometryArray.data[vertBIndex];
+			DqnV2 screenVertA = (vertA.xy * MODEL_SCALE) + modelP;
+			DqnV2 screenVertB = (vertB.xy * MODEL_SCALE) + modelP;
+			DqnV2 screenVertC = (vertC.xy * MODEL_SCALE) + modelP;
 
-			vertA.x = (vertA.x * (renderBuffer->width * 0.5f)) + renderBuffer->width * 0.5f;
-			vertA.y = (vertA.y * (renderBuffer->height * 0.5f)) + renderBuffer->height * 0.5f;
+			// TODO(doyle): Why do we need rounding here? Maybe it's because
+			// I don't do any interpolation in the triangle routine for jagged
+			// edges.
+			screenVertA.x = (f32)(i32)(screenVertA.x + 0.5f);
+			screenVertA.y = (f32)(i32)(screenVertA.y + 0.5f);
+			screenVertB.x = (f32)(i32)(screenVertB.x + 0.5f);
+			screenVertB.y = (f32)(i32)(screenVertB.y + 0.5f);
+			screenVertC.x = (f32)(i32)(screenVertC.x + 0.5f);
+			screenVertC.y = (f32)(i32)(screenVertC.y + 0.5f);
 
-			vertB.x = (vertB.x * (renderBuffer->width * 0.5f)) + renderBuffer->width * 0.5f;
-			vertB.y = (vertB.y * (renderBuffer->height * 0.5f)) + renderBuffer->height * 0.5f;
-
-			DTRRender_Line(renderBuffer, DqnV2i_V2(vertA.xy), DqnV2i_V2(vertB.xy), modelCol);
-		}
-#endif
-	}
-#endif
+			DTRRender_Triangle(renderBuffer, screenVertA, screenVertB, screenVertC, modelCol);
 
 #if 0
+			DqnV4 wireColor = DqnV4_1f(1.0f);
+			for (i32 j = 0; j < 3; j++)
+			{
+				DTRRender_Line(renderBuffer, DqnV2i_V2(screenVertA), DqnV2i_V2(screenVertB), wireColor);
+			}
+#endif
+		}
+	}
+
 #if 1
 	DqnV4 colorRed = DqnV4_4f(0.8f, 0, 0, 1);
 	DqnV2i bufferMidP =
 	    DqnV2i_2f(renderBuffer->width * 0.5f, renderBuffer->height * 0.5f);
 	i32 boundsOffset = 100;
 
-	DqnV2 t0[3] = {DqnV2_2i(10, 70), DqnV2_2i(50, 160), DqnV2_2i(70, 80)};
+	DqnV2 t0[3] = {DqnV2_2i(10, 70),   DqnV2_2i(50, 160),  DqnV2_2i(70, 80)};
 	DqnV2 t1[3] = {DqnV2_2i(180, 50),  DqnV2_2i(150, 1),   DqnV2_2i(70, 180)};
 	DqnV2 t2[3] = {DqnV2_2i(180, 150), DqnV2_2i(120, 160), DqnV2_2i(130, 180)};
 	LOCAL_PERSIST DqnV2 t3[3] = {
@@ -1589,16 +1553,20 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DTRRender_Triangle(renderBuffer, t1[0], t1[1], t1[2], colorRed);
 	DTRRender_Triangle(renderBuffer, t2[0], t2[1], t2[2], colorRed);
 
+	DqnV2 t4[3] = {DqnV2_2i(100, 150), DqnV2_2i(200, 150), DqnV2_2i(200, 250)};
+	DqnV2 t5[3] = {DqnV2_2i(300, 150), DqnV2_2i(201, 150), DqnV2_2i(200, 250)};
+	DTRRender_Triangle(renderBuffer, t4[0], t4[1], t4[2], colorRed);
+	DTRRender_Triangle(renderBuffer, t5[0], t5[1], t5[2], colorRed);
+
 	DqnV4 colorRedHalfA        = DqnV4_4f(1, 0, 0, 0.1f);
 	LOCAL_PERSIST f32 rotation = 0;
 	rotation += input->deltaForFrame * 0.25f;
 
-#if 1
 	DTRRenderTransform defaultTransform = DTRRender_DefaultTransform();
 	defaultTransform.rotation           = rotation + 45;
+
 	DTRRender_Rectangle(renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 100.0f), DqnV4_4f(0, 1.0f, 1.0f, 1.0f),
 	                    defaultTransform);
-#endif
 
 	// Rotating triangle
 	{
@@ -1624,8 +1592,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const renderBuffer,
 	DTRRender_Bitmap(renderBuffer, &state->bitmap, bitmapP, transform, color);
 
 #else
-	CompAssignment(renderBuffer, input, memory);
-#endif
+	// CompAssignment(renderBuffer, input, memory);
 #endif
 	DTRDebug_Update(state, renderBuffer, input, memory);
 }

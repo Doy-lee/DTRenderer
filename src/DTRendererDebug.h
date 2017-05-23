@@ -3,11 +3,11 @@
 
 #include "dqn.h"
 #define DTR_DEBUG 1
-#ifdef DTR_DEBUG
+#if DTR_DEBUG
 	#define DTR_DEBUG_RENDER             0
 
-	#define DTR_DEBUG_PROFILING          1
-	#ifdef DTR_DEBUG_PROFILING
+	#define DTR_DEBUG_PROFILING          0
+	#if     DTR_DEBUG_PROFILING
 		#define BUILD_WITH_EASY_PROFILER 1
 		#include "external/easy/profiler.h"
 
