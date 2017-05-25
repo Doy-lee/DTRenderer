@@ -2,7 +2,10 @@
 #define DTRENDERER_DEBUG_H
 
 #include "dqn.h"
+
+// NOTE: When DTR_DEBUG is 0, _ALL_ debug code is compiled out.
 #define DTR_DEBUG 1
+
 #if DTR_DEBUG
 	#define DTR_DEBUG_RENDER 1
 
@@ -36,6 +39,7 @@ typedef struct DTRFont         DTRFont;
 typedef struct DTRState        DTRState;
 typedef struct PlatformInput   PlatformInput;
 typedef struct PlatformMemory  PlatformMemory;
+typedef struct DTRWavefObj     DTRWavefObj;
 
 enum DTRDebugCounter
 {
@@ -67,22 +71,12 @@ typedef struct DTRDebug
 
 extern DTRDebug globalDebug;
 
-void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *const transMemStack);
-void DTRDebug_PushText(const char *const formatStr, ...);
-void DTRDebug_Update(DTRState *const state,
-                     DTRRenderBuffer *const renderBuffer,
-                     PlatformInput *const input, PlatformMemory *const memory);
-
-void inline DTRDebug_BeginCycleCount(enum DTRDebugCycleCount tag);
-void inline DTRDebug_EndCycleCount  (enum DTRDebugCycleCount tag);
-
-void inline DTRDebug_CounterIncrement(enum DTRDebugCounter tag)
-{
-	if (DTR_DEBUG)
-	{
-		DQN_ASSERT(tag >= 0 && tag < DTRDebugCounter_Count);
-		globalDebug.counter[tag]++;
-	}
-}
+void        DTRDebug_TestWavefFaceAndVertexParser(DTRWavefObj *const obj);
+void        DTRDebug_DumpZBuffer                 (DTRRenderBuffer *const renderBuffer, DqnMemStack *const transMemStack);
+void        DTRDebug_PushText                    (const char *const formatStr, ...);
+void        DTRDebug_Update                      (DTRState *const state, DTRRenderBuffer *const renderBuffer, PlatformInput *const input, PlatformMemory *const memory);
+void inline DTRDebug_BeginCycleCount             (enum DTRDebugCycleCount tag);
+void inline DTRDebug_EndCycleCount               (enum DTRDebugCycleCount tag);
+void inline DTRDebug_CounterIncrement            (enum DTRDebugCounter tag);
 
 #endif

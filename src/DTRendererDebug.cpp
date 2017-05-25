@@ -1,11 +1,50 @@
 #include "DTRendererDebug.h"
 #include "DTRenderer.h"
+#include "DTRendererAsset.h"
 #include "DTRendererPlatform.h"
 #include "DTRendererRender.h"
 
 #include "dqn.h"
 
+#include "external/tests/tinyrenderer/geometry.h"
+#include "external/tests/tinyrenderer/model.cpp"
+#include <vector>
+
 DTRDebug globalDebug;
+void DTRDebug_TestWavefFaceAndVertexParser(DTRWavefModel *const obj)
+{
+	if (DTR_DEBUG)
+	{
+		if (!obj) DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		Model model = Model("african_head.obj");
+
+		DQN_ASSERT(obj->faces.count == model.nfaces());
+		for (i32 i = 0; i < model.nfaces(); i++)
+		{
+			std::vector<i32> correctFace = model.face(i);
+			DTRWavefModelFace *myFace    = &obj->faces.data[i];
+
+			DQN_ASSERT(myFace->vertexIndexArray.count == correctFace.size());
+
+			for (i32 j = 0; j < myFace->vertexIndexArray.count; j++)
+			{
+				// Ensure the vertex index references are correct per face
+				DQN_ASSERT(myFace->vertexIndexArray.data[j] == correctFace[j]);
+
+				Vec3f tmp           = model.vert(correctFace[j]);
+				DqnV3 correctVertex = DqnV3_3f(tmp[0], tmp[1], tmp[2]);
+				DqnV3 myVertex = (obj->geometryArray.data[myFace->vertexIndexArray.data[j]]).xyz;
+
+				// Ensure the vertex values read are correct
+				for (i32 k = 0; k < DQN_ARRAY_COUNT(correctVertex.e); k++)
+				{
+					f32 delta = DQN_ABS(correctVertex.e[k] - myVertex.e[k]);
+					DQN_ASSERT(delta < 0.1f);
+				}
+			}
+		}
+	}
+}
 
 void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *const transMemStack)
 {
@@ -191,4 +230,12 @@ void DTRDebug_Update(DTRState *const state,
 	}
 }
 
+void inline DTRDebug_CounterIncrement(enum DTRDebugCounter tag)
+{
+	if (DTR_DEBUG)
+	{
+		DQN_ASSERT(tag >= 0 && tag < DTRDebugCounter_Count);
+		globalDebug.counter[tag]++;
+	}
+}
 
