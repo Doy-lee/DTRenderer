@@ -2,7 +2,6 @@
 #include "DTRendererDebug.h"
 #include "DTRendererRender.h"
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "external/stb_image.h"
 
 // #define DTR_DEBUG_RENDER_FONT_BITMAP
@@ -52,7 +51,7 @@ FILE_SCOPE inline DTRWavefModelFace WavefModelFaceInit(i32 capacity = 3)
 }
 
 bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory,
-                           const char *const path, DTRWavefModel *const obj)
+                             DTRWavefModel *const obj, const char *const path)
 {
 	if (!memory || !path || !obj) return false;
 
@@ -451,36 +450,108 @@ bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memo
 	return true;
 }
 
-// TODO(doyle): Uses malloc
-bool DTRAsset_BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap, const char *const path,
-                         DqnMemStack *const transMemStack)
-{
-	if (!bitmap) return false;
+////////////////////////////////////////////////////////////////////////////////
+// Bitmap Loading Code
+////////////////////////////////////////////////////////////////////////////////
+// TODO(doyle): Not threadsafe
+FILE_SCOPE DqnMemStack *globalSTBImageAllocator;
 
+FILE_SCOPE void MemcopyInternal(u8 *dest, u8 *src, size_t numBytes)
+{
+	if (!dest || !src || numBytes == 0) return;
+	for (size_t i = 0; i < numBytes; i++)
+		dest[i] = src[i];
+}
+
+FILE_SCOPE void *STBImageReallocSized(void *ptr, size_t oldSize, size_t newSize)
+{
+	// TODO(doyle): Implement when needed. There's no easy way using our stack
+	// allocator since freeing arbitrary elements is abit difficult. But the
+	// general approach is, if the ptr is the last thing that was allocated,
+	// then we can safely push if there's enough space.
+
+	// Othewise eat the cost, we have to actually realloc the old data. Make
+	// a new block and memcpy over the old data.
+	DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	return NULL;
+}
+
+FILE_SCOPE void STBImageFree(void *ptr)
+{
+	// NOTE(doyle): Using our own allocator. Using our MemStack just take note
+	// of current usage before we call STB functions. When we receive the final
+	// ptr just memmove the ptr data back to where we started and update usage
+	// accordingly.
+	return;
+}
+
+FILE_SCOPE void *STBImageMalloc(size_t size)
+{
+	DQN_ASSERT(globalSTBImageAllocator);
+	if (!globalSTBImageAllocator) return NULL;
+	void *result = DqnMemStack_Push(globalSTBImageAllocator, size);
+	return result;
+}
+
+#define STBI_MALLOC(size)                         STBImageMalloc(size)
+#define STBI_REALLOC_SIZED(ptr, oldSize, newSize) STBImageReallocSized(ptr, oldSize, newSize)
+#define STBI_FREE(ptr)                            STBImageFree(ptr)
+
+#define STBI_NO_STDIO
+#define STBI_ONLY_PNG
+#define STBI_ONLY_TGA
+#define STBI_ONLY_BMP
+#define STB_IMAGE_IMPLEMENTATION
+#include "external/stb_image.h"
+
+// TODO(doyle): Uses malloc
+bool DTRAsset_BitmapLoad(const PlatformAPI api, DqnMemStack *const bitmapMemStack,
+                         DqnMemStack *const transMemStack, DTRBitmap *bitmap,
+                         const char *const path)
+{
+	if (!bitmap || !bitmapMemStack || !transMemStack) return false;
+
+	bool result       = false;
 	PlatformFile file = {};
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
-		return false;
+		return result;
 
-	DqnTempMemStack tempBuffer = DqnMemStack_BeginTempRegion(transMemStack);
+	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(transMemStack);
+	u8 *const rawData            = (u8 *)DqnMemStack_Push     (transMemStack, file.size);
+	size_t bytesRead             = api.FileRead               (&file, rawData, file.size);
+
+	if (bytesRead != file.size) goto cleanup;
+
+	// IMPORTANT(doyle): Look at this line!!! To remind you anytime you think of modifying code here
+	globalSTBImageAllocator = bitmapMemStack;
+	size_t usageBeforeSTB   = bitmapMemStack->block->used;
+
+	const u32 FORCE_4_BPP = 4;
+	bitmap->bytesPerPixel = FORCE_4_BPP;
+	u8 *pixels = stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w, &bitmap->dim.h,
+	                                   NULL, FORCE_4_BPP);
+
+	if (!pixels) goto cleanup;
+
+	result                      = true;
+	size_t pixelsSizeInBytes    = bitmap->dim.w * bitmap->dim.h * FORCE_4_BPP;
+	bitmapMemStack->block->used = usageBeforeSTB;
+
+	if ((usageBeforeSTB + pixelsSizeInBytes) < bitmapMemStack->block->size)
 	{
-		u8 *const rawData =
-		    (u8 *)DqnMemStack_Push(transMemStack, file.size);
-		size_t bytesRead = api.FileRead(&file, rawData, file.size);
-		api.FileClose(&file);
-
-		if (bytesRead != file.size)
-		{
-			DqnMemStack_EndTempRegion(tempBuffer);
-			return false;
-		}
-
-		const u32 FORCE_4_BPP = 4;
-		bitmap->memory = stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w,
-		                                       &bitmap->dim.h, NULL, FORCE_4_BPP);
-		bitmap->bytesPerPixel = FORCE_4_BPP;
+		u8 *dest = bitmapMemStack->block->memory + bitmapMemStack->block->used;
+		MemcopyInternal(dest, pixels, pixelsSizeInBytes);
+		pixels = dest;
 	}
-	DqnMemStack_EndTempRegion(tempBuffer);
-	if (!bitmap->memory) return false;
+	else
+	{
+		// TODO(doyle): Check this periodically. We don't like this branch occuring often
+		// Otherwise, stbi will call STBImageMalloc which uses our MemStack and
+		// MemStack will allocate a new block for us if it can, so it'll already
+		// be somewhat "suitably" sitting in our memory system.
+	}
+
+	bitmap->memory = pixels;
 
 	const i32 pitch = bitmap->dim.w * bitmap->bytesPerPixel;
 	for (i32 y = 0; y < bitmap->dim.h; y++)
@@ -511,5 +582,9 @@ bool DTRAsset_BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap, const char *c
 		}
 	}
 
-	return true;
+cleanup:
+	DqnMemStack_EndTempRegion(tmpMemRegion);
+	api.FileClose(&file);
+
+	return result;
 }

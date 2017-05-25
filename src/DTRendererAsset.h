@@ -4,7 +4,6 @@
 #include "DTRendererPlatform.h"
 
 #include "dqn.h"
-
 #include "external/stb_truetype.h"
 
 typedef struct DTRWavefModelFace
@@ -46,7 +45,7 @@ typedef struct DTRBitmap
 } DTRBitmap;
 
 void DTRAsset_InitGlobalState ();
-bool DTRAsset_WavefModelLoad  (const PlatformAPI api, PlatformMemory *const memory, const char *const path, DTRWavefModel *const obj);
+bool DTRAsset_WavefModelLoad  (const PlatformAPI api, PlatformMemory *const memory, DTRWavefModel *const obj, const char *const path);
 bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memory, DTRFont *const font, const char *const path, const DqnV2i bitmapDim, const DqnV2i codepointRange, const f32 sizeInPt);
-bool DTRAsset_BitmapLoad      (const PlatformAPI api, DTRBitmap *bitmap, const char *const path, DqnMemStack *const transMemStack);
+bool DTRAsset_BitmapLoad      (const PlatformAPI api, DqnMemStack *const bitmapMemStack, DqnMemStack *const transMemStack, DTRBitmap *bitmap, const char *const path);
 #endif

@@ -968,19 +968,21 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		state = (DTRState *)memory->context;
 		DTRAsset_FontToBitmapLoad(input->api, memory, &state->font, "Roboto-bold.ttf",
 		                          DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 12);
-		DTRAsset_BitmapLoad(input->api, &state->bitmap, "tree00.bmp", &memory->transMemStack);
+		DTRAsset_BitmapLoad(input->api, &memory->permMemStack,
+		                    &memory->transMemStack, &state->bitmap, "tree00.bmp");
 
 		if (DTR_DEBUG)
 		{
 			DTRBitmap test      = {};
 			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->transMemStack);
-			DTRAsset_BitmapLoad(input->api, &test, "byte_read_check.bmp", &memory->transMemStack);
+			DTRAsset_BitmapLoad(input->api, &memory->permMemStack, &memory->transMemStack, &test, "byte_read_check.bmp");
 			DqnMemStack_EndTempRegion(tmp);
 		}
 
-		if (DTRAsset_WavefModelLoad(input->api, memory, "african_head.obj", &state->obj))
+		if (DTRAsset_WavefModelLoad(input->api, memory, &state->obj, "african_head.obj"))
 		{
-			DTRAsset_BitmapLoad(input->api, &state->objTex, "african_head_diffuse.tga", &memory->transMemStack);
+			DTRAsset_BitmapLoad(input->api, &memory->permMemStack, &memory->transMemStack,
+			                    &state->objTex, "african_head_diffuse.tga");
 		}
 
 		DTRDebug_TestWavefFaceAndVertexParser(&state->obj);
