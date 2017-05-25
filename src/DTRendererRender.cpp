@@ -7,16 +7,11 @@
 #include "external/stb_rect_pack.h"
 #include "external/stb_truetype.h"
 
-// #define DTR_DEBUG_RENDER_FONT_BITMAP
-#ifdef DTR_DEBUG_RENDER_FONT_BITMAP
-	#define STB_IMAGE_WRITE_IMPLEMENTATION
-	#include "external/stb_image_write.h"
-#endif
-
 FILE_SCOPE const f32 COLOR_EPSILON = 0.9f;
 
 FILE_SCOPE inline DqnV4 PreMultiplyAlpha1(const DqnV4 color)
 {
+	DQN_ASSERT(color.a >= 0.0f && color.a <= 1.0f);
 	DqnV4 result;
 	result.r = color.r * color.a;
 	result.g = color.g * color.a;
@@ -26,7 +21,10 @@ FILE_SCOPE inline DqnV4 PreMultiplyAlpha1(const DqnV4 color)
 	DQN_ASSERT(result.r >= 0.0f && result.r <= 1.0f);
 	DQN_ASSERT(result.g >= 0.0f && result.g <= 1.0f);
 	DQN_ASSERT(result.b >= 0.0f && result.b <= 1.0f);
-	DQN_ASSERT(result.a >= 0.0f && result.a <= 1.0f);
+
+	DQN_ASSERT(result.a >= result.r);
+	DQN_ASSERT(result.a >= result.g);
+	DQN_ASSERT(result.a >= result.b);
 	return result;
 }
 
@@ -113,10 +111,8 @@ FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x
 	// If some alpha is involved, we need to apply gamma correction, but if the
 	// new pixel is totally opaque or invisible then we're just flat out
 	// overwriting/keeping the state of the pixel so we can save cycles by skipping.
-#if 1
 	bool needGammaFix = (color.a > 0.0f || color.a < 1.0f + COLOR_EPSILON) && (colorSpace == ColorSpace_SRGB);
 	if (needGammaFix) color = DTRRender_SRGB1ToLinearSpaceV4(color);
-#endif
 
 	u32 src  = bitmapPtr[x + (y * pitchInU32)];
 	f32 srcR = (f32)((src >> 16) & 0xFF) * DTRRENDER_INV_255;
@@ -484,6 +480,237 @@ void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 m
 	}
 }
 
+FILE_SCOPE void DebugBarycentricInternal(DqnV2 p, DqnV2 a, DqnV2 b, DqnV2 c, f32 *u, f32 *v, f32 *w)
+{
+	DqnV2 v0 = b - a;
+	DqnV2 v1 = c - a;
+	DqnV2 v2 = p - a;
+
+	f32 d00   = DqnV2_Dot(v0, v0);
+	f32 d01   = DqnV2_Dot(v0, v1);
+	f32 d11   = DqnV2_Dot(v1, v1);
+	f32 d20   = DqnV2_Dot(v2, v0);
+	f32 d21   = DqnV2_Dot(v2, v1);
+	f32 denom = d00 * d11 - d01 * d01;
+	*v        = (d11 * d20 - d01 * d21) / denom;
+	*w        = (d00 * d21 - d01 * d20) / denom;
+	*u        = 1.0f - *v - *w;
+}
+
+void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
+                                DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
+                                DqnV4 color, const DTRRenderTransform transform)
+{
+	DTR_DEBUG_EP_TIMED_FUNCTION();
+	////////////////////////////////////////////////////////////////////////////
+	// Transform vertexes
+	////////////////////////////////////////////////////////////////////////////
+	DqnV3 p1p2 = p2 - p1;
+	DqnV3 p1p3 = p3 - p1;
+
+	// TODO(doyle): Transform is only in 2d right now
+	DqnV2 p1p2Anchored = p1p2.xy * transform.anchor;
+	DqnV2 p1p3Anchored = p1p3.xy * transform.anchor;
+	DqnV2 origin       = p1.xy + p1p2Anchored + p1p3Anchored;
+	DqnV2 pList[3]     = {p1.xy - origin, p2.xy - origin, p3.xy - origin};
+	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale, transform.rotation);
+	p1.xy = pList[0];
+	p2.xy = pList[1];
+	p3.xy = pList[2];
+
+	color = DTRRender_SRGB1ToLinearSpaceV4(color);
+	color = PreMultiplyAlpha1(color);
+
+	////////////////////////////////////////////////////////////////////////////
+	// Calculate Bounding Box
+	////////////////////////////////////////////////////////////////////////////
+	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
+	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
+	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
+	                       DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
+	min.x = DQN_MAX(min.x, 0);
+	min.y = DQN_MAX(min.y, 0);
+	max.x = DQN_MIN(max.x, renderBuffer->width - 1);
+	max.y = DQN_MIN(max.y, renderBuffer->height - 1);
+
+	f32 area2Times = ((p2.x - p1.x) * (p2.y + p1.y)) +
+	                 ((p3.x - p2.x) * (p3.y + p2.y)) +
+	                 ((p1.x - p3.x) * (p1.y + p3.y));
+	if (area2Times > 0)
+	{
+		// Clockwise swap any point to make it clockwise
+		DQN_SWAP(DqnV3, p2, p3);
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	// Signed Area - See Render_Triangle for explanation
+	////////////////////////////////////////////////////////////////////////////
+	const DqnV3 a = p1;
+	const DqnV3 b = p2;
+	const DqnV3 c = p3;
+
+	DqnV2i startP = min;
+	f32 oldSignedArea1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
+	f32 oldSignedArea2       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
+	f32 oldSignedArea3       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
+
+	f32 signedArea1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
+	f32 signedArea1DeltaX = a.y - b.y;
+	f32 signedArea1DeltaY = b.x - a.x;
+
+	f32 signedArea2       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
+	f32 signedArea2DeltaX = b.y - c.y;
+	f32 signedArea2DeltaY = c.x - b.x;
+
+	f32 signedArea3       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
+	f32 signedArea3DeltaX = c.y - a.y;
+	f32 signedArea3DeltaY = a.x - c.x;
+
+	f32 signedAreaParallelogram = signedArea1 + signedArea2 + signedArea3;
+	if (signedAreaParallelogram == 0) return;
+	f32 invSignedAreaParallelogram = 1 / signedAreaParallelogram;
+
+	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
+	////////////////////////////////////////////////////////////////////////////
+	// Scan and Render
+	////////////////////////////////////////////////////////////////////////////
+	const u32 zBufferPitch        = renderBuffer->width;
+	const f32 BARYCENTRIC_EPSILON = 0.1f;
+
+	u8 *texturePtr         = texture->memory;
+	const u32 texturePitch = texture->bytesPerPixel * texture->dim.w;
+	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
+	{
+		f32 signedArea1Row = signedArea1;
+		f32 signedArea2Row = signedArea2;
+		f32 signedArea3Row = signedArea3;
+
+		for (i32 bufferX = min.x; bufferX < max.x; bufferX++)
+		{
+			if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
+			{
+				f32 barycentricB = signedArea3Row * invSignedAreaParallelogram;
+				f32 barycentricC = signedArea1Row * invSignedAreaParallelogram;
+
+				if (DTR_DEBUG)
+				{
+					const f32 EPSILON = 0.1f;
+
+					f32 debugSignedArea1 = ((b.x - a.x) * (bufferY - a.y)) - ((b.y - a.y) * (bufferX - a.x));
+					f32 debugSignedArea2 = ((c.x - b.x) * (bufferY - b.y)) - ((c.y - b.y) * (bufferX - b.x));
+					f32 debugSignedArea3 = ((a.x - c.x) * (bufferY - c.y)) - ((a.y - c.y) * (bufferX - c.x));
+
+					f32 deltaSignedArea1 = debugSignedArea1 - signedArea1Row;
+					f32 deltaSignedArea2 = debugSignedArea2 - signedArea2Row;
+					f32 deltaSignedArea3 = debugSignedArea3 - signedArea3Row;
+					DQN_ASSERT(deltaSignedArea1 < EPSILON && deltaSignedArea2 < EPSILON &&
+					           deltaSignedArea3 < EPSILON)
+
+					f32 debugBarycentricA, debugBarycentricB, debugBarycentricC;
+					DebugBarycentricInternal(DqnV2_2i(bufferX, bufferY), a.xy, b.xy, c.xy,
+					                         &debugBarycentricA, &debugBarycentricB,
+					                         &debugBarycentricC);
+
+
+					f32 deltaBaryB = DQN_ABS(barycentricB - debugBarycentricB);
+					f32 deltaBaryC = DQN_ABS(barycentricC - debugBarycentricC);
+
+					DQN_ASSERT(deltaBaryB < EPSILON && deltaBaryC < EPSILON)
+				}
+
+				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
+				f32 pixelZValue = a.z + (barycentricB * (b.z - a.z)) + (barycentricC * (c.z - a.z));
+				f32 currZValue  = renderBuffer->zBuffer[zBufferIndex];
+				DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
+
+				if (pixelZValue > currZValue)
+				{
+					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+					const bool DEBUG_SAMPLE_TEXTURE = true;
+					DqnV2 uv = uv1 + ((uv2 - uv1) * barycentricB) + ((uv3 - uv1) * barycentricC);
+
+					const f32 EPSILON = 0.1f;
+					DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
+					DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
+
+					uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
+					uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
+
+					f32 texelXf = uv.x * texture->dim.w;
+					f32 texelYf = uv.y * texture->dim.h;
+					DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
+					DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
+
+					i32 texelX = (i32)texelXf;
+					i32 texelY = (i32)texelYf;
+
+					u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
+					                      (texelY * texturePitch));
+
+					DqnV4 color1;
+					color1.a = (f32)(texel1 >> 24);
+					color1.b = (f32)((texel1 >> 16) & 0xFF);
+					color1.g = (f32)((texel1 >> 8) & 0xFF);
+					color1.r = (f32)((texel1 >> 0) & 0xFF);
+
+					color1 *= DTRRENDER_INV_255;
+					color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
+					DqnV4 blend = color * color1;
+					SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+				}
+			}
+
+			signedArea1Row += signedArea1DeltaX;
+			signedArea2Row += signedArea2DeltaX;
+			signedArea3Row += signedArea3DeltaX;
+		}
+
+		signedArea1 += signedArea1DeltaY;
+		signedArea2 += signedArea2DeltaY;
+		signedArea3 += signedArea3DeltaY;
+	}
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
+
+	////////////////////////////////////////////////////////////////////////////
+	// Debug
+	////////////////////////////////////////////////////////////////////////////
+	DTRDebug_CounterIncrement(DTRDebugCounter_RenderTriangle);
+	if (DTR_DEBUG_RENDER)
+	{
+		// Draw Bounding box
+		if (0)
+		{
+			DTRRender_Line(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
+		}
+
+		// Draw Triangle Coordinate Basis
+		if (0)
+		{
+			DqnV2 xAxis = DqnV2_2f(cosf(transform.rotation), sinf(transform.rotation)) * transform.scale.x;
+			DqnV2 yAxis         = DqnV2_2f(-xAxis.y, xAxis.x) * transform.scale.y;
+			DqnV4 coordSysColor = DqnV4_4f(0, 1, 1, 1);
+			i32 axisLen = 50;
+			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
+		}
+
+		// Draw axis point
+		if (0)
+		{
+			DqnV4 green  = DqnV4_4f(0, 1, 0, 1);
+			DqnV4 blue   = DqnV4_4f(0, 0, 1, 1);
+			DqnV4 purple = DqnV4_4f(1, 0, 1, 1);
+
+			DTRRender_Rectangle(renderBuffer, p1.xy - DqnV2_1f(5), p1.xy + DqnV2_1f(5), green);
+			DTRRender_Rectangle(renderBuffer, p2.xy - DqnV2_1f(5), p2.xy + DqnV2_1f(5), blue);
+			DTRRender_Rectangle(renderBuffer, p3.xy - DqnV2_1f(5), p3.xy + DqnV2_1f(5), purple);
+		}
+	}
+}
+
 void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
                         DqnV4 color, const DTRRenderTransform transform)
 {
@@ -670,30 +897,17 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 		{
 			if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
 			{
-#if 1
-				f32 barycentricA = signedArea2Row * invSignedAreaParallelogram;
 				f32 barycentricB = signedArea3Row * invSignedAreaParallelogram;
 				f32 barycentricC = signedArea1Row * invSignedAreaParallelogram;
 
-				if (DTR_DEBUG)
-				{
-					f32 barycentricSum = barycentricA + barycentricB + barycentricC;
-					DQN_ASSERT((1.0f - barycentricSum) < BARYCENTRIC_EPSILON);
-				}
-
-				f32 pixelZValue =
-				    (a.z * barycentricA) + (b.z * barycentricB) + (c.z * barycentricC);
-
 				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
-				f32 currZValue   = renderBuffer->zBuffer[zBufferIndex];
+				f32 pixelZValue = a.z + (barycentricB * (b.z - a.z)) + (barycentricC * (c.z - a.z));
+				f32 currZValue  = renderBuffer->zBuffer[zBufferIndex];
 				if (pixelZValue > currZValue)
 				{
 					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
 					SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
 				}
-#else
-				SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
-#endif
 			}
 
 			signedArea1Row += signedArea1DeltaX;
@@ -996,5 +1210,3 @@ void DTRRender_Clear(DTRRenderBuffer *const renderBuffer,
 		}
 	}
 }
-
-

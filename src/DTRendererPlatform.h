@@ -10,6 +10,13 @@ enum PlatformFilePermissionFlag
 	PlatformFilePermissionFlag_Write = (1 << 1),
 };
 
+enum PlatformFileAction
+{
+	PlatformFileAction_OpenOnly,
+	PlatformFileAction_CreateIfNotExist,
+	PlatformFileAction_ClearIfExist,
+};
+
 typedef struct PlatformFile
 {
 	void   *handle;
@@ -17,16 +24,16 @@ typedef struct PlatformFile
 	u32     permissionFlags;
 } PlatformFile;
 
-typedef bool   PlatformAPI_FileOpen (const char *const path, PlatformFile *const file,
-                                     const u32 permissionFlags);
-typedef size_t PlatformAPI_FileRead (PlatformFile *const file, u8 *const buf,
-                                     const size_t bytesToRead); // Return bytes read
+typedef bool   PlatformAPI_FileOpen (const char *const path, PlatformFile *const file, const u32 permissionFlags, const enum PlatformFileAction actionFlags);
+typedef size_t PlatformAPI_FileRead (PlatformFile *const file, u8 *const buf, const size_t bytesToRead); // Return bytes read
+typedef size_t PlatformAPI_FileWrite(PlatformFile *const file, u8 *const buf, const size_t numBytesToWrite); // Return bytes read
 typedef void   PlatformAPI_FileClose(PlatformFile *const file);
 typedef void   PlatformAPI_Print    (const char *const string);
 typedef struct PlatformAPI
 {
 	PlatformAPI_FileOpen  *FileOpen;
 	PlatformAPI_FileRead  *FileRead;
+	PlatformAPI_FileWrite *FileWrite;
 	PlatformAPI_FileClose *FileClose;
 	PlatformAPI_Print     *Print;
 } PlatformAPI;
@@ -68,6 +75,14 @@ typedef struct KeyState
 	u32 halfTransitionCount;
 } KeyState;
 
+typedef struct PlatformMouse
+{
+	i32 x;
+	i32 y;
+	KeyState leftBtn;
+	KeyState rightBtn;
+} PlatformMouse;
+
 typedef struct PlatformInput
 {
 	f32  deltaForFrame;
@@ -76,7 +91,8 @@ typedef struct PlatformInput
 	bool canUseSSE2;
 	bool canUseRdtsc;
 
-	PlatformAPI api;
+	PlatformAPI   api;
+	PlatformMouse mouse;
 	union {
 		KeyState key[key_count];
 		struct

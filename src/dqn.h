@@ -36,7 +36,7 @@ typedef int16_t i16;
 typedef double f64;
 typedef float  f32;
 
-#define DQN_F32_MIN FLT_MIN
+#define DQN_F32_MIN -FLT_MAX
 
 #define DQN_TERABYTE(val) (DQN_GIGABYTE(val) * 1024LL)
 #define DQN_GIGABYTE(val) (DQN_MEGABYTE(val) * 1024LL)
@@ -765,7 +765,6 @@ DQN_FILE_SCOPE i32  DqnRnd_PCGRange(DqnRandPCGState *pcg, i32 min, i32 max);
 ////////////////////////////////////////////////////////////////////////////////
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-
 
 #define DQN_WIN32_ERROR_BOX(text, title) MessageBoxA(NULL, text, title, MB_OK);
 // Out is a pointer to the buffer to receive the characters.

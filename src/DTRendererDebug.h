@@ -4,7 +4,7 @@
 #include "dqn.h"
 #define DTR_DEBUG 1
 #if DTR_DEBUG
-	#define DTR_DEBUG_RENDER 0
+	#define DTR_DEBUG_RENDER 1
 
 	#define DTR_DEBUG_PROFILING_EASY_PROFILER 0
 	#if DTR_DEBUG_PROFILING_EASY_PROFILER
@@ -67,6 +67,7 @@ typedef struct DTRDebug
 
 extern DTRDebug globalDebug;
 
+void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *const transMemStack);
 void DTRDebug_PushText(const char *const formatStr, ...);
 void DTRDebug_Update(DTRState *const state,
                      DTRRenderBuffer *const renderBuffer,

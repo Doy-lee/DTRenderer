@@ -40,16 +40,20 @@ void Platform_Print(const char *const string)
 	OutputDebugString(string);
 }
 
-bool Platform_FileOpen(const char *const path, PlatformFile *const file,
-                       const u32 permissionFlags)
+bool Platform_FileOpen(const char *const path, PlatformFile *const file, const u32 permissionFlags,
+                       const enum PlatformFileAction fileAction)
 {
 	if (!path || !file) return false;
 	DQN_ASSERT((permissionFlags &
 	            ~(PlatformFilePermissionFlag_Write |
 	              PlatformFilePermissionFlag_Read)) == 0);
 
+	DQN_ASSERT((fileAction &
+	            ~(PlatformFileAction_OpenOnly | PlatformFileAction_CreateIfNotExist |
+	              PlatformFileAction_ClearIfExist)) == 0);
+
 	DqnFile dqnFile = {};
-	if (DqnFile_Open(path, &dqnFile, permissionFlags, DqnFileAction_OpenOnly))
+	if (DqnFile_Open(path, &dqnFile, permissionFlags, (enum DqnFileAction)fileAction))
 	{
 		*file = DqnFileToPlatformFileInternal(dqnFile);
 		return true;
@@ -69,6 +73,17 @@ size_t Platform_FileRead(PlatformFile *const file, u8 *const buf,
 	return numBytesRead;
 }
 
+size_t Platform_FileWrite(PlatformFile *const file, u8 *const buf,
+                         const size_t numBytesToWrite)
+{
+	if (!file || !buf) return 0;
+
+	DqnFile dqnFile     = PlatformFileToDqnFileInternal(*file);
+	size_t numBytesRead = DqnFile_Write(&dqnFile, buf, numBytesToWrite, 0);
+	return numBytesRead;
+}
+
+
 void Platform_FileClose(PlatformFile *const file)
 {
 	if (!file) return;
@@ -81,6 +96,7 @@ void Platform_FileClose(PlatformFile *const file)
 // Win32 Layer
 ////////////////////////////////////////////////////////////////////////////////
 #include <Windows.h>
+#include <Windowsx.h> // For GET_X|Y_LPARAM(), mouse input
 #include <Psapi.h>    // For win32 GetProcessMemoryInfo()
 typedef struct Win32RenderBitmap
 {
@@ -314,6 +330,34 @@ FILE_SCOPE void Win32ProcessMessages(HWND window, PlatformInput *input)
 			}
 			break;
 
+			case WM_LBUTTONDOWN:
+			case WM_RBUTTONDOWN:
+			case WM_LBUTTONUP:
+			case WM_RBUTTONUP:
+			{
+				bool isDown = (msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN);
+
+				if (msg.message == WM_LBUTTONDOWN || msg.message == WM_LBUTTONUP)
+				{
+					Win32UpdateKey(&input->mouse.leftBtn, isDown);
+				}
+				else if (msg.message == WM_RBUTTONDOWN || msg.message == WM_RBUTTONUP)
+				{
+					Win32UpdateKey(&input->mouse.rightBtn, isDown);
+				}
+			}
+			break;
+
+			case WM_MOUSEMOVE:
+			{
+				LONG height;
+				DqnWin32_GetClientDim(window, NULL, &height);
+
+				input->mouse.x = GET_X_LPARAM(msg.lParam);
+				input->mouse.y = height - GET_Y_LPARAM(msg.lParam);
+			}
+			break;
+
 			case WM_SYSKEYDOWN:
 			case WM_SYSKEYUP:
 			case WM_KEYDOWN:
@@ -431,8 +475,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	// when you blit to the screen blackness, the area that is being blitted to
 	// is slightly smaller than 800x600. Windows provides a function to help
 	// calculate the size you'd need by accounting for the window style.
-	const u32 MIN_WIDTH  = 1024;
-	const u32 MIN_HEIGHT = 768;
+	const u32 MIN_WIDTH  = 800;
+	const u32 MIN_HEIGHT = 800;
 	RECT rect   = {};
 	rect.right  = MIN_WIDTH;
 	rect.bottom = MIN_HEIGHT;
@@ -508,6 +552,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	PlatformAPI platformAPI = {};
 	platformAPI.FileOpen    = Platform_FileOpen;
 	platformAPI.FileRead    = Platform_FileRead;
+	platformAPI.FileWrite   = Platform_FileWrite;
 	platformAPI.FileClose   = Platform_FileClose;
 	platformAPI.Print       = Platform_Print;
 
@@ -588,8 +633,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			}
 		}
 
-		frameTimeInS   = DqnTime_NowInS() - startFrameTimeInS;
-		f32 msPerFrame = 1000.0f * (f32)frameTimeInS;
+		frameTimeInS        = DqnTime_NowInS() - startFrameTimeInS;
+		f32 msPerFrame      = 1000.0f * (f32)frameTimeInS;
+		f32 framesPerSecond = 1.0f / (f32)frameTimeInS;
 
 		////////////////////////////////////////////////////////////////////////
 		// Misc
@@ -600,7 +646,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 		// Update title bar
 		char windowTitleBuffer[128] = {};
-		Dqn_sprintf(windowTitleBuffer, "drenderer - dev - %5.2f ms/f - mem %'dkb", msPerFrame,
+		Dqn_sprintf(windowTitleBuffer, "drenderer - dev - %5.2f ms/f - %5.2f fps - mem %'dkb", msPerFrame, framesPerSecond,
 		            (u32)(memCounter.PagefileUsage / 1024.0f));
 		SetWindowTextA(mainWindow, windowTitleBuffer);
 	}

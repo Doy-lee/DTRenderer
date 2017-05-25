@@ -3,7 +3,55 @@
 #include "DTRendererPlatform.h"
 #include "DTRendererRender.h"
 
+#include "dqn.h"
+
 DTRDebug globalDebug;
+
+void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *const transMemStack)
+{
+	if (DTR_DEBUG)
+	{
+		PlatformAPI *const api = &globalDebug.input->api;
+		PlatformFile file      = {};
+
+		u32 permissions   = (PlatformFilePermissionFlag_Read | PlatformFilePermissionFlag_Write);
+		if (!api->FileOpen("zBufferDump.txt", &file, permissions,
+		                   PlatformFileAction_CreateIfNotExist))
+		{
+			if (!api->FileOpen("zBufferDump.txt", &file, permissions,
+			                   PlatformFileAction_ClearIfExist))
+			{
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+		}
+
+		DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(transMemStack);
+
+		size_t bufSize = DQN_MEGABYTE(16);
+		char *bufString = (char *)DqnMemStack_Push(transMemStack, bufSize);
+		char *bufPtr    = bufString;
+		for (i32 i = 0; i < renderBuffer->width * renderBuffer->height; i++)
+		{
+
+			f32 zValue = renderBuffer->zBuffer[i];
+			if (zValue == DQN_F32_MIN) continue;
+			i32 chWritten = Dqn_sprintf(bufPtr, "index %06d: %05.5f\n", i, zValue);
+			if ((bufPtr + chWritten) > (bufString + bufSize))
+			{
+				size_t bufPtrAddr    = (size_t)(bufPtr + chWritten);
+				size_t bufStringAddr = (size_t)(bufString + bufSize);
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+			bufPtr += chWritten;
+		}
+
+		size_t writeSize    = (size_t)bufPtr - (size_t)bufString;
+		size_t bytesWritten = api->FileWrite(&file, (u8 *)bufString, writeSize);
+		api->FileClose(&file);
+
+		DqnMemStack_EndTempRegion(tmpMemRegion);
+	}
+}
 
 void DTRDebug_PushText(const char *const formatStr, ...)
 {
@@ -105,6 +153,21 @@ void DTRDebug_Update(DTRState *const state,
 		debug->totalSetPixels += debug->counter[DTRDebugCounter_SetPixels];
 		debug->totalSetPixels = DQN_MAX(0, debug->totalSetPixels);
 
+		// memory
+		{
+			PushMemStackText("PermBuffer", &memory->permMemStack);
+			PushMemStackText("TransBuffer", &memory->transMemStack);
+		}
+
+		DTRDebug_PushText("Mouse: %d, %d", input->mouse.x, input->mouse.y);
+		DTRDebug_PushText("MouseLBtn: %s", (input->mouse.leftBtn.endedDown) ? "true" : "false");
+		DTRDebug_PushText("MouseRBtn: %s", (input->mouse.rightBtn.endedDown) ? "true" : "false");
+		DTRDebug_PushText("");
+
+		DTRDebug_PushText("SSE2Support: %s", (input->canUseSSE2) ? "true" : "false");
+		DTRDebug_PushText("RDTSCSupport: %s", (input->canUseRdtsc) ? "true" : "false");
+		DTRDebug_PushText("");
+
 		DTRDebug_PushText("TotalSetPixels: %'lld",    debug->totalSetPixels);
 		DTRDebug_PushText("SetPixelsPerFrame: %'lld", debug->counter[DTRDebugCounter_SetPixels]);
 		DTRDebug_PushText("TrianglesRendered: %'lld", debug->counter[DTRDebugCounter_RenderTriangle]);
@@ -116,15 +179,10 @@ void DTRDebug_Update(DTRState *const state,
 		}
 		DTRDebug_PushText("");
 
-		// memory
-		{
-			PushMemStackText("PermBuffer", &memory->permMemStack);
-			PushMemStackText("TransBuffer", &memory->transMemStack);
-		}
 
-		DTRDebug_PushText("SSE2Support: %s", (input->canUseSSE2) ? "true" : "false");
-		DTRDebug_PushText("SSE2Support: %s", (input->canUseRdtsc) ? "true" : "false");
-
+		////////////////////////////////////////////////////////////////////////
+		// End Debug Update
+		////////////////////////////////////////////////////////////////////////
 		debug->displayP =
 			DqnV2_2i(0, debug->renderBuffer->height + globalDebug.displayYOffset);
 

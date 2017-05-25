@@ -6,17 +6,60 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb_image.h"
 
+// #define DTR_DEBUG_RENDER_FONT_BITMAP
+#ifdef DTR_DEBUG_RENDER_FONT_BITMAP
+	#define STB_IMAGE_WRITE_IMPLEMENTATION
+	#include "external/tests/stb_image_write.h"
+#endif
+
 #define DQN_IMPLEMENTATION
 #include "dqn.h"
+
+#include "external/tests/tinyrenderer/geometry.h"
+#include "external/tests/tinyrenderer/model.cpp"
+#include <algorithm>
+#include <vector>
+
+FILE_SCOPE void DebugTestWavefrontFaceAndVertexParser(WavefrontObj *const obj)
+{
+	if (!obj) DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	Model model = Model("african_head.obj");
+
+	DQN_ASSERT(obj->model.faces.count == model.nfaces());
+	for (i32 i = 0; i < model.nfaces(); i++)
+	{
+		std::vector<i32> correctFace = model.face(i);
+		WavefrontModelFace *myFace   = &obj->model.faces.data[i];
+
+		DQN_ASSERT(myFace->vertexIndexArray.count == correctFace.size());
+
+		for (i32 j = 0; j < myFace->vertexIndexArray.count; j++)
+		{
+			// Ensure the vertex index references are correct per face
+			DQN_ASSERT(myFace->vertexIndexArray.data[j] == correctFace[j]);
+
+			Vec3f tmp           = model.vert(correctFace[j]);
+			DqnV3 correctVertex = DqnV3_3f(tmp[0], tmp[1], tmp[2]);
+			DqnV3 myVertex      = (obj->geometryArray.data[myFace->vertexIndexArray.data[j]]).xyz;
+
+			// Ensure the vertex values read are correct
+			for (i32 k = 0; k < DQN_ARRAY_COUNT(correctVertex.e); k++)
+			{
+				f32 delta = DQN_ABS(correctVertex.e[k] - myVertex.e[k]);
+				DQN_ASSERT(delta < 0.1f);
+			}
+		}
+	}
+}
 
 #include <math.h>
 
 FILE_SCOPE inline WavefrontModelFace ObjWavefrontModelFaceInit(i32 capacity = 3)
 {
 	WavefrontModelFace result = {};
-	DQN_ASSERT(DqnArray_Init(&result.vertexArray, capacity));
-	DQN_ASSERT(DqnArray_Init(&result.textureArray, capacity));
-	DQN_ASSERT(DqnArray_Init(&result.normalArray, capacity));
+	DQN_ASSERT(DqnArray_Init(&result.vertexIndexArray, capacity));
+	DQN_ASSERT(DqnArray_Init(&result.textureIndexArray, capacity));
+	DQN_ASSERT(DqnArray_Init(&result.normalIndexArray, capacity));
 
 	return result;
 }
@@ -28,14 +71,14 @@ FILE_SCOPE bool ObjWaveFrontInit(WavefrontObj *const obj, const i32 vertexInitCa
 	bool initialised = false;
 
 	initialised |= DqnArray_Init(&obj->geometryArray, vertexInitCapacity);
-	initialised |= DqnArray_Init(&obj->texUVArray,    vertexInitCapacity);
+	initialised |= DqnArray_Init(&obj->textureArray,    vertexInitCapacity);
 	initialised |= DqnArray_Init(&obj->normalArray,   vertexInitCapacity);
 	initialised |= DqnArray_Init(&obj->model.faces,   faceInitCapacity);
 
 	if (!initialised)
 	{
 		DqnArray_Free(&obj->geometryArray);
-		DqnArray_Free(&obj->texUVArray);
+		DqnArray_Free(&obj->textureArray);
 		DqnArray_Free(&obj->normalArray);
 		DqnArray_Free(&obj->model.faces);
 	}
@@ -49,7 +92,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 	if (!memory || !path || !obj) return false;
 
 	PlatformFile file = {};
-	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
+	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return false; // TODO(doyle): Logging
 
 	// TODO(doyle): Make arrays use given memory not malloc
@@ -120,8 +163,8 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 						scan++;
 					}
 
-					i32 f32Len = (i32)((size_t)scan - (size_t)f32StartPtr);
-					v4.e[vIndex++] = (f32)atof(f32StartPtr); // Dqn_StrToF32(f32StartPtr, f32Len);
+					i32 f32Len     = (i32)((size_t)scan - (size_t)f32StartPtr);
+					v4.e[vIndex++] = Dqn_StrToF32(f32StartPtr, f32Len);
 					DQN_ASSERT(vIndex < DQN_ARRAY_COUNT(v4.e));
 
 					while (scan && (*scan == ' ' || *scan == '\n')) scan++;
@@ -137,7 +180,7 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 				}
 				else if (type == WavefrontVertexType_Texture)
 				{
-					DqnArray_Push(&obj->texUVArray, v4.xyz);
+					DqnArray_Push(&obj->textureArray, v4.xyz);
 				}
 				else if (type == WavefrontVertexType_Normal)
 				{
@@ -214,19 +257,19 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 						{
 							// NOTE(doyle): Obj format starts indexing from 1,
 							// so offset by -1 to make it zero-based indexes.
-							i32 index = (i32)Dqn_StrToI64(numStartPtr, numLen) - 1;
+							i32 vertIndex = (i32)Dqn_StrToI64(numStartPtr, numLen) - 1;
 
 							if (type == WavefrontVertexType_Geometric)
 							{
-								DQN_ASSERT(DqnArray_Push(&face.vertexArray, index));
+								DQN_ASSERT(DqnArray_Push(&face.vertexIndexArray, vertIndex));
 							}
 							else if (type == WavefrontVertexType_Texture)
 							{
-								DQN_ASSERT(DqnArray_Push(&face.textureArray, index));
+								DQN_ASSERT(DqnArray_Push(&face.textureIndexArray, vertIndex));
 							}
 							else if (type == WavefrontVertexType_Normal)
 							{
-								DQN_ASSERT(DqnArray_Push(&face.normalArray, index));
+								DQN_ASSERT(DqnArray_Push(&face.normalIndexArray, vertIndex));
 							}
 						}
 
@@ -247,11 +290,6 @@ FILE_SCOPE bool ObjWavefrontLoad(const PlatformAPI api, PlatformMemory *const me
 						{
 							moreVertexesToParse = false;
 						}
-					}
-
-					if (obj->model.faces.count == 7470 || obj->model.faces.count == 2491)
-					{
-						int x = 5;
 					}
 				}
 				DQN_ASSERT(numVertexesParsed >= 3);
@@ -368,7 +406,7 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 	// Load font data
 	////////////////////////////////////////////////////////////////////////////
 	PlatformFile file = {};
-	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
+	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return false; // TODO(doyle): Logging
 
 	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
@@ -451,6 +489,7 @@ FILE_SCOPE bool BitmapFontCreate(const PlatformAPI api,
 	return true;
 }
 
+// TODO(doyle): Uses malloc
 FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
                            const char *const path,
                            DqnMemStack *const transMemStack)
@@ -458,7 +497,7 @@ FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
 	if (!bitmap) return false;
 
 	PlatformFile file = {};
-	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read))
+	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return false;
 
 	DqnTempMemStack tempBuffer = DqnMemStack_BeginTempRegion(transMemStack);
@@ -474,8 +513,10 @@ FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
 			return false;
 		}
 
+		const u32 FORCE_4_BPP = 4;
 		bitmap->memory = stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w,
-		                                       &bitmap->dim.h, &bitmap->bytesPerPixel, 4);
+		                                       &bitmap->dim.h, NULL, FORCE_4_BPP);
+		bitmap->bytesPerPixel = FORCE_4_BPP;
 	}
 	DqnMemStack_EndTempRegion(tempBuffer);
 	if (!bitmap->memory) return false;
@@ -495,14 +536,15 @@ FILE_SCOPE bool BitmapLoad(const PlatformAPI api, DTRBitmap *bitmap,
 			color.g     = (f32)((pixel >> 8) & 0xFF);
 			color.r     = (f32)((pixel >> 0) & 0xFF);
 
-			color *= DTRRENDER_INV_255;
-			color = DTRRender_PreMultiplyAlphaSRGB1WithLinearConversion(color);
-			color *= 255.0f;
+			DqnV4 preMulColor = color;
+			preMulColor *= DTRRENDER_INV_255;
+			preMulColor = DTRRender_PreMultiplyAlphaSRGB1WithLinearConversion(preMulColor);
+			preMulColor *= 255.0f;
 
-			pixel = (((u32)color.a << 24) |
-			         ((u32)color.b << 16) |
-			         ((u32)color.g << 8) |
-			         ((u32)color.r << 0));
+			pixel = (((u32)preMulColor.a << 24) |
+			         ((u32)preMulColor.b << 16) |
+			         ((u32)preMulColor.g << 8) |
+			         ((u32)preMulColor.r << 0));
 
 			pixelPtr[x] = pixel;
 		}
@@ -1370,7 +1412,7 @@ void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const in
 	}
 }
 
-FILE_SCOPE void TestStrToF32Converter()
+FILE_SCOPE void DebugTestStrToF32Converter()
 {
 	const f32 EPSILON = 0.001f;
 	const char a[]    = "-0.66248";
@@ -1459,7 +1501,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 	if (!memory->isInit)
 	{
-		TestStrToF32Converter();
+		DebugTestStrToF32Converter();
 		DTR_DEBUG_EP_TIMED_BLOCK("DTR_Update Memory Initialisation");
 		// NOTE(doyle): Do premultiply ourselves
 		stbi_set_unpremultiply_on_load(true);
@@ -1482,7 +1524,11 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		           &memory->transMemStack);
 		DqnMemStack_EndTempRegion(tmp);
 
+		DQN_ASSERT(BitmapLoad(input->api, &state->objTex, "african_head_diffuse.tga",
+		                      &memory->transMemStack));
 		DQN_ASSERT(ObjWavefrontLoad(input->api, memory, "african_head.obj", &state->obj));
+
+		DebugTestWavefrontFaceAndVertexParser(&state->obj);
 	}
 
 	DqnTempMemStack transMemTmpRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
@@ -1502,7 +1548,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	////////////////////////////////////////////////////////////////////////////
 	// Update and Render
 	////////////////////////////////////////////////////////////////////////////
-	DTRRender_Clear(&renderBuffer, DqnV3_3f(0.0f, 0.0f, 0.0f));
+	DTRRender_Clear(&renderBuffer, DqnV3_3f(0.5f, 0.0f, 1.0f));
 
 #if 1
 	DqnV4 colorRed    = DqnV4_4f(0.8f, 0, 0, 1);
@@ -1543,54 +1589,81 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 
 		for (i32 i = 0; i < waveObj->model.faces.count; i++)
 		{
+			if (i == 852)
+			{
+				int BreakHere = 0;
+			}
 			WavefrontModelFace face = waveObj->model.faces.data[i];
-			DQN_ASSERT(face.vertexArray.count == 3);
-			i32 vertAIndex = face.vertexArray.data[0];
-			i32 vertBIndex = face.vertexArray.data[1];
-			i32 vertCIndex = face.vertexArray.data[2];
+			DQN_ASSERT(face.vertexIndexArray.count == 3);
+			i32 vertAIndex = face.vertexIndexArray.data[0];
+			i32 vertBIndex = face.vertexIndexArray.data[1];
+			i32 vertCIndex = face.vertexIndexArray.data[2];
 
 			DqnV4 vertA = waveObj->geometryArray.data[vertAIndex];
 			DqnV4 vertB = waveObj->geometryArray.data[vertBIndex];
 			DqnV4 vertC = waveObj->geometryArray.data[vertCIndex];
+			DQN_ASSERT(vertAIndex < waveObj->geometryArray.count);
+			DQN_ASSERT(vertBIndex < waveObj->geometryArray.count);
+			DQN_ASSERT(vertCIndex < waveObj->geometryArray.count);
 
 			DqnV4 vertAB = vertB - vertA;
 			DqnV4 vertAC = vertC - vertA;
 			DqnV3 normal = DqnV3_Cross(vertAC.xyz, vertAB.xyz);
 
 			f32 intensity = DqnV3_Dot(DqnV3_Normalise(normal), LIGHT);
-			if (intensity > 0)
+			if (intensity < 0) continue;
+			DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
+			modelCol.rgb *= DQN_ABS(intensity);
+
+			DqnV3 screenVA = (vertA.xyz * MODEL_SCALE) + modelP;
+			DqnV3 screenVB = (vertB.xyz * MODEL_SCALE) + modelP;
+			DqnV3 screenVC = (vertC.xyz * MODEL_SCALE) + modelP;
+
+			// TODO(doyle): Why do we need rounding here? Maybe it's because
+			// I don't do any interpolation in the triangle routine for jagged
+			// edges.
+			screenVA.x = (f32)(i32)(screenVA.x + 0.5f);
+			screenVA.y = (f32)(i32)(screenVA.y + 0.5f);
+			screenVB.x = (f32)(i32)(screenVB.x + 0.5f);
+			screenVB.y = (f32)(i32)(screenVB.y + 0.5f);
+			screenVC.x = (f32)(i32)(screenVC.x + 0.5f);
+			screenVC.y = (f32)(i32)(screenVC.y + 0.5f);
+
+			i32 textureAIndex = face.textureIndexArray.data[0];
+			i32 textureBIndex = face.textureIndexArray.data[1];
+			i32 textureCIndex = face.textureIndexArray.data[2];
+
+			DqnV2 texA = waveObj->textureArray.data[textureAIndex].xy;
+			DqnV2 texB = waveObj->textureArray.data[textureBIndex].xy;
+			DqnV2 texC = waveObj->textureArray.data[textureCIndex].xy;
+			DQN_ASSERT(textureAIndex < waveObj->textureArray.count);
+			DQN_ASSERT(textureBIndex < waveObj->textureArray.count);
+			DQN_ASSERT(textureCIndex < waveObj->textureArray.count);
+
+			bool DEBUG_SIMPLE_MODE = false;
+			if (DTR_DEBUG && DEBUG_SIMPLE_MODE)
 			{
-				DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
-				modelCol.rgb *= intensity;
-
-				DqnV3 screenVA = (vertA.xyz * MODEL_SCALE) + modelP;
-				DqnV3 screenVB = (vertB.xyz * MODEL_SCALE) + modelP;
-				DqnV3 screenVC = (vertC.xyz * MODEL_SCALE) + modelP;
-
-				// TODO(doyle): Why do we need rounding here? Maybe it's because
-				// I don't do any interpolation in the triangle routine for jagged
-				// edges.
-				screenVA.x = (f32)(i32)(screenVA.x + 0.5f);
-				screenVA.y = (f32)(i32)(screenVA.y + 0.5f);
-				screenVB.x = (f32)(i32)(screenVB.x + 0.5f);
-				screenVB.y = (f32)(i32)(screenVB.y + 0.5f);
-				screenVC.x = (f32)(i32)(screenVC.x + 0.5f);
-				screenVC.y = (f32)(i32)(screenVC.y + 0.5f);
-
 				DTRRender_Triangle(&renderBuffer, screenVA, screenVB, screenVC, modelCol);
+			}
+			else
+			{
+				DTRRender_TexturedTriangle(&renderBuffer, screenVA, screenVB, screenVC, texA, texB,
+				                           texC, &state->objTex, modelCol);
+			}
 
-#if 0
-				DqnV4 wireColor = DqnV4_1f(1.0f);
-				for (i32 j = 0; j < 3; j++)
-				{
-					DTRRender_Line(renderBuffer, DqnV2i_V2(screenVertA), DqnV2i_V2(screenVertB), wireColor);
-				}
-#endif
+			bool DEBUG_WIREFRAME = false;
+			if (DTR_DEBUG && DEBUG_WIREFRAME)
+			{
+				DqnV4 wireColor = DqnV4_4f(1.0f, 1.0f, 1.0f, 0.01f);
+				DTRRender_Line(&renderBuffer, DqnV2i_V2(screenVA.xy), DqnV2i_V2(screenVB.xy), wireColor);
+				DTRRender_Line(&renderBuffer, DqnV2i_V2(screenVB.xy), DqnV2i_V2(screenVC.xy), wireColor);
+				DTRRender_Line(&renderBuffer, DqnV2i_V2(screenVC.xy), DqnV2i_V2(screenVA.xy), wireColor);
 			}
 		}
 	}
 
 	// Rect drawing
+	if (0)
 	{
 		DTRRenderTransform transform = DTRRender_DefaultTransform();
 		transform.rotation           = rotation + 45;
@@ -1600,6 +1673,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	}
 
 	// Bitmap drawing
+	if (0)
 	{
 		DTRRenderTransform transform = DTRRender_DefaultTransform();
 		transform.scale              = DqnV2_1f(2.0f);
@@ -1618,11 +1692,12 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 #endif
 
 	DTRDebug_Update(state, &renderBuffer, input, memory);
-
 	////////////////////////////////////////////////////////////////////////////
 	// End Update
 	////////////////////////////////////////////////////////////////////////////
 	DqnMemStack_EndTempRegion(transMemTmpRegion);
+	DqnMemStack_ClearCurrBlock(&memory->transMemStack, true);
+
 	DQN_ASSERT(memory->transMemStack.tempStackCount == 0);
 	DQN_ASSERT(memory->permMemStack.tempStackCount == 0);
 }
