@@ -34,13 +34,6 @@
 	#define DTR_DEBUG_PROFILING 1
 #endif
 
-typedef struct DTRRenderBuffer DTRRenderBuffer;
-typedef struct DTRFont         DTRFont;
-typedef struct DTRState        DTRState;
-typedef struct PlatformInput   PlatformInput;
-typedef struct PlatformMemory  PlatformMemory;
-typedef struct DTRWavefObj     DTRWavefObj;
-
 enum DTRDebugCounter
 {
 	DTRDebugCounter_SetPixels,
@@ -56,9 +49,9 @@ enum DTRDebugCycleCount
 
 typedef struct DTRDebug
 {
-	DTRFont         *font;
-	DTRRenderBuffer *renderBuffer;
-	PlatformInput   *input;
+	struct DTRFont         *font;
+	struct DTRRenderBuffer *renderBuffer;
+	struct PlatformInput   *input;
 
 	DqnV4 displayColor;
 	DqnV2 displayP;
@@ -71,12 +64,12 @@ typedef struct DTRDebug
 
 extern DTRDebug globalDebug;
 
-void        DTRDebug_TestWavefFaceAndVertexParser(DTRWavefObj *const obj);
-void        DTRDebug_DumpZBuffer                 (DTRRenderBuffer *const renderBuffer, DqnMemStack *const transMemStack);
-void        DTRDebug_PushText                    (const char *const formatStr, ...);
-void        DTRDebug_Update                      (DTRState *const state, DTRRenderBuffer *const renderBuffer, PlatformInput *const input, PlatformMemory *const memory);
-void inline DTRDebug_BeginCycleCount             (enum DTRDebugCycleCount tag);
-void inline DTRDebug_EndCycleCount               (enum DTRDebugCycleCount tag);
-void inline DTRDebug_CounterIncrement            (enum DTRDebugCounter tag);
+void        DTRDebug_TestMeshFaceAndVertexParser(struct DTRMesh *const mesh);
+void        DTRDebug_DumpZBuffer                (struct DTRRenderBuffer *const renderBuffer, struct DqnMemStack *const transMemStack);
+void        DTRDebug_PushText                   (const char *const formatStr, ...);
+void        DTRDebug_Update                     (struct DTRState *const state, struct DTRRenderBuffer *const renderBuffer, struct PlatformInput *const input, struct PlatformMemory *const memory);
+void inline DTRDebug_BeginCycleCount            (enum DTRDebugCycleCount tag);
+void inline DTRDebug_EndCycleCount              (enum DTRDebugCycleCount tag);
+void inline DTRDebug_CounterIncrement           (enum DTRDebugCounter tag);
 
 #endif

@@ -10,9 +10,8 @@ typedef void DTR_UpdateFunction(struct PlatformRenderBuffer *const renderBuffer,
 
 typedef struct DTRState
 {
-	DTRFont       font;
-	DTRBitmap     bitmap;
-	DTRWavefModel obj;
-	DTRBitmap     objTex;
+	DTRFont   font;
+	DTRBitmap bitmap;
+	DTRMesh   mesh;
 } DTRState;
 #endif

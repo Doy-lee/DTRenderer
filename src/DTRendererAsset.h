@@ -6,26 +6,40 @@
 #include "dqn.h"
 #include "external/stb_truetype.h"
 
-typedef struct DTRWavefModelFace
+typedef struct DTRBitmap
 {
-	DqnArray<i32> vertexIndexArray;
-	DqnArray<i32> textureIndexArray;
-	DqnArray<i32> normalIndexArray;
-} DTRWavefModelFace;
+	u8    *memory;
+	DqnV2i dim;
+	i32    bytesPerPixel;
+} DTRBitmap;
 
-typedef struct DTRWavefModel
+typedef struct DTRMeshFace
 {
-	DqnArray<DqnV4> geometryArray;
-	DqnArray<DqnV3> textureArray;
-	DqnArray<DqnV3> normalArray;
+	i32 *vertexIndex;
+	u32 numVertexIndex;
 
-	// TODO(doyle): Fixed size
-	char *groupName[16];
-	i32   groupNameIndex;
-	i32   groupSmoothing;
+	i32 *texIndex;
+	u32 numTexIndex;
 
-	DqnArray<DTRWavefModelFace> faces;
-} DTRWavefModel;
+	i32 *normalIndex;
+	u32  numNormalIndex;
+} DTRMeshFace;
+
+typedef struct DTRMesh
+{
+	DqnV4 *vertexes;
+	u32    numVertexes;
+
+	DqnV3 *texUV;
+	u32    numTexUV;
+
+	DqnV3 *normals;
+	u32    numNormals;
+
+	DTRMeshFace *faces;
+	u32          numFaces;
+	DTRBitmap    tex;
+} DTRMesh;
 
 typedef struct DTRFont
 {
@@ -37,15 +51,8 @@ typedef struct DTRFont
 	stbtt_packedchar *atlas;
 } DTRFont;
 
-typedef struct DTRBitmap
-{
-	u8    *memory;
-	DqnV2i dim;
-	i32    bytesPerPixel;
-} DTRBitmap;
-
 void DTRAsset_InitGlobalState ();
-bool DTRAsset_WavefModelLoad  (const PlatformAPI api, PlatformMemory *const memory, DTRWavefModel *const obj, const char *const path);
-bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memory, DTRFont *const font, const char *const path, const DqnV2i bitmapDim, const DqnV2i codepointRange, const f32 sizeInPt);
-bool DTRAsset_BitmapLoad      (const PlatformAPI api, DqnMemStack *const bitmapMemStack, DqnMemStack *const transMemStack, DTRBitmap *bitmap, const char *const path);
+bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStack, DTRMesh *const mesh, const char *const path);
+bool DTRAsset_LoadFontToBitmap(const PlatformAPI api, DqnMemStack *const memStack, DqnMemStack *const tmpMemStack, DTRFont *const font, const char *const path, const DqnV2i bitmapDim, const DqnV2i codepointRange, const f32 sizeInPt);
+bool DTRAsset_LoadBitmap      (const PlatformAPI api, DqnMemStack *const memStack, DqnMemStack *const transMemStack, DTRBitmap *bitmap, const char *const path);
 #endif

@@ -968,26 +968,26 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DqnMemStack *const tempStack  = &memory->tempStack;
 		DQN_ASSERT(memory->context);
 		state = (DTRState *)memory->context;
-		DTRAsset_FontToBitmapLoad(input->api, memory, &state->font, "Roboto-bold.ttf",
-		                          DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 12);
-		DTRAsset_BitmapLoad(input->api, assetStack,
+		DTRAsset_LoadFontToBitmap(input->api, &memory->mainStack, tempStack, &state->font,
+		                          "Roboto-bold.ttf", DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 12);
+		DTRAsset_LoadBitmap(input->api, assetStack,
 		                    tempStack, &state->bitmap, "tree00.bmp");
 
 		if (DTR_DEBUG)
 		{
 			DTRBitmap test      = {};
 			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->tempStack);
-			DTRAsset_BitmapLoad(input->api, assetStack, &memory->tempStack, &test, "byte_read_check.bmp");
+			DTRAsset_LoadBitmap(input->api, assetStack, &memory->tempStack, &test, "byte_read_check.bmp");
 			DqnMemStack_EndTempRegion(tmp);
 		}
 
-		if (DTRAsset_WavefModelLoad(input->api, memory, &state->obj, "african_head.obj"))
+		if (DTRAsset_LoadWavefrontObj(input->api, assetStack, &state->mesh, "african_head.obj"))
 		{
-			DTRAsset_BitmapLoad(input->api, assetStack, tempStack, &state->objTex,
+			DTRAsset_LoadBitmap(input->api, assetStack, tempStack, &state->mesh.tex,
 			                    "african_head_diffuse.tga");
 		}
 
-		DTRDebug_TestWavefFaceAndVertexParser(&state->obj);
+		DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
 	}
 
 	DqnTempMemStack transMemTmpRegion = DqnMemStack_BeginTempRegion(&memory->tempStack);
@@ -1043,27 +1043,25 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		////////////////////////////////////////////////////////////////////////
 		const DqnV3 LIGHT           = DqnV3_3i(0, 0, -1);
 		const f32 MODEL_SCALE       = DQN_MIN(renderBuffer.width, renderBuffer.height) * 0.5f;
-		DTRWavefModel *const waveObj = &state->obj;
+		DTRMesh *const mesh = &state->mesh;
 		DqnV3 modelP = DqnV3_3f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f, 0);
 
-		for (i32 i = 0; i < waveObj->faces.count; i++)
+		for (u32 i = 0; i < mesh->numFaces; i++)
 		{
-			if (i == 852)
-			{
-				int BreakHere = 0;
-			}
-			DTRWavefModelFace face = waveObj->faces.data[i];
-			DQN_ASSERT(face.vertexIndexArray.count == 3);
-			i32 vertAIndex = face.vertexIndexArray.data[0];
-			i32 vertBIndex = face.vertexIndexArray.data[1];
-			i32 vertCIndex = face.vertexIndexArray.data[2];
+			DTRMeshFace face = mesh->faces[i];
+			DQN_ASSERT(face.numVertexIndex == 3);
+			i32 vertAIndex = face.vertexIndex[0];
+			i32 vertBIndex = face.vertexIndex[1];
+			i32 vertCIndex = face.vertexIndex[2];
 
-			DqnV4 vertA = waveObj->geometryArray.data[vertAIndex];
-			DqnV4 vertB = waveObj->geometryArray.data[vertBIndex];
-			DqnV4 vertC = waveObj->geometryArray.data[vertCIndex];
-			DQN_ASSERT(vertAIndex < waveObj->geometryArray.count);
-			DQN_ASSERT(vertBIndex < waveObj->geometryArray.count);
-			DQN_ASSERT(vertCIndex < waveObj->geometryArray.count);
+			DqnV4 vertA = mesh->vertexes[vertAIndex];
+			DqnV4 vertB = mesh->vertexes[vertBIndex];
+			DqnV4 vertC = mesh->vertexes[vertCIndex];
+			// TODO(doyle): Some models have -ve indexes to refer to relative
+			// vertices. We should resolve that to positive indexes at run time.
+			DQN_ASSERT(vertAIndex < (i32)mesh->numVertexes);
+			DQN_ASSERT(vertBIndex < (i32)mesh->numVertexes);
+			DQN_ASSERT(vertCIndex < (i32)mesh->numVertexes);
 
 			DqnV4 vertAB = vertB - vertA;
 			DqnV4 vertAC = vertC - vertA;
@@ -1088,16 +1086,16 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			screenVC.x = (f32)(i32)(screenVC.x + 0.5f);
 			screenVC.y = (f32)(i32)(screenVC.y + 0.5f);
 
-			i32 textureAIndex = face.textureIndexArray.data[0];
-			i32 textureBIndex = face.textureIndexArray.data[1];
-			i32 textureCIndex = face.textureIndexArray.data[2];
+			i32 textureAIndex = face.texIndex[0];
+			i32 textureBIndex = face.texIndex[1];
+			i32 textureCIndex = face.texIndex[2];
 
-			DqnV2 texA = waveObj->textureArray.data[textureAIndex].xy;
-			DqnV2 texB = waveObj->textureArray.data[textureBIndex].xy;
-			DqnV2 texC = waveObj->textureArray.data[textureCIndex].xy;
-			DQN_ASSERT(textureAIndex < waveObj->textureArray.count);
-			DQN_ASSERT(textureBIndex < waveObj->textureArray.count);
-			DQN_ASSERT(textureCIndex < waveObj->textureArray.count);
+			DqnV2 texA = mesh->texUV[textureAIndex].xy;
+			DqnV2 texB = mesh->texUV[textureBIndex].xy;
+			DqnV2 texC = mesh->texUV[textureCIndex].xy;
+			DQN_ASSERT(textureAIndex < (i32)mesh->numTexUV);
+			DQN_ASSERT(textureBIndex < (i32)mesh->numTexUV);
+			DQN_ASSERT(textureCIndex < (i32)mesh->numTexUV);
 
 			bool DEBUG_SIMPLE_MODE = false;
 			if (DTR_DEBUG && DEBUG_SIMPLE_MODE)
@@ -1107,7 +1105,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			else
 			{
 				DTRRender_TexturedTriangle(&renderBuffer, screenVA, screenVB, screenVC, texA, texB,
-				                           texC, &state->objTex, modelCol);
+				                           texC, &state->mesh.tex, modelCol);
 			}
 
 			bool DEBUG_WIREFRAME = false;
@@ -1157,6 +1155,6 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	DqnMemStack_EndTempRegion(transMemTmpRegion);
 	DqnMemStack_ClearCurrBlock(&memory->tempStack, true);
 
-	DQN_ASSERT(memory->tempStack.tempStackCount == 0);
-	DQN_ASSERT(memory->mainStack.tempStackCount == 0);
+	for (i32 i = 0; i < DQN_ARRAY_COUNT(memory->stacks); i++)
+		DQN_ASSERT(memory->stacks[i].tempStackCount == 0);
 }

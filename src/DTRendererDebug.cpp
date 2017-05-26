@@ -11,29 +11,29 @@
 #include <vector>
 
 DTRDebug globalDebug;
-void DTRDebug_TestWavefFaceAndVertexParser(DTRWavefModel *const obj)
+void DTRDebug_TestMeshFaceAndVertexParser(DTRMesh *const mesh)
 {
 	if (DTR_DEBUG)
 	{
-		if (!obj) DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		if (!mesh) DQN_ASSERT(DQN_INVALID_CODE_PATH);
 		Model model = Model("african_head.obj");
 
-		DQN_ASSERT(obj->faces.count == model.nfaces());
+		DQN_ASSERT((i64)mesh->numFaces == model.nfaces());
 		for (i32 i = 0; i < model.nfaces(); i++)
 		{
 			std::vector<i32> correctFace = model.face(i);
-			DTRWavefModelFace *myFace    = &obj->faces.data[i];
+			DTRMeshFace *myFace          = &mesh->faces[i];
 
-			DQN_ASSERT(myFace->vertexIndexArray.count == correctFace.size());
+			DQN_ASSERT(myFace->numVertexIndex == correctFace.size());
 
-			for (i32 j = 0; j < myFace->vertexIndexArray.count; j++)
+			for (i32 j = 0; j < (i32)myFace->numVertexIndex; j++)
 			{
 				// Ensure the vertex index references are correct per face
-				DQN_ASSERT(myFace->vertexIndexArray.data[j] == correctFace[j]);
+				DQN_ASSERT(myFace->vertexIndex[j] == correctFace[j]);
 
 				Vec3f tmp           = model.vert(correctFace[j]);
 				DqnV3 correctVertex = DqnV3_3f(tmp[0], tmp[1], tmp[2]);
-				DqnV3 myVertex = (obj->geometryArray.data[myFace->vertexIndexArray.data[j]]).xyz;
+				DqnV3 myVertex      = (mesh->vertexes[myFace->vertexIndex[j]]).xyz;
 
 				// Ensure the vertex values read are correct
 				for (i32 k = 0; k < DQN_ARRAY_COUNT(correctVertex.e); k++)
