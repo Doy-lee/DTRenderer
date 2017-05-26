@@ -273,21 +273,23 @@ FILE_SCOPE void Win32HandleMenuMessages(HWND window, MSG msg,
 
 		case Win32Menu_FileFlushMemory:
 		{
+			for (i32 i = 0; i < DQN_ARRAY_COUNT(globalPlatformMemory.stacks); i++)
+			{
+				while (globalPlatformMemory.stacks[i].block->prevBlock)
+					DqnMemStack_FreeLastBlock(&globalPlatformMemory.stacks[i]);
+
+				DqnMemStack_ClearCurrBlock(&globalPlatformMemory.stacks[i], true);
+			}
+
 			DqnMemStack mainStack  = globalPlatformMemory.mainStack;
-			DqnMemStack tempStack = globalPlatformMemory.tempStack;
-			while (mainStack.block->prevBlock)
-				DqnMemStack_FreeLastBlock(&mainStack);
+			DqnMemStack assetStack = globalPlatformMemory.assetStack;
+			DqnMemStack tempStack  = globalPlatformMemory.tempStack;
 
-			while (tempStack.block->prevBlock)
-				DqnMemStack_FreeLastBlock(&tempStack);
-
-			DqnMemStack_ClearCurrBlock(&tempStack, true);
-			DqnMemStack_ClearCurrBlock(&mainStack, true);
-
-			PlatformMemory empty               = {};
-			globalPlatformMemory               = empty;
+			PlatformMemory empty            = {};
+			globalPlatformMemory            = empty;
 			globalPlatformMemory.mainStack  = mainStack;
-			globalPlatformMemory.tempStack = tempStack;
+			globalPlatformMemory.assetStack = assetStack;
+			globalPlatformMemory.tempStack  = tempStack;
 		}
 		break;
 

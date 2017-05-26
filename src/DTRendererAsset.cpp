@@ -32,7 +32,7 @@ FILE_SCOPE void AssetDqnArrayMemAPICallback(DqnMemAPICallbackInfo info, DqnMemAP
 	{
 		case DqnMemAPICallbackType_Alloc:
 		{
-			void *ptr        = DqnMemStack_Push(stack, info.requestSize);
+			void *ptr         = DqnMemStack_Push(stack, info.requestSize);
 			result->newMemPtr = ptr;
 			result->type      = DqnMemAPICallbackType_Alloc;
 		}
@@ -89,18 +89,18 @@ FILE_SCOPE void AssetDqnArrayMemAPICallback(DqnMemAPICallbackInfo info, DqnMemAP
 				stack->block->used -= info.oldSize;
 			}
 
-			// NOTE(doyle): This leaves chunks of memory dead!!! But, we use
-			// this in our custom allocator, which its strategy is to load all
-			// the data, using as much re-allocations as required then after the
-			// fact, recompact the data by Memcopying the data together and free
-			// the extraneous blocks we've made.
-
 			// Otherwise, not enough space or, allocation is not the last
 			// allocated, so can't expand inplace.
 			DqnMemStackBlock *newBlock =
 			    DqnMemStack_AllocateCompatibleBlock(stack, info.newRequestSize);
 			if (DqnMemStack_AttachBlock(stack, newBlock))
 			{
+				// NOTE(doyle): This leaves chunks of memory dead!!! But, we use
+				// this in our custom allocator, which its strategy is to load all
+				// the data, using as much re-allocations as required then after the
+				// fact, recompact the data by Memcopying the data together and free
+				// the extraneous blocks we've made.
+
 				void *newPtr = DqnMemStack_Push(stack, info.newRequestSize);
 				MemcopyInternal((u8 *)newPtr, (u8 *)info.oldMemPtr, info.oldSize);
 
@@ -118,7 +118,7 @@ FILE_SCOPE void AssetDqnArrayMemAPICallback(DqnMemAPICallbackInfo info, DqnMemAP
 
 FILE_SCOPE bool WavefModelInit(DTRWavefModel *const obj,
                                DqnMemAPI memAPI             = DqnMemAPI_DefaultUseCalloc(),
-                               const i32 vertexInitCapacity = 100, const i32 faceInitCapacity = 100)
+                               const i32 vertexInitCapacity = 1000, const i32 faceInitCapacity = 1000)
 {
 	if (!obj) return false;
 
@@ -144,9 +144,9 @@ FILE_SCOPE inline DTRWavefModelFace
 WavefModelFaceInit(i32 capacity = 3, DqnMemAPI memAPI = DqnMemAPI_DefaultUseCalloc())
 {
 	DTRWavefModelFace result = {};
-	DQN_ASSERT(DqnArray_Init(&result.vertexIndexArray, capacity));
-	DQN_ASSERT(DqnArray_Init(&result.textureIndexArray, capacity));
-	DQN_ASSERT(DqnArray_Init(&result.normalIndexArray, capacity));
+	DQN_ASSERT(DqnArray_Init(&result.vertexIndexArray,  capacity, memAPI));
+	DQN_ASSERT(DqnArray_Init(&result.textureIndexArray, capacity, memAPI));
+	DQN_ASSERT(DqnArray_Init(&result.normalIndexArray,  capacity, memAPI));
 
 	return result;
 }
@@ -161,10 +161,12 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 		return false; // TODO(doyle): Logging
 
 	// TODO(doyle): Make arrays use given memory not malloc
-	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->tempStack);
-	u8 *rawBytes               = (u8 *)DqnMemStack_Push(&memory->tempStack, file.size);
-	size_t bytesRead           = api.FileRead(&file, rawBytes, file.size);
-	size_t fileSize            = file.size;
+	DqnTempMemStack tmpMemRegion   = DqnMemStack_BeginTempRegion(&memory->tempStack);
+	DqnTempMemStack tmpAssetRegion = DqnMemStack_BeginTempRegion(&memory->assetStack);
+
+	u8 *rawBytes     = (u8 *)DqnMemStack_Push(&memory->tempStack, file.size);
+	size_t bytesRead = api.FileRead(&file, rawBytes, file.size);
+	size_t fileSize  = file.size;
 	api.FileClose(&file);
 	if (bytesRead != file.size)
 	{
@@ -184,7 +186,7 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 	memAPI.callback    = AssetDqnArrayMemAPICallback;
 	memAPI.userContext = &memory->assetStack;
 
-	if (!WavefModelInit(obj))
+	if (!WavefModelInit(obj, memAPI))
 	{
 		DqnMemStack_EndTempRegion(tmpMemRegion);
 		return false;
@@ -307,7 +309,7 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 				while (scan && (*scan == ' ' || *scan == '\n')) scan++;
 				if (!scan) continue;
 
-				DTRWavefModelFace face   = WavefModelFaceInit();
+				DTRWavefModelFace face   = WavefModelFaceInit(3, memAPI);
 				i32 numVertexesParsed    = 0;
 				bool moreVertexesToParse = true;
 				while (moreVertexesToParse)
@@ -425,8 +427,8 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 						scan++;
 					}
 
-					i32 numLen               = (i32)((size_t)scan - (size_t)numStartPtr);
-					i32 groupSmoothing       = (i32)Dqn_StrToI64(numStartPtr, numLen);
+					i32 numLen          = (i32)((size_t)scan - (size_t)numStartPtr);
+					i32 groupSmoothing  = (i32)Dqn_StrToI64(numStartPtr, numLen);
 					obj->groupSmoothing = groupSmoothing;
 				}
 
@@ -455,9 +457,121 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 		}
 	}
 
-	DqnMemStack_EndTempRegion(tmpMemRegion);
+	////////////////////////////////////////////////////////////////////////////
+	// Recompact Allocations
+	////////////////////////////////////////////////////////////////////////////
+	u8 *geometryPtr = (u8 *)obj->geometryArray.data;
+	u8 *texturePtr  = (u8 *)obj->textureArray.data;
+	u8 *normalPtr   = (u8 *)obj->normalArray.data;
 
-	return true;
+	size_t geometrySize = sizeof(obj->geometryArray.data[0]) * obj->geometryArray.count;
+	size_t textureSize  = sizeof(obj->textureArray.data[0]) * obj->textureArray.count;
+	size_t normalSize   = sizeof(obj->normalArray.data[0]) * obj->normalArray.count;
+
+	u8 *facePtr     = (u8 *)obj->faces.data;
+	size_t faceSize = sizeof(obj->faces.data[0]) * obj->faces.count;
+
+	size_t totalModelSize = geometrySize + textureSize + normalSize + faceSize;
+
+	size_t vertIndexItemSize = sizeof(obj->faces.data[0].vertexIndexArray.data[0]);
+	size_t texIndexItemSize  = sizeof(obj->faces.data[0].textureIndexArray.data[0]);
+	size_t normIndexItemSize = sizeof(obj->faces.data[0].normalIndexArray.data[0]);
+	{
+		for (i32 i = 0; i < obj->faces.count; i++)
+		{
+			DTRWavefModelFace *face = &obj->faces.data[i];
+
+			size_t vertIndexSize    = face->vertexIndexArray.count * vertIndexItemSize;
+			size_t texIndexSize     = face->textureIndexArray.count * texIndexItemSize;
+			size_t normIndexSize    = face->normalIndexArray.count * normIndexItemSize;
+
+			totalModelSize += (vertIndexSize + texIndexSize + normIndexSize);
+		}
+	}
+
+	// IMPORTANT(doyle): We always allocate a new block, so each assets owns
+	// their own memory block.
+	DqnMemStackBlock *modelBlock =
+	    DqnMemStack_AllocateCompatibleBlock(&memory->assetStack, totalModelSize);
+	if (modelBlock)
+	{
+		if (DqnMemStack_AttachBlock(&memory->assetStack, modelBlock))
+		{
+			u8 *newGeometryPtr = (u8 *)DqnMemStack_Push(&memory->assetStack, geometrySize);
+			u8 *newTexturePtr  = (u8 *)DqnMemStack_Push(&memory->assetStack, textureSize);
+			u8 *newNormalPtr   = (u8 *)DqnMemStack_Push(&memory->assetStack, normalSize);
+			u8 *newFacePtr     = (u8 *)DqnMemStack_Push(&memory->assetStack, faceSize);
+			MemcopyInternal(newGeometryPtr, geometryPtr, geometrySize);
+			MemcopyInternal(newTexturePtr, texturePtr, textureSize);
+			MemcopyInternal(newNormalPtr, normalPtr, normalSize);
+			MemcopyInternal(newFacePtr, facePtr, faceSize);
+			obj->geometryArray.data = (DqnV4 *)newGeometryPtr;
+			obj->normalArray.data   = (DqnV3 *)newNormalPtr;
+			obj->textureArray.data  = (DqnV3 *)newTexturePtr;
+			obj->faces.data         = (DTRWavefModelFace *)newFacePtr;
+
+			obj->geometryArray.capacity = obj->geometryArray.count;
+			obj->normalArray.capacity   = obj->normalArray.count;
+			obj->textureArray.capacity  = obj->textureArray.count;
+			obj->faces.capacity         = obj->faces.count;
+
+			for (i32 i = 0; i < obj->faces.count; i++)
+			{
+				DTRWavefModelFace *face = &obj->faces.data[i];
+				size_t vertIndexSize    = face->vertexIndexArray.count * vertIndexItemSize;
+				size_t texIndexSize     = face->textureIndexArray.count * texIndexItemSize;
+				size_t normIndexSize    = face->normalIndexArray.count * normIndexItemSize;
+
+				u8 *newVertIndexPtr = (u8 *)DqnMemStack_Push(&memory->assetStack, vertIndexSize);
+				u8 *newTexIndexPtr  = (u8 *)DqnMemStack_Push(&memory->assetStack, texIndexSize);
+				u8 *newNormIndexPtr = (u8 *)DqnMemStack_Push(&memory->assetStack, normIndexSize);
+
+				MemcopyInternal(newVertIndexPtr, (u8 *)face->vertexIndexArray.data, vertIndexSize);
+				MemcopyInternal(newTexIndexPtr,  (u8 *)face->textureIndexArray.data, texIndexSize);
+				MemcopyInternal(newNormIndexPtr, (u8 *)face->normalIndexArray.data, normIndexSize);
+
+				face->vertexIndexArray.data  = (i32 *)newVertIndexPtr;
+				face->textureIndexArray.data = (i32 *)newTexIndexPtr;
+				face->normalIndexArray.data  = (i32 *)newNormIndexPtr;
+
+				face->vertexIndexArray.capacity  = face->vertexIndexArray.count;
+				face->textureIndexArray.capacity = face->textureIndexArray.count;
+				face->normalIndexArray.capacity  = face->normalIndexArray.count;
+			}
+
+			// NOTE: Detach the block, because the stack is in a temp region.
+			// End the temp region and reattach the compact model block.
+			DqnMemStack_DetachBlock(&memory->assetStack, modelBlock);
+		}
+		else
+		{
+			// TODO(doyle): Stack can't attach block, i.e. invalid args or
+			// stack is configured to be nonexpandable
+			DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		}
+	}
+	else
+	{
+		// TODO(doyle): Out of memory error
+		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	}
+
+	DqnMemStack_EndTempRegion(tmpMemRegion);
+	DqnMemStack_EndTempRegion(tmpAssetRegion);
+	DqnMemStack_ClearCurrBlock(&memory->assetStack, true);
+	if (modelBlock)
+	{
+		DqnMemStackBlock *firstBlock = memory->assetStack.block;
+		DqnMemStack_DetachBlock(&memory->assetStack, memory->assetStack.block);
+
+		DqnMemStack_AttachBlock(&memory->assetStack, modelBlock);
+		DqnMemStack_AttachBlock(&memory->assetStack, firstBlock);
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memory,
@@ -605,7 +719,6 @@ FILE_SCOPE void *STBImageMalloc(size_t size)
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb_image.h"
 
-// TODO(doyle): Uses malloc
 bool DTRAsset_BitmapLoad(const PlatformAPI api, DqnMemStack *const bitmapMemStack,
                          DqnMemStack *const tempStack, DTRBitmap *bitmap,
                          const char *const path)

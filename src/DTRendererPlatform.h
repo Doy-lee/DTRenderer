@@ -128,9 +128,15 @@ typedef struct PlatformInput
 
 typedef struct PlatformMemory
 {
-	DqnMemStack mainStack;
-	DqnMemStack tempStack;
-	DqnMemStack assetStack;
+	union {
+		struct
+		{
+			DqnMemStack mainStack;
+			DqnMemStack tempStack;
+			DqnMemStack assetStack;
+		};
+		DqnMemStack stacks[3];
+	};
 	bool  isInit;
 	void *context;
 } PlatformMemory;

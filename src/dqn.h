@@ -160,6 +160,7 @@ typedef struct DqnMemStackBlock
 // allowed to have new blocks.
 DQN_FILE_SCOPE DqnMemStackBlock *DqnMemStack_AllocateCompatibleBlock(const DqnMemStack *const stack, size_t size);
 DQN_FILE_SCOPE bool              DqnMemStack_AttachBlock            (DqnMemStack *const stack, DqnMemStackBlock *const newBlock);
+DQN_FILE_SCOPE bool              DqnMemStack_DetachBlock            (DqnMemStack *const stack, DqnMemStackBlock *const detachBlock);
 
 // (IMPORTANT) Should only be used to free blocks that haven't been attached!
 // Attached blocks should be freed using FreeStackBlock().
@@ -1390,7 +1391,7 @@ DqnMemStack_AllocateCompatibleBlock(const DqnMemStack *const stack, size_t size)
 }
 
 DQN_FILE_SCOPE bool DqnMemStack_AttachBlock(DqnMemStack *const stack,
-                                             DqnMemStackBlock *const newBlock)
+                                            DqnMemStackBlock *const newBlock)
 {
 	if (!stack || !newBlock) return false;
 	if (stack->flags & DqnMemStackFlag_IsFixedMemoryFromUser) return false;
@@ -1400,6 +1401,31 @@ DQN_FILE_SCOPE bool DqnMemStack_AttachBlock(DqnMemStack *const stack,
 	stack->block       = newBlock;
 	return true;
 }
+
+DQN_FILE_SCOPE bool DqnMemStack_DetachBlock(DqnMemStack *const stack,
+                                            DqnMemStackBlock *const detachBlock)
+{
+	if (!stack || !detachBlock) return false;
+	if (stack->flags & DqnMemStackFlag_IsFixedMemoryFromUser) return false;
+	if (stack->flags & DqnMemStackFlag_IsNotExpandable)       return false;
+
+	DqnMemStackBlock **blockPtr = &stack->block;
+	while (*blockPtr && *blockPtr != detachBlock)
+		blockPtr = &((*blockPtr)->prevBlock);
+
+	if (*blockPtr)
+	{
+		*blockPtr = detachBlock->prevBlock;
+		detachBlock->prevBlock = NULL;
+	}
+	else
+	{
+		return false;
+	}
+
+	return true;
+}
+
 
 DQN_FILE_SCOPE void DqnMemStack_FreeBlock(DqnMemStackBlock *block)
 {
