@@ -962,33 +962,35 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRAsset_InitGlobalState();
 
 		memory->isInit  = true;
-		memory->context = DqnMemStack_Push(&memory->permMemStack, sizeof(DTRState));
-		DQN_ASSERT(memory->context);
+		memory->context = DqnMemStack_Push(&memory->mainStack, sizeof(DTRState));
 
+		DqnMemStack *const assetStack = &memory->assetStack;
+		DqnMemStack *const tempStack  = &memory->tempStack;
+		DQN_ASSERT(memory->context);
 		state = (DTRState *)memory->context;
 		DTRAsset_FontToBitmapLoad(input->api, memory, &state->font, "Roboto-bold.ttf",
 		                          DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 12);
-		DTRAsset_BitmapLoad(input->api, &memory->permMemStack,
-		                    &memory->transMemStack, &state->bitmap, "tree00.bmp");
+		DTRAsset_BitmapLoad(input->api, assetStack,
+		                    tempStack, &state->bitmap, "tree00.bmp");
 
 		if (DTR_DEBUG)
 		{
 			DTRBitmap test      = {};
-			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->transMemStack);
-			DTRAsset_BitmapLoad(input->api, &memory->permMemStack, &memory->transMemStack, &test, "byte_read_check.bmp");
+			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->tempStack);
+			DTRAsset_BitmapLoad(input->api, assetStack, &memory->tempStack, &test, "byte_read_check.bmp");
 			DqnMemStack_EndTempRegion(tmp);
 		}
 
 		if (DTRAsset_WavefModelLoad(input->api, memory, &state->obj, "african_head.obj"))
 		{
-			DTRAsset_BitmapLoad(input->api, &memory->permMemStack, &memory->transMemStack,
-			                    &state->objTex, "african_head_diffuse.tga");
+			DTRAsset_BitmapLoad(input->api, assetStack, tempStack, &state->objTex,
+			                    "african_head_diffuse.tga");
 		}
 
 		DTRDebug_TestWavefFaceAndVertexParser(&state->obj);
 	}
 
-	DqnTempMemStack transMemTmpRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
+	DqnTempMemStack transMemTmpRegion = DqnMemStack_BeginTempRegion(&memory->tempStack);
 
 	DTRRenderBuffer renderBuffer = {};
 	renderBuffer.width           = platformRenderBuffer->width;
@@ -997,7 +999,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	renderBuffer.memory          = (u8 *)platformRenderBuffer->memory;
 
 	u32 zBufferSize = platformRenderBuffer->width * platformRenderBuffer->height;
-	renderBuffer.zBuffer = (f32 *)DqnMemStack_Push(&memory->transMemStack,
+	renderBuffer.zBuffer = (f32 *)DqnMemStack_Push(&memory->tempStack,
 	                                               zBufferSize * sizeof(*renderBuffer.zBuffer));
 
 	for (u32 i = 0; i < zBufferSize; i++) renderBuffer.zBuffer[i] = DQN_F32_MIN;
@@ -1153,8 +1155,8 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	// End Update
 	////////////////////////////////////////////////////////////////////////////
 	DqnMemStack_EndTempRegion(transMemTmpRegion);
-	DqnMemStack_ClearCurrBlock(&memory->transMemStack, true);
+	DqnMemStack_ClearCurrBlock(&memory->tempStack, true);
 
-	DQN_ASSERT(memory->transMemStack.tempStackCount == 0);
-	DQN_ASSERT(memory->permMemStack.tempStackCount == 0);
+	DQN_ASSERT(memory->tempStack.tempStackCount == 0);
+	DQN_ASSERT(memory->mainStack.tempStackCount == 0);
 }

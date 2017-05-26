@@ -273,21 +273,21 @@ FILE_SCOPE void Win32HandleMenuMessages(HWND window, MSG msg,
 
 		case Win32Menu_FileFlushMemory:
 		{
-			DqnMemStack permMemStack  = globalPlatformMemory.permMemStack;
-			DqnMemStack transMemStack = globalPlatformMemory.transMemStack;
-			while (permMemStack.block->prevBlock)
-				DqnMemStack_FreeLastBlock(&permMemStack);
+			DqnMemStack mainStack  = globalPlatformMemory.mainStack;
+			DqnMemStack tempStack = globalPlatformMemory.tempStack;
+			while (mainStack.block->prevBlock)
+				DqnMemStack_FreeLastBlock(&mainStack);
 
-			while (transMemStack.block->prevBlock)
-				DqnMemStack_FreeLastBlock(&transMemStack);
+			while (tempStack.block->prevBlock)
+				DqnMemStack_FreeLastBlock(&tempStack);
 
-			DqnMemStack_ClearCurrBlock(&transMemStack, true);
-			DqnMemStack_ClearCurrBlock(&permMemStack, true);
+			DqnMemStack_ClearCurrBlock(&tempStack, true);
+			DqnMemStack_ClearCurrBlock(&mainStack, true);
 
 			PlatformMemory empty               = {};
 			globalPlatformMemory               = empty;
-			globalPlatformMemory.permMemStack  = permMemStack;
-			globalPlatformMemory.transMemStack = transMemStack;
+			globalPlatformMemory.mainStack  = mainStack;
+			globalPlatformMemory.tempStack = tempStack;
 		}
 		break;
 
@@ -546,8 +546,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	////////////////////////////////////////////////////////////////////////////
 	// Platform Data Pre-amble
 	////////////////////////////////////////////////////////////////////////////
-	DQN_ASSERT(DqnMemStack_Init(&globalPlatformMemory.permMemStack, DQN_MEGABYTE(4), true, 4) &&
-	           DqnMemStack_Init(&globalPlatformMemory.transMemStack, DQN_MEGABYTE(4), true, 4));
+	DQN_ASSERT(DqnMemStack_Init(&globalPlatformMemory.mainStack, DQN_MEGABYTE(4), true, 4) &&
+	           DqnMemStack_Init(&globalPlatformMemory.tempStack, DQN_MEGABYTE(4), true, 4) &&
+	           DqnMemStack_Init(&globalPlatformMemory.assetStack, DQN_MEGABYTE(4), true, 4)
+			  );
 
 	PlatformAPI platformAPI = {};
 	platformAPI.FileOpen    = Platform_FileOpen;

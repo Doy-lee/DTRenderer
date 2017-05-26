@@ -17,17 +17,117 @@ void DTRAsset_InitGlobalState()
 	stbi_set_flip_vertically_on_load(true);
 }
 
-FILE_SCOPE bool WavefModelInit(DTRWavefModel *const obj, const i32 vertexInitCapacity = 100,
-                             const i32 faceInitCapacity = 100)
+FILE_SCOPE void MemcopyInternal(u8 *dest, u8 *src, size_t numBytes)
+{
+	if (!dest || !src || numBytes == 0) return;
+	for (size_t i = 0; i < numBytes; i++)
+		dest[i] = src[i];
+}
+
+FILE_SCOPE void AssetDqnArrayMemAPICallback(DqnMemAPICallbackInfo info, DqnMemAPICallbackResult *result)
+{
+	DQN_ASSERT(info.type != DqnMemAPICallbackType_Invalid);
+	DqnMemStack *stack = static_cast<DqnMemStack *>(info.userContext);
+	switch (info.type)
+	{
+		case DqnMemAPICallbackType_Alloc:
+		{
+			void *ptr        = DqnMemStack_Push(stack, info.requestSize);
+			result->newMemPtr = ptr;
+			result->type      = DqnMemAPICallbackType_Alloc;
+		}
+		break;
+
+		case DqnMemAPICallbackType_Free:
+		{
+			DqnMemStackBlock **blockPtr = &stack->block;
+			while (*blockPtr && (*blockPtr)->memory != info.ptrToFree)
+			{
+				// NOTE(doyle): Ensure that the base ptr of each block is always
+				// actually aligned so we don't ever miss finding the block if
+				// the allocator had to realign the pointer from the base
+				// address.
+				if (DTR_DEBUG)
+				{
+					size_t memBaseAddr = (size_t)((*blockPtr)->memory);
+					DQN_ASSERT(DQN_ALIGN_POW_N(memBaseAddr, stack->byteAlign) ==
+					           memBaseAddr);
+				}
+				blockPtr = &((*blockPtr)->prevBlock);
+			}
+
+			DQN_ASSERT(*blockPtr && (*blockPtr)->memory == info.ptrToFree);
+			DqnMemStackBlock *blockToFree = *blockPtr;
+			*blockPtr                     = blockToFree->prevBlock;
+			DqnMem_Free(blockToFree);
+
+		}
+		break;
+
+		case DqnMemAPICallbackType_Realloc:
+		{
+			result->type = DqnMemAPICallbackType_Realloc;
+
+			// Check if the ptr is the last thing that was allocated. If so we
+			// can check if there's enough space in place for realloc and give
+			// them that.
+			u8 *currMemPtr = (u8 *)(stack->block->memory + stack->block->used);
+			u8 *checkPtr   = currMemPtr - info.oldSize;
+			if (checkPtr == info.oldMemPtr)
+			{
+				if ((stack->block->used + info.newRequestSize) < stack->block->size)
+				{
+					stack->block->used += info.newRequestSize;
+					result->newMemPtr = info.oldMemPtr;
+					return;
+				}
+
+				// The allocation was the last one allocated, but there's not
+				// enough space to realloc in the block. For book-keeping,
+				// "deallocate" the old mem ptr by reverting the usage of the
+				// memory stack.
+				stack->block->used -= info.oldSize;
+			}
+
+			// NOTE(doyle): This leaves chunks of memory dead!!! But, we use
+			// this in our custom allocator, which its strategy is to load all
+			// the data, using as much re-allocations as required then after the
+			// fact, recompact the data by Memcopying the data together and free
+			// the extraneous blocks we've made.
+
+			// Otherwise, not enough space or, allocation is not the last
+			// allocated, so can't expand inplace.
+			DqnMemStackBlock *newBlock =
+			    DqnMemStack_AllocateCompatibleBlock(stack, info.newRequestSize);
+			if (DqnMemStack_AttachBlock(stack, newBlock))
+			{
+				void *newPtr = DqnMemStack_Push(stack, info.newRequestSize);
+				MemcopyInternal((u8 *)newPtr, (u8 *)info.oldMemPtr, info.oldSize);
+
+				result->newMemPtr = newPtr;
+			}
+			else
+			{
+				// TODO(doyle): Die out of memory
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+		}
+		break;
+	}
+}
+
+FILE_SCOPE bool WavefModelInit(DTRWavefModel *const obj,
+                               DqnMemAPI memAPI             = DqnMemAPI_DefaultUseCalloc(),
+                               const i32 vertexInitCapacity = 100, const i32 faceInitCapacity = 100)
 {
 	if (!obj) return false;
 
 	bool initialised = false;
 
-	initialised |= DqnArray_Init(&obj->geometryArray, vertexInitCapacity);
-	initialised |= DqnArray_Init(&obj->textureArray,  vertexInitCapacity);
-	initialised |= DqnArray_Init(&obj->normalArray,   vertexInitCapacity);
-	initialised |= DqnArray_Init(&obj->faces,         faceInitCapacity);
+	initialised |= DqnArray_Init(&obj->geometryArray, vertexInitCapacity, memAPI);
+	initialised |= DqnArray_Init(&obj->textureArray,  vertexInitCapacity, memAPI);
+	initialised |= DqnArray_Init(&obj->normalArray,   vertexInitCapacity, memAPI);
+	initialised |= DqnArray_Init(&obj->faces,         faceInitCapacity, memAPI);
 
 	if (!initialised)
 	{
@@ -40,7 +140,8 @@ FILE_SCOPE bool WavefModelInit(DTRWavefModel *const obj, const i32 vertexInitCap
 	return initialised;
 }
 
-FILE_SCOPE inline DTRWavefModelFace WavefModelFaceInit(i32 capacity = 3)
+FILE_SCOPE inline DTRWavefModelFace
+WavefModelFaceInit(i32 capacity = 3, DqnMemAPI memAPI = DqnMemAPI_DefaultUseCalloc())
 {
 	DTRWavefModelFace result = {};
 	DQN_ASSERT(DqnArray_Init(&result.vertexIndexArray, capacity));
@@ -60,8 +161,8 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 		return false; // TODO(doyle): Logging
 
 	// TODO(doyle): Make arrays use given memory not malloc
-	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
-	u8 *rawBytes               = (u8 *)DqnMemStack_Push(&memory->transMemStack, file.size);
+	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->tempStack);
+	u8 *rawBytes               = (u8 *)DqnMemStack_Push(&memory->tempStack, file.size);
 	size_t bytesRead           = api.FileRead(&file, rawBytes, file.size);
 	size_t fileSize            = file.size;
 	api.FileClose(&file);
@@ -78,6 +179,10 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 		WavefVertexType_Texture,
 		WavefVertexType_Normal,
 	};
+
+	DqnMemAPI memAPI   = {};
+	memAPI.callback    = AssetDqnArrayMemAPICallback;
+	memAPI.userContext = &memory->assetStack;
 
 	if (!WavefModelInit(obj))
 	{
@@ -223,6 +328,9 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 							// so offset by -1 to make it zero-based indexes.
 							i32 vertIndex = (i32)Dqn_StrToI64(numStartPtr, numLen) - 1;
 
+							// TODO(doyle): Does not supprot relative vertexes yet
+							DQN_ASSERT(vertIndex >= 0);
+
 							if (type == WavefVertexType_Geometric)
 							{
 								DQN_ASSERT(DqnArray_Push(&face.vertexIndexArray, vertIndex));
@@ -288,7 +396,7 @@ bool DTRAsset_WavefModelLoad(const PlatformAPI api, PlatformMemory *const memory
 
 					DQN_ASSERT(!obj->groupName[obj->groupNameIndex]);
 					obj->groupName[obj->groupNameIndex++] = (char *)DqnMemStack_Push(
-					    &memory->permMemStack, (nameLen + 1) * sizeof(char));
+					    &memory->mainStack, (nameLen + 1) * sizeof(char));
 
 					for (i32 i = 0; i < nameLen; i++)
 						obj->groupName[obj->groupNameIndex - 1][i] = namePtr[i];
@@ -370,8 +478,8 @@ bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memo
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return false; // TODO(doyle): Logging
 
-	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->transMemStack);
-	u8 *fontBuf                = (u8 *)DqnMemStack_Push(&memory->transMemStack, file.size);
+	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(&memory->tempStack);
+	u8 *fontBuf                = (u8 *)DqnMemStack_Push(&memory->tempStack, file.size);
 	size_t bytesRead           = api.FileRead(&file, fontBuf, file.size);
 	api.FileClose(&file);
 	if (bytesRead != file.size)
@@ -393,7 +501,7 @@ bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memo
 	// Pack font data to bitmap
 	////////////////////////////////////////////////////////////////////////////
 	loadedFont.bitmap = (u8 *)DqnMemStack_Push(
-	    &memory->permMemStack,
+	    &memory->mainStack,
 	    (size_t)(loadedFont.bitmapDim.w * loadedFont.bitmapDim.h));
 
 	stbtt_pack_context fontPackContext = {};
@@ -406,7 +514,7 @@ bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memo
 		    (i32)((codepointRange.max + 1) - codepointRange.min);
 
 		loadedFont.atlas = (stbtt_packedchar *)DqnMemStack_Push(
-		    &memory->permMemStack, numCodepoints * sizeof(stbtt_packedchar));
+		    &memory->mainStack, numCodepoints * sizeof(stbtt_packedchar));
 		stbtt_PackFontRange(&fontPackContext, fontBuf, 0,
 		                    STBTT_POINT_SIZE(sizeInPt), (i32)codepointRange.min,
 		                    numCodepoints, loadedFont.atlas);
@@ -456,13 +564,6 @@ bool DTRAsset_FontToBitmapLoad(const PlatformAPI api, PlatformMemory *const memo
 // TODO(doyle): Not threadsafe
 FILE_SCOPE DqnMemStack *globalSTBImageAllocator;
 
-FILE_SCOPE void MemcopyInternal(u8 *dest, u8 *src, size_t numBytes)
-{
-	if (!dest || !src || numBytes == 0) return;
-	for (size_t i = 0; i < numBytes; i++)
-		dest[i] = src[i];
-}
-
 FILE_SCOPE void *STBImageReallocSized(void *ptr, size_t oldSize, size_t newSize)
 {
 	// TODO(doyle): Implement when needed. There's no easy way using our stack
@@ -506,18 +607,18 @@ FILE_SCOPE void *STBImageMalloc(size_t size)
 
 // TODO(doyle): Uses malloc
 bool DTRAsset_BitmapLoad(const PlatformAPI api, DqnMemStack *const bitmapMemStack,
-                         DqnMemStack *const transMemStack, DTRBitmap *bitmap,
+                         DqnMemStack *const tempStack, DTRBitmap *bitmap,
                          const char *const path)
 {
-	if (!bitmap || !bitmapMemStack || !transMemStack) return false;
+	if (!bitmap || !bitmapMemStack || !tempStack) return false;
 
 	bool result       = false;
 	PlatformFile file = {};
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return result;
 
-	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(transMemStack);
-	u8 *const rawData            = (u8 *)DqnMemStack_Push     (transMemStack, file.size);
+	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(tempStack);
+	u8 *const rawData            = (u8 *)DqnMemStack_Push     (tempStack, file.size);
 	size_t bytesRead             = api.FileRead               (&file, rawData, file.size);
 
 	if (bytesRead != file.size) goto cleanup;

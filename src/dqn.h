@@ -96,24 +96,18 @@ DQN_FILE_SCOPE void  DqnMem_Free   (void *memory);
 //      BeginTempRegion and EndTempRegion functions. Specifically freeing
 //      individual items is typically not generalisable in this scheme.
 
-typedef struct DqnMemStackBlock
-{
-	u8     *memory;
-	size_t  used;
-	size_t  size;
-
-	DqnMemStackBlock *prevBlock;
-} DqnMemStackBlock;
-
 enum DqnMemStackFlag
 {
 	DqnMemStackFlag_IsNotExpandable       = (1 << 0),
 	DqnMemStackFlag_IsFixedMemoryFromUser = (1 << 1), // NOTE(doyle): Required to indicate we CAN'T free this memory when free is called.
 };
 
+////////////////////////////////////////////////////////////////////////////////
+// Advanced API Structs
+////////////////////////////////////////////////////////////////////////////////
 typedef struct DqnMemStack
 {
-	DqnMemStackBlock *block;
+	struct DqnMemStackBlock *block;
 
 	u32 flags;
 	i32 tempStackCount;
@@ -122,8 +116,8 @@ typedef struct DqnMemStack
 
 typedef struct DqnTempMemStack
 {
-	DqnMemStack      *stack;
-	DqnMemStackBlock *startingBlock;
+	DqnMemStack             *stack;
+	struct DqnMemStackBlock *startingBlock;
 	size_t used;
 
 } DqnTempMemStack;
@@ -132,12 +126,12 @@ DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem (DqnMemStack *const stack, u8 *
 DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedSize(DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4); // Single allocation from platform, no further allocations, returns NULL of allocate if out of space
 DQN_FILE_SCOPE bool DqnMemStack_Init             (DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4); // Allocates from platform dynamically as space runs out
 
-DQN_FILE_SCOPE void *DqnMemStack_Push          (DqnMemStack *const stack, size_t size);             // Returns NULL if out of space and stack is using fixed memory/size, or platform allocation fails
-DQN_FILE_SCOPE bool  DqnMemStack_Pop           (DqnMemStack *const stack, void *ptr, size_t size);  // Frees the given ptr. It MUST be the last allocated item in the stack
-DQN_FILE_SCOPE void  DqnMemStack_Free          (DqnMemStack *const stack);                          // Frees all blocks belonging to this stack
-DQN_FILE_SCOPE bool  DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemStackBlock *block); // Frees the specified block, returns false if block doesn't belong
+DQN_FILE_SCOPE void *DqnMemStack_Push          (DqnMemStack *const stack, size_t size);             // Returns NULL if out of space and stack is using fixed memory/size, or platform allocation fails.
+DQN_FILE_SCOPE bool  DqnMemStack_Pop           (DqnMemStack *const stack, void *ptr, size_t size);  // Frees the given ptr. It MUST be the last allocated item in the stack.
+DQN_FILE_SCOPE void  DqnMemStack_Free          (DqnMemStack *const stack);                          // Frees all blocks belonging to this stack.
+DQN_FILE_SCOPE bool  DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemStackBlock *block); // Frees the specified block, returns false if block doesn't belong, calls DqnMem_Free().
 DQN_FILE_SCOPE bool  DqnMemStack_FreeLastBlock (DqnMemStack *const stack);                          // Frees the last-most memory block. If last block, free that block, next allocate will attach a block.
-DQN_FILE_SCOPE void  DqnMemStack_ClearCurrBlock(DqnMemStack *const stack, const bool zeroClear);    // Reset the current memory block usage to 0
+DQN_FILE_SCOPE void  DqnMemStack_ClearCurrBlock(DqnMemStack *const stack, const bool zeroClear);    // Reset the current memory block usage to 0.
 
 // TempMemStack is only required for the function. Once BeginTempRegion() is called, subsequent allocation calls can be made using the original stack.
 // Upon EndTempRegion() the original stack will free any additional blocks it allocated during the temp region and revert to the original
@@ -147,7 +141,20 @@ DQN_FILE_SCOPE void  DqnMemStack_ClearCurrBlock(DqnMemStack *const stack, const 
 DQN_FILE_SCOPE DqnTempMemStack DqnMemStack_BeginTempRegion(DqnMemStack *const stack);
 DQN_FILE_SCOPE void            DqnMemStack_EndTempRegion  (DqnTempMemStack tempstack);
 
+////////////////////////////////////////////////////////////////////////////////
 // (OPTIONAL) DqnMemStack Advanced API
+// Blocks are freely modifiable if you want fine grained control. Size value and
+// memory ptr should _NOT_ be modified directly, only indirectly through the
+// regular API.
+typedef struct DqnMemStackBlock
+{
+	u8     *memory;
+	size_t  size;
+	size_t  used;
+
+	DqnMemStackBlock *prevBlock;
+} DqnMemStackBlock;
+
 // This is useful for forcing a new block to be used. AllocateCompatibleBlock
 // will fail if the supplied stack has flags set such that the stack is not
 // allowed to have new blocks.

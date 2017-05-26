@@ -46,7 +46,7 @@ void DTRDebug_TestWavefFaceAndVertexParser(DTRWavefModel *const obj)
 	}
 }
 
-void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *const transMemStack)
+void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *const tempStack)
 {
 	if (DTR_DEBUG)
 	{
@@ -64,10 +64,10 @@ void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *cons
 			}
 		}
 
-		DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(transMemStack);
+		DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(tempStack);
 
 		size_t bufSize = DQN_MEGABYTE(16);
-		char *bufString = (char *)DqnMemStack_Push(transMemStack, bufSize);
+		char *bufString = (char *)DqnMemStack_Push(tempStack, bufSize);
 		char *bufPtr    = bufString;
 		for (i32 i = 0; i < renderBuffer->width * renderBuffer->height; i++)
 		{
@@ -149,6 +149,7 @@ FILE_SCOPE void PushMemStackText(const char *const name, const DqnMemStack *cons
 		i32 numBlocks      = 0;
 
 		DqnMemStackBlock *blockPtr = stack->block;
+		size_t freeSizeOfCurrBlock  = (blockPtr) ? blockPtr->size - blockPtr->used : 0;
 		while (blockPtr)
 		{
 			totalUsed += blockPtr->used;
@@ -159,7 +160,7 @@ FILE_SCOPE void PushMemStackText(const char *const name, const DqnMemStack *cons
 
 		size_t totalUsedKb   = totalUsed / 1024;
 		size_t totalSizeKb   = totalSize / 1024;
-		size_t totalWastedKb = totalWasted / 1024;
+		size_t totalWastedKb = (totalSize - totalUsed - freeSizeOfCurrBlock) / 1024;
 
 		char str[128] = {};
 		Dqn_sprintf(str, "%s: %d block(s): %_$lld/%_$lld: wasted: %_$lld", name, numBlocks,
@@ -194,8 +195,9 @@ void DTRDebug_Update(DTRState *const state,
 
 		// memory
 		{
-			PushMemStackText("PermBuffer", &memory->permMemStack);
-			PushMemStackText("TransBuffer", &memory->transMemStack);
+			PushMemStackText("MainStack", &memory->mainStack);
+			PushMemStackText("TempStack", &memory->tempStack);
+			PushMemStackText("AssetStack", &memory->assetStack);
 		}
 
 		DTRDebug_PushText("Mouse: %d, %d", input->mouse.x, input->mouse.y);
