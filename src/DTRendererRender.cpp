@@ -60,11 +60,19 @@ inline f32 DTRRender_SRGB1ToLinearSpacef(f32 val)
 
 inline DqnV4 DTRRender_SRGB1ToLinearSpaceV4(DqnV4 color)
 {
-	DqnV4 result = {};
+	DqnV4 result;
+#if 0
 	result.r     = DTRRender_SRGB1ToLinearSpacef(color.r);
 	result.g     = DTRRender_SRGB1ToLinearSpacef(color.g);
 	result.b     = DTRRender_SRGB1ToLinearSpacef(color.b);
-	result.a     = color.a;
+#else
+	__m128 simdColor  = _mm_set_ps(color.r, color.g, color.b, 0);
+	__m128 simdResult = _mm_mul_ps(simdColor, simdColor);
+	result.r = ((f32 *)&simdResult)[3];
+	result.g = ((f32 *)&simdResult)[2];
+	result.b = ((f32 *)&simdResult)[1];
+#endif
+	result.a = color.a;
 
 	return result;
 }
@@ -79,11 +87,19 @@ inline f32 DTRRender_LinearToSRGB1Spacef(f32 val)
 
 inline DqnV4 DTRRender_LinearToSRGB1SpaceV4(DqnV4 color)
 {
-	DqnV4 result = {};
+	DqnV4 result;
+#if 0
 	result.r     = DTRRender_LinearToSRGB1Spacef(color.r);
 	result.g     = DTRRender_LinearToSRGB1Spacef(color.g);
 	result.b     = DTRRender_LinearToSRGB1Spacef(color.b);
-	result.a     = color.a;
+#else
+	__m128 simdColor  = _mm_set_ps(color.r, color.g, color.b, 0);
+	__m128 simdResult = _mm_sqrt_ps(simdColor);
+	result.r = ((f32 *)&simdResult)[3];
+	result.g = ((f32 *)&simdResult)[2];
+	result.b = ((f32 *)&simdResult)[1];
+#endif
+	result.a = color.a;
 
 	return result;
 }
@@ -116,7 +132,8 @@ FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x
 	bool needGammaFix = (color.a > 0.0f || color.a < 1.0f + COLOR_EPSILON) && (colorSpace == ColorSpace_SRGB);
 	if (needGammaFix) color = DTRRender_SRGB1ToLinearSpaceV4(color);
 
-	u32 src  = bitmapPtr[x + (y * pitchInU32)];
+	u32 src = bitmapPtr[x + (y * pitchInU32)];
+#if 0
 	f32 srcR = (f32)((src >> 16) & 0xFF) * DTRRENDER_INV_255;
 	f32 srcG = (f32)((src >> 8) & 0xFF)  * DTRRENDER_INV_255;
 	f32 srcB = (f32)((src >> 0) & 0xFF)  * DTRRENDER_INV_255;
@@ -136,27 +153,65 @@ FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x
 	destG = DTRRender_LinearToSRGB1Spacef(destG) * 255.0f;
 	destB = DTRRender_LinearToSRGB1Spacef(destB) * 255.0f;
 
-	DQN_ASSERT(destR >= 0);
-	DQN_ASSERT(destG >= 0);
-	DQN_ASSERT(destB >= 0);
+	if (DTR_DEBUG)
+	{
+		DQN_ASSERT((destR - 255.0f) < COLOR_EPSILON);
+		DQN_ASSERT((destG - 255.0f) < COLOR_EPSILON);
+		DQN_ASSERT((destB - 255.0f) < COLOR_EPSILON);
+	}
 
 	if (destR > 255.0f)
 	{
-		DQN_ASSERT((destR - 255.0f) < COLOR_EPSILON);
 		destR = 255;
 	}
 
 	if (destG > 255.0f)
 	{
-		DQN_ASSERT((destG - 255.0f) < COLOR_EPSILON);
 		destG = 255;
 	}
 
 	if (destB > 255.0f)
 	{
-		DQN_ASSERT((destB - 255.0f) < COLOR_EPSILON);
 		destB = 255;
 	}
+
+#else
+	__m128 simdSrc = _mm_set_ps(0.0f,
+	                            (f32)((src >> 16) & 0xFF),
+	                            (f32)((src >> 8) & 0xFF),
+	                            (f32)((src >> 0) & 0xFF));
+
+	__m128 inv255_4x = _mm_set_ps1(DTRRENDER_INV_255);
+	simdSrc          = _mm_mul_ps(simdSrc, inv255_4x);
+	simdSrc          = _mm_mul_ps(simdSrc, simdSrc); // to linear
+
+	f32 invANorm       = 1 - color.a;
+	__m128 invANorm_4x = _mm_set_ps1(invANorm);
+	__m128 const255_4x = _mm_set_ps1(255.0f);
+
+	__m128 simdColor = _mm_set_ps(0, color.r, color.g, color.b);
+	__m128 dest      = _mm_add_ps(simdColor, _mm_mul_ps(simdSrc, invANorm_4x)); // to 0->1 range
+	dest             = _mm_sqrt_ps(dest);                                   // to srgb
+	dest             = _mm_mul_ps(dest, const255_4x);                       // to 0->255 range
+
+	DQN_ASSERT(((f32 *)&dest)[2] >= 0);
+	DQN_ASSERT(((f32 *)&dest)[1] >= 0);
+	DQN_ASSERT(((f32 *)&dest)[0] >= 0);
+
+	if (DTR_DEBUG)
+	{
+		DQN_ASSERT((((f32 *)&dest)[2] - 255.0f) < COLOR_EPSILON);
+		DQN_ASSERT((((f32 *)&dest)[1] - 255.0f) < COLOR_EPSILON);
+		DQN_ASSERT((((f32 *)&dest)[0] - 255.0f) < COLOR_EPSILON);
+	}
+
+	dest = _mm_min_ps(dest, const255_4x);
+
+	f32 destR = ((f32 *)&dest)[2];
+	f32 destG = ((f32 *)&dest)[1];
+	f32 destB = ((f32 *)&dest)[0];
+
+#endif
 
 	u32 pixel = // ((u32)(destA) << 24 |
 	             (u32)(destR) << 16 |
