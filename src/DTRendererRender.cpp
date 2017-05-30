@@ -576,6 +576,7 @@ void DTRRender_TexturedTriangle(PlatformInput *const input,
 		if (signedAreaParallelogramPixel1 == 0) return;
 		f32 invSignedAreaParallelogramPixel1 = 1 / signedAreaParallelogramPixel1;
 
+		__m128 inv255_4x                    = _mm_set_ps1(DTRRENDER_INV_255);
 		__m128 zero_4x                      = _mm_set_ps1(0.0f);
 		__m128 two_4x                       = _mm_set_ps1(2.0f);
 		__m128 invSignedAreaParallelogram4x = _mm_set_ps1(invSignedAreaParallelogramPixel1);
@@ -590,8 +591,9 @@ void DTRRender_TexturedTriangle(PlatformInput *const input,
 		// NOTE: Step size of 2 pixels across X
 		signedAreaPixelDeltaX = _mm_mul_ps(signedAreaPixelDeltaX, two_4x);
 
-		const DqnV2 uv2SubUv1 = uv2 - uv1;
-		const DqnV2 uv3SubUv1 = uv3 - uv1;
+		const DqnV2 uv2SubUv1      = uv2 - uv1;
+		const DqnV2 uv3SubUv1      = uv3 - uv1;
+		const __m128 colorModulate = _mm_set_ps(color.a, color.b, color.g, color.r);
 
 		const u32 IS_GREATER_MASK = 0xF;
 
@@ -600,6 +602,7 @@ void DTRRender_TexturedTriangle(PlatformInput *const input,
 			__m128 signedArea1 = signedAreaPixel1;
 			__m128 signedArea2 = signedAreaPixel2;
 
+#define PROCESS_COLOR_NO_SIMD 0
 			for (i32 bufferX = min.x; bufferX < max.x; bufferX += 2)
 			{
 				__m128 isGreater1    = _mm_cmpge_ps(signedArea1, zero_4x);
@@ -641,6 +644,7 @@ void DTRRender_TexturedTriangle(PlatformInput *const input,
 						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
 						                      (texelY * texturePitch));
 
+#if PROCESS_COLOR_NO_SIMD
 						DqnV4 color1;
 						color1.a = (f32)(texel1 >> 24);
 						color1.b = (f32)((texel1 >> 16) & 0xFF);
@@ -649,6 +653,21 @@ void DTRRender_TexturedTriangle(PlatformInput *const input,
 						color1 *= DTRRENDER_INV_255;
 						color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
 						DqnV4 blend = color * color1;
+#else
+						__m128 color1 = _mm_set_ps((f32)(texel1 >> 24),
+						                           (f32)((texel1 >> 16) & 0xFF),
+						                           (f32)((texel1 >> 8) & 0xFF),
+						                           (f32)((texel1 >> 0) & 0xFF));
+						color1 = _mm_mul_ps(color1, inv255_4x);
+						color1 = _mm_mul_ps(color1, color1); // to linear space
+						color1 = _mm_mul_ps(color1, colorModulate);
+
+						DqnV4 blend = {};
+						blend.r     = ((f32 *)&color1)[0];
+						blend.g     = ((f32 *)&color1)[1];
+						blend.b     = ((f32 *)&color1)[2];
+						blend.a     = ((f32 *)&color1)[3];
+#endif
 						SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
 					}
 
@@ -694,6 +713,7 @@ void DTRRender_TexturedTriangle(PlatformInput *const input,
 						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
 						                      (texelY * texturePitch));
 
+#if PROCESS_COLOR_NO_SIMD
 						DqnV4 color1;
 						color1.a = (f32)(texel1 >> 24);
 						color1.b = (f32)((texel1 >> 16) & 0xFF);
@@ -702,6 +722,21 @@ void DTRRender_TexturedTriangle(PlatformInput *const input,
 						color1 *= DTRRENDER_INV_255;
 						color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
 						DqnV4 blend = color * color1;
+#else
+						__m128 color1 = _mm_set_ps((f32)(texel1 >> 24),
+						                           (f32)((texel1 >> 16) & 0xFF),
+						                           (f32)((texel1 >> 8) & 0xFF),
+						                           (f32)((texel1 >> 0) & 0xFF));
+						color1 = _mm_mul_ps(color1, inv255_4x);
+						color1 = _mm_mul_ps(color1, color1); // to linear space
+						color1 = _mm_mul_ps(color1, colorModulate);
+
+						DqnV4 blend = {};
+						blend.r     = ((f32 *)&color1)[0];
+						blend.g     = ((f32 *)&color1)[1];
+						blend.b     = ((f32 *)&color1)[2];
+						blend.a     = ((f32 *)&color1)[3];
+#endif
 						SetPixel(renderBuffer, bufferX1, bufferY, blend, ColorSpace_Linear);
 					}
 				}
