@@ -47,6 +47,14 @@ enum DTRDebugCycleCount
 	DTRDebugCycleCount_Count,
 };
 
+typedef struct DTRDebugCycles
+{
+	u64 totalCycles;
+	u64 numInvokes;
+
+	u64 tmpStartCycles; // Used to calculate the number of cycles elapsed
+} DTRDebugCycles;
+
 typedef struct DTRDebug
 {
 	struct DTRFont         *font;
@@ -57,9 +65,9 @@ typedef struct DTRDebug
 	DqnV2 displayP;
 	i32   displayYOffset;
 
-	u64 cycleCount[DTRDebugCycleCount_Count];
-	u64 counter   [DTRDebugCounter_Count];
-	u64 totalSetPixels;
+	DTRDebugCycles cycles [DTRDebugCycleCount_Count];
+	u64            counter[DTRDebugCounter_Count];
+	u64            totalSetPixels;
 } DTRDebug;
 
 extern DTRDebug globalDebug;

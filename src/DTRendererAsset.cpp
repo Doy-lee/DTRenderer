@@ -17,14 +17,23 @@ void DTRAsset_InitGlobalState()
 	stbi_set_flip_vertically_on_load(true);
 }
 
-FILE_SCOPE void MemcopyInternal(u8 *dest, u8 *src, size_t numBytes)
+FILE_SCOPE void MemcopyInternal(u8 *const dest, u8 *const src, size_t numBytes)
 {
 	if (!dest || !src || numBytes == 0) return;
 	for (size_t i = 0; i < numBytes; i++)
 		dest[i] = src[i];
 }
 
-FILE_SCOPE void AssetDqnArrayMemAPICallback(DqnMemAPICallbackInfo info, DqnMemAPICallbackResult *result)
+// NOTE: Dynamic array allocations just requests space at the first option it
+// can take. Realloc will reallocate in place if there's space. Otherwise
+// it'll create a new block and reallocate there by copying the old data over.
+
+// So this does waste space. But is a quick way to reroute allocations into
+// a MemStack. It's main intended purpose is for one-shot loading data that you
+// don't know how much space you need in your DArray. After filling out
+// the dynamic array you then compact the data manually using memcopys into
+// a new block and discard the old data.
+FILE_SCOPE void DumbDynamicArrayMemAPICallback(DqnMemAPICallbackInfo info, DqnMemAPICallbackResult *result)
 {
 	DQN_ASSERT(info.type != DqnMemAPICallbackType_Invalid);
 	DqnMemStack *stack = static_cast<DqnMemStack *>(info.userContext);
@@ -40,27 +49,7 @@ FILE_SCOPE void AssetDqnArrayMemAPICallback(DqnMemAPICallbackInfo info, DqnMemAP
 
 		case DqnMemAPICallbackType_Free:
 		{
-			DqnMemStackBlock **blockPtr = &stack->block;
-			while (*blockPtr && (*blockPtr)->memory != info.ptrToFree)
-			{
-				// NOTE(doyle): Ensure that the base ptr of each block is always
-				// actually aligned so we don't ever miss finding the block if
-				// the allocator had to realign the pointer from the base
-				// address.
-				if (DTR_DEBUG)
-				{
-					size_t memBaseAddr = (size_t)((*blockPtr)->memory);
-					DQN_ASSERT(DQN_ALIGN_POW_N(memBaseAddr, stack->byteAlign) ==
-					           memBaseAddr);
-				}
-				blockPtr = &((*blockPtr)->prevBlock);
-			}
-
-			DQN_ASSERT(*blockPtr && (*blockPtr)->memory == info.ptrToFree);
-			DqnMemStackBlock *blockToFree = *blockPtr;
-			*blockPtr                     = blockToFree->prevBlock;
-			DqnMem_Free(blockToFree);
-
+			DQN_ASSERT(DQN_INVALID_CODE_PATH);
 		}
 		break;
 
@@ -189,7 +178,7 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 	size_t fileSize                = file.size;
 
 	DqnMemAPI memAPI   = {};
-	memAPI.callback    = AssetDqnArrayMemAPICallback;
+	memAPI.callback    = DumbDynamicArrayMemAPICallback;
 	memAPI.userContext = memStack;
 
 	enum WavefVertexType {
@@ -199,6 +188,23 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 		WavefVertexType_Normal,
 	};
 
+	// TODO(doyle): We should profile, reading it out to WavefModel format and
+	// then copying it over, versus just reading the file twice. First pass is
+	// to count the number of vertexes etc. for each section we need. Then the
+	// second pass we can allocate directly the number we need and reparse it.
+	// I have a feeling that, in general that's a better idea, atleast it gets
+	// rid of alot of stupid copying code and memstack juggling.
+
+	// NOTE(doyle): We pre-process the data into an intermediate format that
+	// more accurately represents the file format. Since there's no metadata
+	// inside Wavefront objects, we don't know how many vertexes/texUV/normals
+	// there are- which makes it hard to allocate "nicely" out of our memory
+	// stack.
+
+	// So we preprocess. Then once we know the final amount, copy over the data
+	// to a new memstack block such that all the data is compacted together in
+	// memory for locality. Then just throw away the intermediate
+	// representation.
 	WavefModel dummy_ = {};
 	WavefModel *obj   = &dummy_;
 
@@ -410,11 +416,17 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 					DQN_ASSERT(obj->groupNameIndex + 1 < DQN_ARRAY_COUNT(obj->groupName));
 
 					DQN_ASSERT(!obj->groupName[obj->groupNameIndex]);
+					// TODO(doyle): Broken since I don't "copy" it over to our
+					// final DTRMesh. Below I copy over the data so that all the
+					// allocations are compacted together but don't copy this
+					// yet. Which means the name gets trashed atm.
+#if 0
 					obj->groupName[obj->groupNameIndex++] =
 					    (char *)DqnMemStack_Push(memStack, (nameLen + 1) * sizeof(char));
 
 					for (i32 i = 0; i < nameLen; i++)
 						obj->groupName[obj->groupNameIndex - 1][i] = namePtr[i];
+#endif
 
 					while (scan && (*scan == ' ' || *scan == '\n'))
 						scan++;

@@ -1104,8 +1104,8 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			}
 			else
 			{
-				DTRRender_TexturedTriangle(&renderBuffer, screenVA, screenVB, screenVC, texA, texB,
-				                           texC, &state->mesh.tex, modelCol);
+				DTRRender_TexturedTriangle(input, &renderBuffer, screenVA, screenVB, screenVC, texA,
+				                           texB, texC, &state->mesh.tex, modelCol);
 			}
 
 			bool DEBUG_WIREFRAME = false;

@@ -121,7 +121,9 @@ void inline DTRDebug_BeginCycleCount(enum DTRDebugCycleCount tag)
 	{
 		if (globalDebug.input && globalDebug.input->canUseRdtsc)
 		{
-			globalDebug.cycleCount[tag] = __rdtsc();
+			DTRDebugCycles *const cycles = &globalDebug.cycles[tag];
+			cycles->tmpStartCycles       = __rdtsc();
+			cycles->numInvokes++;
 		}
 	}
 }
@@ -132,7 +134,8 @@ void inline DTRDebug_EndCycleCount(enum DTRDebugCycleCount tag)
 	{
 		if (globalDebug.input && globalDebug.input->canUseRdtsc)
 		{
-			globalDebug.cycleCount[tag] = __rdtsc() - globalDebug.cycleCount[tag];
+			DTRDebugCycles *const cycles = &globalDebug.cycles[tag];
+			cycles->totalCycles += __rdtsc() - cycles->tmpStartCycles;
 		}
 	}
 }
@@ -214,9 +217,16 @@ void DTRDebug_Update(DTRState *const state,
 		DTRDebug_PushText("TrianglesRendered: %'lld", debug->counter[DTRDebugCounter_RenderTriangle]);
 		DTRDebug_PushText("");
 
-		for (i32 i = 0; i < DQN_ARRAY_COUNT(debug->cycleCount); i++)
+		DTRDebugCycles emptyDebugCycles = {};
+		for (i32 i = 0; i < DQN_ARRAY_COUNT(debug->cycles); i++)
 		{
-			DTRDebug_PushText("%d: %'lld cycles", i, debug->cycleCount[i]);
+			DTRDebugCycles *const cycles = &globalDebug.cycles[i];
+
+			u64 invocations = (cycles->numInvokes == 0) ? 1 : cycles->numInvokes;
+			u64 avgCycles   = cycles->totalCycles / invocations;
+			DTRDebug_PushText("%d: %'lld avg cycles", i, avgCycles);
+
+			*cycles = emptyDebugCycles;
 		}
 		DTRDebug_PushText("");
 

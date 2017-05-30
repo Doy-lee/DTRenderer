@@ -7,6 +7,8 @@
 #include "external/stb_rect_pack.h"
 #include "external/stb_truetype.h"
 
+#include <intrin.h>
+
 FILE_SCOPE const f32 COLOR_EPSILON = 0.9f;
 
 FILE_SCOPE inline DqnV4 PreMultiplyAlpha1(const DqnV4 color)
@@ -497,7 +499,8 @@ FILE_SCOPE void DebugBarycentricInternal(DqnV2 p, DqnV2 a, DqnV2 b, DqnV2 c, f32
 	*u        = 1.0f - *v - *w;
 }
 
-void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
+void DTRRender_TexturedTriangle(PlatformInput *const input,
+                                DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
                                 DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
                                 DqnV4 color, const DTRRenderTransform transform)
 {
@@ -549,125 +552,287 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, D
 	const DqnV3 b = p2;
 	const DqnV3 c = p3;
 
-	DqnV2i startP = min;
-	f32 oldSignedArea1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
-	f32 oldSignedArea2       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
-	f32 oldSignedArea3       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
-
-	f32 signedArea1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
-	f32 signedArea1DeltaX = a.y - b.y;
-	f32 signedArea1DeltaY = b.x - a.x;
-
-	f32 signedArea2       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
-	f32 signedArea2DeltaX = b.y - c.y;
-	f32 signedArea2DeltaY = c.x - b.x;
-
-	f32 signedArea3       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
-	f32 signedArea3DeltaX = c.y - a.y;
-	f32 signedArea3DeltaY = a.x - c.x;
-
-	f32 signedAreaParallelogram = signedArea1 + signedArea2 + signedArea3;
-	if (signedAreaParallelogram == 0) return;
-	f32 invSignedAreaParallelogram = 1 / signedAreaParallelogram;
-
 	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	const u32 zBufferPitch        = renderBuffer->width;
-	const f32 BARYCENTRIC_EPSILON = 0.1f;
-
-	u8 *texturePtr         = texture->memory;
-	const u32 texturePitch = texture->bytesPerPixel * texture->dim.w;
-	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
+	const u32 zBufferPitch = renderBuffer->width;
+	if (input->canUseSSE2)
 	{
-		f32 signedArea1Row = signedArea1;
-		f32 signedArea2Row = signedArea2;
-		f32 signedArea3Row = signedArea3;
+		DqnV2i startP                   = min;
+		f32 edge1SignedAreaPixel1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
+		f32 edge1SignedAreaPixel1DeltaX = a.y - b.y;
+		f32 edge1SignedAreaPixel1DeltaY = b.x - a.x;
 
-		for (i32 bufferX = min.x; bufferX < max.x; bufferX++)
+		f32 edge2SignedAreaPixel1       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
+		f32 edge2SignedAreaPixel1DeltaX = b.y - c.y;
+		f32 edge2SignedAreaPixel1DeltaY = c.x - b.x;
+
+		f32 edge3SignedAreaPixel1       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
+		f32 edge3SignedAreaPixel1DeltaX = c.y - a.y;
+		f32 edge3SignedAreaPixel1DeltaY = a.x - c.x;
+
+		f32 signedAreaParallelogramPixel1 = edge1SignedAreaPixel1 + edge2SignedAreaPixel1 + edge3SignedAreaPixel1;
+		if (signedAreaParallelogramPixel1 == 0) return;
+		f32 invSignedAreaParallelogramPixel1 = 1 / signedAreaParallelogramPixel1;
+
+		__m128 zero_4x                      = _mm_set_ps1(0.0f);
+		__m128 two_4x                       = _mm_set_ps1(2.0f);
+		__m128 invSignedAreaParallelogram4x = _mm_set_ps1(invSignedAreaParallelogramPixel1);
+		__m128 triangleZ                    = _mm_set_ps(0, b.z, a.z, c.z);
+
+		__m128 signedAreaPixelDeltaX = _mm_set_ps(0, edge3SignedAreaPixel1DeltaX, edge2SignedAreaPixel1DeltaX, edge1SignedAreaPixel1DeltaX);
+		__m128 signedAreaPixelDeltaY = _mm_set_ps(0, edge3SignedAreaPixel1DeltaY, edge2SignedAreaPixel1DeltaY, edge1SignedAreaPixel1DeltaY);
+
+		__m128 signedAreaPixel1 = _mm_set_ps(0, edge3SignedAreaPixel1, edge2SignedAreaPixel1, edge1SignedAreaPixel1);
+		__m128 signedAreaPixel2 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaX);
+
+		// NOTE: Step size of 2 pixels across X
+		signedAreaPixelDeltaX = _mm_mul_ps(signedAreaPixelDeltaX, two_4x);
+
+		const DqnV2 uv2SubUv1 = uv2 - uv1;
+		const DqnV2 uv3SubUv1 = uv3 - uv1;
+
+		const u32 IS_GREATER_MASK = 0xF;
+
+		for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
 		{
-			if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
+			__m128 signedArea1 = signedAreaPixel1;
+			__m128 signedArea2 = signedAreaPixel2;
+
+			for (i32 bufferX = min.x; bufferX < max.x; bufferX += 2)
 			{
-				f32 barycentricB = signedArea3Row * invSignedAreaParallelogram;
-				f32 barycentricC = signedArea1Row * invSignedAreaParallelogram;
-
-				if (DTR_DEBUG)
+				__m128 isGreater1    = _mm_cmpge_ps(signedArea1, zero_4x);
+				i32 isGreaterResult1 = _mm_movemask_ps(isGreater1);
+				if ((isGreaterResult1 & IS_GREATER_MASK) == IS_GREATER_MASK)
 				{
-					const f32 EPSILON = 0.1f;
+					__m128 barycentric  = _mm_mul_ps(signedArea1, invSignedAreaParallelogram4x);
+					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
-					f32 debugSignedArea1 = ((b.x - a.x) * (bufferY - a.y)) - ((b.y - a.y) * (bufferX - a.x));
-					f32 debugSignedArea2 = ((c.x - b.x) * (bufferY - b.y)) - ((c.y - b.y) * (bufferX - b.x));
-					f32 debugSignedArea3 = ((a.x - c.x) * (bufferY - c.y)) - ((a.y - c.y) * (bufferX - c.x));
+					i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
+					f32 pixelZValue = ((f32 *)&barycentricZ)[0] +
+					                  ((f32 *)&barycentricZ)[1] +
+					                  ((f32 *)&barycentricZ)[2];
+					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
+					if (pixelZValue > currZValue)
+					{
+						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+						u8 *texturePtr                      = texture->memory;
+						const u32 texturePitch = texture->bytesPerPixel * texture->dim.w;
 
-					f32 deltaSignedArea1 = debugSignedArea1 - signedArea1Row;
-					f32 deltaSignedArea2 = debugSignedArea2 - signedArea2Row;
-					f32 deltaSignedArea3 = debugSignedArea3 - signedArea3Row;
-					DQN_ASSERT(deltaSignedArea1 < EPSILON && deltaSignedArea2 < EPSILON &&
-					           deltaSignedArea3 < EPSILON)
+						f32 barycentricB = ((f32 *)&barycentric)[2];
+						f32 barycentricC = ((f32 *)&barycentric)[0];
+						DqnV2 uv = uv1 + (uv2SubUv1 * barycentricB) + (uv3SubUv1 * barycentricC);
 
-					f32 debugBarycentricA, debugBarycentricB, debugBarycentricC;
-					DebugBarycentricInternal(DqnV2_2i(bufferX, bufferY), a.xy, b.xy, c.xy,
-					                         &debugBarycentricA, &debugBarycentricB,
-					                         &debugBarycentricC);
+						const f32 EPSILON = 0.1f;
+						DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
+						DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
+						uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
+						uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
 
+						f32 texelXf = uv.x * texture->dim.w;
+						f32 texelYf = uv.y * texture->dim.h;
+						DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
+						DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
 
-					f32 deltaBaryB = DQN_ABS(barycentricB - debugBarycentricB);
-					f32 deltaBaryC = DQN_ABS(barycentricC - debugBarycentricC);
+						i32 texelX = (i32)texelXf;
+						i32 texelY = (i32)texelYf;
 
-					DQN_ASSERT(deltaBaryB < EPSILON && deltaBaryC < EPSILON)
+						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
+						                      (texelY * texturePitch));
+
+						DqnV4 color1;
+						color1.a = (f32)(texel1 >> 24);
+						color1.b = (f32)((texel1 >> 16) & 0xFF);
+						color1.g = (f32)((texel1 >> 8) & 0xFF);
+						color1.r = (f32)((texel1 >> 0) & 0xFF);
+						color1 *= DTRRENDER_INV_255;
+						color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
+						DqnV4 blend = color * color1;
+						SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+					}
+
 				}
 
-				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
-				f32 pixelZValue = a.z + (barycentricB * (b.z - a.z)) + (barycentricC * (c.z - a.z));
-				f32 currZValue  = renderBuffer->zBuffer[zBufferIndex];
-				DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
-
-				if (pixelZValue > currZValue)
+				__m128 isGreater2    = _mm_cmpge_ps(signedArea2, zero_4x);
+				i32 isGreaterResult2 = _mm_movemask_ps(isGreater2);
+				i32 bufferX1         = bufferX + 1;
+				if ((isGreaterResult2 & IS_GREATER_MASK) == IS_GREATER_MASK && bufferX1 < max.x)
 				{
-					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-					const bool DEBUG_SAMPLE_TEXTURE = true;
-					DqnV2 uv = uv1 + ((uv2 - uv1) * barycentricB) + ((uv3 - uv1) * barycentricC);
+					__m128 barycentric  = _mm_mul_ps(signedArea2, invSignedAreaParallelogram4x);
+					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
-					const f32 EPSILON = 0.1f;
-					DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
-					DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
+					i32 zBufferIndex = bufferX1 + (bufferY * zBufferPitch);
+					f32 pixelZValue  = ((f32 *)&barycentricZ)[0] +
+					                   ((f32 *)&barycentricZ)[1] +
+					                   ((f32 *)&barycentricZ)[2];
+					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
+					if (pixelZValue > currZValue)
+					{
+						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+						u8 *texturePtr                      = texture->memory;
+						const u32 texturePitch = texture->bytesPerPixel * texture->dim.w;
 
-					uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
-					uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
+						f32 barycentricB = ((f32 *)&barycentric)[2];
+						f32 barycentricC = ((f32 *)&barycentric)[0];
+						DqnV2 uv = uv1 + (uv2SubUv1 * barycentricB) + (uv3SubUv1 * barycentricC);
 
-					f32 texelXf = uv.x * texture->dim.w;
-					f32 texelYf = uv.y * texture->dim.h;
-					DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
-					DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
+						const f32 EPSILON = 0.1f;
+						DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
+						DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
+						uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
+						uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
 
-					i32 texelX = (i32)texelXf;
-					i32 texelY = (i32)texelYf;
+						f32 texelXf = uv.x * texture->dim.w;
+						f32 texelYf = uv.y * texture->dim.h;
+						DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
+						DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
 
-					u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
-					                      (texelY * texturePitch));
+						i32 texelX = (i32)texelXf;
+						i32 texelY = (i32)texelYf;
 
-					DqnV4 color1;
-					color1.a = (f32)(texel1 >> 24);
-					color1.b = (f32)((texel1 >> 16) & 0xFF);
-					color1.g = (f32)((texel1 >> 8) & 0xFF);
-					color1.r = (f32)((texel1 >> 0) & 0xFF);
+						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
+						                      (texelY * texturePitch));
 
-					color1 *= DTRRENDER_INV_255;
-					color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
-					DqnV4 blend = color * color1;
-					SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+						DqnV4 color1;
+						color1.a = (f32)(texel1 >> 24);
+						color1.b = (f32)((texel1 >> 16) & 0xFF);
+						color1.g = (f32)((texel1 >> 8) & 0xFF);
+						color1.r = (f32)((texel1 >> 0) & 0xFF);
+						color1 *= DTRRENDER_INV_255;
+						color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
+						DqnV4 blend = color * color1;
+						SetPixel(renderBuffer, bufferX1, bufferY, blend, ColorSpace_Linear);
+					}
 				}
+
+				signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
+				signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
 			}
 
-			signedArea1Row += signedArea1DeltaX;
-			signedArea2Row += signedArea2DeltaX;
-			signedArea3Row += signedArea3DeltaX;
+			signedAreaPixel1 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaY);
+			signedAreaPixel2 = _mm_add_ps(signedAreaPixel2, signedAreaPixelDeltaY);
 		}
+	}
+	else
+	{
+		DqnV2i startP         = min;
+		f32 signedArea1       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
+		f32 signedArea1DeltaX = a.y - b.y;
+		f32 signedArea1DeltaY = b.x - a.x;
 
-		signedArea1 += signedArea1DeltaY;
-		signedArea2 += signedArea2DeltaY;
-		signedArea3 += signedArea3DeltaY;
+		f32 signedArea2       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
+		f32 signedArea2DeltaX = b.y - c.y;
+		f32 signedArea2DeltaY = c.x - b.x;
+
+		f32 signedArea3       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
+		f32 signedArea3DeltaX = c.y - a.y;
+		f32 signedArea3DeltaY = a.x - c.x;
+
+		f32 signedAreaParallelogram = signedArea1 + signedArea2 + signedArea3;
+		if (signedAreaParallelogram == 0) return;
+		f32 invSignedAreaParallelogram = 1 / signedAreaParallelogram;
+
+		for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
+		{
+			f32 signedArea1Row = signedArea1;
+			f32 signedArea2Row = signedArea2;
+			f32 signedArea3Row = signedArea3;
+
+			for (i32 bufferX = min.x; bufferX < max.x; bufferX++)
+			{
+				if (signedArea1Row >= 0 && signedArea2Row >= 0 && signedArea3Row >= 0)
+				{
+					f32 barycentricB = signedArea3Row * invSignedAreaParallelogram;
+					f32 barycentricC = signedArea1Row * invSignedAreaParallelogram;
+
+					if (DTR_DEBUG)
+					{
+						const f32 EPSILON = 0.1f;
+
+						f32 debugSignedArea1 = ((b.x - a.x) * (bufferY - a.y)) - ((b.y - a.y) * (bufferX - a.x));
+						f32 debugSignedArea2 = ((c.x - b.x) * (bufferY - b.y)) - ((c.y - b.y) * (bufferX - b.x));
+						f32 debugSignedArea3 = ((a.x - c.x) * (bufferY - c.y)) - ((a.y - c.y) * (bufferX - c.x));
+
+						f32 deltaSignedArea1 = DQN_ABS(debugSignedArea1 - signedArea1Row);
+						f32 deltaSignedArea2 = DQN_ABS(debugSignedArea2 - signedArea2Row);
+						f32 deltaSignedArea3 = DQN_ABS(debugSignedArea3 - signedArea3Row);
+						DQN_ASSERT(deltaSignedArea1 < EPSILON && deltaSignedArea2 < EPSILON &&
+						           deltaSignedArea3 < EPSILON)
+
+						f32 debugBarycentricA, debugBarycentricB, debugBarycentricC;
+						DebugBarycentricInternal(DqnV2_2i(bufferX, bufferY), a.xy, b.xy, c.xy,
+						                         &debugBarycentricA, &debugBarycentricB,
+						                         &debugBarycentricC);
+
+						f32 deltaBaryB = DQN_ABS(barycentricB - debugBarycentricB);
+						f32 deltaBaryC = DQN_ABS(barycentricC - debugBarycentricC);
+
+						DQN_ASSERT(deltaBaryB < EPSILON && deltaBaryC < EPSILON)
+					}
+
+					i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
+					f32 pixelZValue =
+					    a.z + (barycentricB * (b.z - a.z)) + (barycentricC * (c.z - a.z));
+					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
+					DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
+
+					if (pixelZValue > currZValue)
+					{
+						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+						if (texture)
+						{
+							u8 *texturePtr         = texture->memory;
+							const u32 texturePitch = texture->bytesPerPixel * texture->dim.w;
+
+							DqnV2 uv =
+							    uv1 + ((uv2 - uv1) * barycentricB) + ((uv3 - uv1) * barycentricC);
+
+							const f32 EPSILON = 0.1f;
+							DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
+							DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
+
+							uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
+							uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
+
+							f32 texelXf = uv.x * texture->dim.w;
+							f32 texelYf = uv.y * texture->dim.h;
+							DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
+							DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
+
+							i32 texelX = (i32)texelXf;
+							i32 texelY = (i32)texelYf;
+
+							u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
+							                      (texelY * texturePitch));
+
+							DqnV4 color1;
+							color1.a = (f32)(texel1 >> 24);
+							color1.b = (f32)((texel1 >> 16) & 0xFF);
+							color1.g = (f32)((texel1 >> 8) & 0xFF);
+							color1.r = (f32)((texel1 >> 0) & 0xFF);
+
+							color1 *= DTRRENDER_INV_255;
+							color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
+							DqnV4 blend = color * color1;
+							SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+						}
+						else
+						{
+							SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
+						}
+					}
+				}
+
+				signedArea1Row += signedArea1DeltaX;
+				signedArea2Row += signedArea2DeltaX;
+				signedArea3Row += signedArea3DeltaX;
+			}
+
+			signedArea1 += signedArea1DeltaY;
+			signedArea2 += signedArea2DeltaY;
+			signedArea3 += signedArea3DeltaY;
+		}
 	}
 	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 
@@ -881,12 +1046,10 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 	if (signedAreaParallelogram == 0) return;
 	f32 invSignedAreaParallelogram = 1 / signedAreaParallelogram;
 
-	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	const u32 zBufferPitch        = renderBuffer->width;
-	const f32 BARYCENTRIC_EPSILON = 0.1f;
+	const u32 zBufferPitch = renderBuffer->width;
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
 	{
 		f32 signedArea1Row = signedArea1;
@@ -903,6 +1066,7 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
 				f32 pixelZValue = a.z + (barycentricB * (b.z - a.z)) + (barycentricC * (c.z - a.z));
 				f32 currZValue  = renderBuffer->zBuffer[zBufferIndex];
+				DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
 				if (pixelZValue > currZValue)
 				{
 					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
@@ -919,7 +1083,6 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 		signedArea2 += signedArea2DeltaY;
 		signedArea3 += signedArea3DeltaY;
 	}
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Debug
@@ -958,8 +1121,7 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 	}
 }
 
-void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer,
-                      DTRBitmap *const bitmap, DqnV2 pos,
+void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2 pos,
                       const DTRRenderTransform transform, DqnV4 color)
 {
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
