@@ -83,13 +83,18 @@ typedef struct PlatformMouse
 	KeyState rightBtn;
 } PlatformMouse;
 
+typedef struct PlatformFlags
+{
+	bool executableReloaded;
+	bool canUseRdtsc;
+	bool canUseSSE2;
+} PlatformFlags;
+
 typedef struct PlatformInput
 {
-	f32  deltaForFrame;
-	f64  timeNowInS;
-	bool executableReloaded;
-	bool canUseSSE2;
-	bool canUseRdtsc;
+	f32           deltaForFrame;
+	f64           timeNowInS;
+	PlatformFlags flags;
 
 	PlatformAPI   api;
 	PlatformMouse mouse;

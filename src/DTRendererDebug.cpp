@@ -119,7 +119,7 @@ void inline DTRDebug_BeginCycleCount(enum DTRDebugCycleCount tag)
 {
 	if (DTR_DEBUG_PROFILING)
 	{
-		if (globalDebug.input && globalDebug.input->canUseRdtsc)
+		if (globalDTRPlatformFlags.canUseRdtsc)
 		{
 			DTRDebugCycles *const cycles = &globalDebug.cycles[tag];
 			cycles->tmpStartCycles       = __rdtsc();
@@ -132,7 +132,7 @@ void inline DTRDebug_EndCycleCount(enum DTRDebugCycleCount tag)
 {
 	if (DTR_DEBUG_PROFILING)
 	{
-		if (globalDebug.input && globalDebug.input->canUseRdtsc)
+		if (globalDTRPlatformFlags.canUseRdtsc)
 		{
 			DTRDebugCycles *const cycles = &globalDebug.cycles[tag];
 			cycles->totalCycles += __rdtsc() - cycles->tmpStartCycles;
@@ -208,8 +208,8 @@ void DTRDebug_Update(DTRState *const state,
 		DTRDebug_PushText("MouseRBtn: %s", (input->mouse.rightBtn.endedDown) ? "true" : "false");
 		DTRDebug_PushText("");
 
-		DTRDebug_PushText("SSE2Support: %s", (input->canUseSSE2) ? "true" : "false");
-		DTRDebug_PushText("RDTSCSupport: %s", (input->canUseRdtsc) ? "true" : "false");
+		DTRDebug_PushText("SSE2Support: %s", (globalDTRPlatformFlags.canUseSSE2) ? "true" : "false");
+		DTRDebug_PushText("RDTSCSupport: %s", (globalDTRPlatformFlags.canUseRdtsc) ? "true" : "false");
 		DTRDebug_PushText("");
 
 		DTRDebug_PushText("TotalSetPixels: %'lld",    debug->totalSetPixels);
@@ -226,7 +226,7 @@ void DTRDebug_Update(DTRState *const state,
 			u64 avgCycles   = cycles->totalCycles / invocations;
 			DTRDebug_PushText("%d: %'lld avg cycles", i, avgCycles);
 
-			*cycles = emptyDebugCycles;
+			// *cycles = emptyDebugCycles;
 		}
 		DTRDebug_PushText("");
 

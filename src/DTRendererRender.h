@@ -62,8 +62,9 @@ inline DqnV4 DTRRender_PreMultiplyAlphaSRGB1WithLinearConversion(DqnV4 color);
 void DTRRender_Text            (DTRRenderBuffer *const renderBuffer, const DTRFont font, DqnV2 pos, const char *const text, DqnV4 color = DqnV4_1f(1), i32 len = -1);
 void DTRRender_Line            (DTRRenderBuffer *const renderBuffer, DqnV2i a, DqnV2i b, DqnV4 color);
 void DTRRender_Rectangle       (DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 max, DqnV4 color, const DTRRenderTransform transform = DTRRender_DefaultTransform());
+void DTRRender_Mesh            (DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, const DqnV3 pos, const f32 scale, const DqnV3 lightVector);
 void DTRRender_Triangle        (DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV4 color, const DTRRenderTransform transform = DTRRender_DefaultTriangleTransform());
-void DTRRender_TexturedTriangle(PlatformInput *const input, DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture, DqnV4 color, const DTRRenderTransform transform = DTRRender_DefaultTriangleTransform());
+void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture, DqnV4 color, const DTRRenderTransform transform = DTRRender_DefaultTriangleTransform());
 void DTRRender_Bitmap          (DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2 pos, const DTRRenderTransform transform = DTRRender_DefaultTransform(), DqnV4 color = DqnV4_4f(1, 1, 1, 1));
 void DTRRender_Clear           (DTRRenderBuffer *const renderBuffer, DqnV3 color);
 

@@ -273,23 +273,21 @@ FILE_SCOPE void Win32HandleMenuMessages(HWND window, MSG msg,
 
 		case Win32Menu_FileFlushMemory:
 		{
+			DqnMemStack memStacks[DQN_ARRAY_COUNT(globalPlatformMemory.stacks)] = {};
 			for (i32 i = 0; i < DQN_ARRAY_COUNT(globalPlatformMemory.stacks); i++)
 			{
-				while (globalPlatformMemory.stacks[i].block->prevBlock)
-					DqnMemStack_FreeLastBlock(&globalPlatformMemory.stacks[i]);
+				DqnMemStack *stack = &globalPlatformMemory.stacks[i];
+				while (stack->block->prevBlock)
+					DqnMemStack_FreeLastBlock(stack);
 
-				DqnMemStack_ClearCurrBlock(&globalPlatformMemory.stacks[i], true);
+				DqnMemStack_ClearCurrBlock(stack, true);
+				memStacks[i] = *stack;
 			}
 
-			DqnMemStack mainStack  = globalPlatformMemory.mainStack;
-			DqnMemStack assetStack = globalPlatformMemory.assetStack;
-			DqnMemStack tempStack  = globalPlatformMemory.tempStack;
-
-			PlatformMemory empty            = {};
-			globalPlatformMemory            = empty;
-			globalPlatformMemory.mainStack  = mainStack;
-			globalPlatformMemory.assetStack = assetStack;
-			globalPlatformMemory.tempStack  = tempStack;
+			PlatformMemory empty = {};
+			globalPlatformMemory = empty;
+			for (i32 i = 0; i < DQN_ARRAY_COUNT(globalPlatformMemory.stacks); i++)
+				globalPlatformMemory.stacks[i] = memStacks[i];
 		}
 		break;
 
@@ -560,10 +558,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	platformAPI.FileClose   = Platform_FileClose;
 	platformAPI.Print       = Platform_Print;
 
-	PlatformInput platformInput = {};
-	platformInput.canUseSSE2    = IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE);
-	platformInput.canUseRdtsc   = IsProcessorFeaturePresent(PF_RDTSC_INSTRUCTION_AVAILABLE);
-	platformInput.api           = platformAPI;
+	PlatformInput platformInput     = {};
+	platformInput.api               = platformAPI;
+	platformInput.flags.canUseSSE2  = IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE);
+	platformInput.flags.canUseRdtsc = IsProcessorFeaturePresent(PF_RDTSC_INSTRUCTION_AVAILABLE);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Update Loop
@@ -585,7 +583,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		{
 			Win32UnloadExternalDLL(&dllCode);
 			dllCode = Win32LoadExternalDLL(dllPath, dllTmpPath, lastWriteTime);
-			platformInput.executableReloaded = true;
+			platformInput.flags.executableReloaded = true;
 		}
 
 		{

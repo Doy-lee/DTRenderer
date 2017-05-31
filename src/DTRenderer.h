@@ -14,4 +14,6 @@ typedef struct DTRState
 	DTRBitmap bitmap;
 	DTRMesh   mesh;
 } DTRState;
+
+extern PlatformFlags globalDTRPlatformFlags;
 #endif

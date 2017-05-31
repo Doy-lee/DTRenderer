@@ -8,6 +8,8 @@
 #include "dqn.h"
 #include <math.h>
 
+PlatformFlags globalDTRPlatformFlags;
+
 // #include <algorithm>
 void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const input,
                     PlatformMemory *const memory)
@@ -946,8 +948,9 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	////////////////////////////////////////////////////////////////////////////
 	// Initialisation
 	////////////////////////////////////////////////////////////////////////////
-	DTRState *state = (DTRState *)memory->context;
-	if (input->executableReloaded)
+	DTRState *state        = (DTRState *)memory->context;
+	globalDTRPlatformFlags = input->flags;
+	if (globalDTRPlatformFlags.executableReloaded)
 	{
 		DTR_DEBUG_EP_PROFILE_END();
 		DTR_DEBUG_EP_PROFILE_START();
@@ -1046,77 +1049,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRMesh *const mesh = &state->mesh;
 		DqnV3 modelP = DqnV3_3f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f, 0);
 
-		for (u32 i = 0; i < mesh->numFaces; i++)
-		{
-			DTRMeshFace face = mesh->faces[i];
-			DQN_ASSERT(face.numVertexIndex == 3);
-			i32 vertAIndex = face.vertexIndex[0];
-			i32 vertBIndex = face.vertexIndex[1];
-			i32 vertCIndex = face.vertexIndex[2];
-
-			DqnV4 vertA = mesh->vertexes[vertAIndex];
-			DqnV4 vertB = mesh->vertexes[vertBIndex];
-			DqnV4 vertC = mesh->vertexes[vertCIndex];
-			// TODO(doyle): Some models have -ve indexes to refer to relative
-			// vertices. We should resolve that to positive indexes at run time.
-			DQN_ASSERT(vertAIndex < (i32)mesh->numVertexes);
-			DQN_ASSERT(vertBIndex < (i32)mesh->numVertexes);
-			DQN_ASSERT(vertCIndex < (i32)mesh->numVertexes);
-
-			DqnV4 vertAB = vertB - vertA;
-			DqnV4 vertAC = vertC - vertA;
-			DqnV3 normal = DqnV3_Cross(vertAC.xyz, vertAB.xyz);
-
-			f32 intensity = DqnV3_Dot(DqnV3_Normalise(normal), LIGHT);
-			if (intensity < 0) continue;
-			DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
-			modelCol.rgb *= DQN_ABS(intensity);
-
-			DqnV3 screenVA = (vertA.xyz * MODEL_SCALE) + modelP;
-			DqnV3 screenVB = (vertB.xyz * MODEL_SCALE) + modelP;
-			DqnV3 screenVC = (vertC.xyz * MODEL_SCALE) + modelP;
-
-			// TODO(doyle): Why do we need rounding here? Maybe it's because
-			// I don't do any interpolation in the triangle routine for jagged
-			// edges.
-			screenVA.x = (f32)(i32)(screenVA.x + 0.5f);
-			screenVA.y = (f32)(i32)(screenVA.y + 0.5f);
-			screenVB.x = (f32)(i32)(screenVB.x + 0.5f);
-			screenVB.y = (f32)(i32)(screenVB.y + 0.5f);
-			screenVC.x = (f32)(i32)(screenVC.x + 0.5f);
-			screenVC.y = (f32)(i32)(screenVC.y + 0.5f);
-
-			i32 textureAIndex = face.texIndex[0];
-			i32 textureBIndex = face.texIndex[1];
-			i32 textureCIndex = face.texIndex[2];
-
-			DqnV2 texA = mesh->texUV[textureAIndex].xy;
-			DqnV2 texB = mesh->texUV[textureBIndex].xy;
-			DqnV2 texC = mesh->texUV[textureCIndex].xy;
-			DQN_ASSERT(textureAIndex < (i32)mesh->numTexUV);
-			DQN_ASSERT(textureBIndex < (i32)mesh->numTexUV);
-			DQN_ASSERT(textureCIndex < (i32)mesh->numTexUV);
-
-			bool DEBUG_SIMPLE_MODE = false;
-			if (DTR_DEBUG && DEBUG_SIMPLE_MODE)
-			{
-				DTRRender_Triangle(&renderBuffer, screenVA, screenVB, screenVC, modelCol);
-			}
-			else
-			{
-				DTRRender_TexturedTriangle(input, &renderBuffer, screenVA, screenVB, screenVC, texA,
-				                           texB, texC, &state->mesh.tex, modelCol);
-			}
-
-			bool DEBUG_WIREFRAME = false;
-			if (DTR_DEBUG && DEBUG_WIREFRAME)
-			{
-				DqnV4 wireColor = DqnV4_4f(1.0f, 1.0f, 1.0f, 0.01f);
-				DTRRender_Line(&renderBuffer, DqnV2i_V2(screenVA.xy), DqnV2i_V2(screenVB.xy), wireColor);
-				DTRRender_Line(&renderBuffer, DqnV2i_V2(screenVB.xy), DqnV2i_V2(screenVC.xy), wireColor);
-				DTRRender_Line(&renderBuffer, DqnV2i_V2(screenVC.xy), DqnV2i_V2(screenVA.xy), wireColor);
-			}
-		}
+		DTRRender_Mesh(&renderBuffer, mesh, modelP, MODEL_SCALE, LIGHT);
 	}
 
 	// Rect drawing
