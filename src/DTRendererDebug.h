@@ -43,6 +43,7 @@ enum DTRDebugCounter
 
 enum DTRDebugCycleCount
 {
+	DTRDebugCycleCount_RenderTexturedTriangle_Rasterise,
 	DTRDebugCycleCount_RenderTriangle_Rasterise,
 	DTRDebugCycleCount_Count,
 };

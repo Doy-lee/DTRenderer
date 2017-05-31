@@ -1041,15 +1041,18 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRRender_Triangle(&renderBuffer, t4[0], t4[1], t4[2], colorRed);
 		DTRRender_Triangle(&renderBuffer, t5[0], t5[1], t5[2], colorRed);
 
-		////////////////////////////////////////////////////////////////////////
-		// Draw Loaded Model
-		////////////////////////////////////////////////////////////////////////
-		const DqnV3 LIGHT           = DqnV3_3i(0, 0, -1);
-		const f32 MODEL_SCALE       = DQN_MIN(renderBuffer.width, renderBuffer.height) * 0.5f;
-		DTRMesh *const mesh = &state->mesh;
-		DqnV3 modelP = DqnV3_3f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f, 0);
+		if (1)
+		{
+			////////////////////////////////////////////////////////////////////////
+			// Draw Loaded Model
+			////////////////////////////////////////////////////////////////////////
+			const DqnV3 LIGHT     = DqnV3_3i(0, 0, -1);
+			const f32 MODEL_SCALE = DQN_MIN(renderBuffer.width, renderBuffer.height) * 0.5f;
+			DTRMesh *const mesh   = &state->mesh;
+			DqnV3 modelP = DqnV3_3f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f, 0);
 
-		DTRRender_Mesh(&renderBuffer, mesh, modelP, MODEL_SCALE, LIGHT);
+			DTRRender_Mesh(&renderBuffer, mesh, modelP, MODEL_SCALE, LIGHT);
+		}
 	}
 
 	// Rect drawing
