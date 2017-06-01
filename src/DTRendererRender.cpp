@@ -1002,7 +1002,9 @@ FILE_SCOPE __m128 SIMD_SampleTextureForTriangle(DTRBitmap *const texture, const 
                                                 const DqnV2 uv2SubUv1, const DqnV2 uv3SubUv1,
                                                 const __m128 barycentric)
 {
-	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_SampleTextureFunction);
+	DTRDebug_BeginCycleCount("SIMD_TexturedTriangle_SampleTexture",
+	                         DTRDebugCycleCount_SIMD_TexturedTriangle_SampleTexture);
+
 	LOCAL_PERSIST const __m128 INV255_4X = _mm_set_ps1(1.0f / 255.0f);
 
 	const f32 barycentricP2 = ((f32 *)&barycentric)[1];
@@ -1033,7 +1035,7 @@ FILE_SCOPE __m128 SIMD_SampleTextureForTriangle(DTRBitmap *const texture, const 
 	                          (f32)((texel1 >> 0) & 0xFF));
 
 	color = SIMD_SRGB255ToLinearSpace1(color);
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_SampleTextureFunction);
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMD_TexturedTriangle_SampleTexture);
 	return color;
 }
 
@@ -1043,6 +1045,7 @@ FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3
                                       const DTRRenderTransform transform)
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
+	DTRDebug_BeginCycleCount("SIMD_TexturedTriangle", DTRDebugCycleCount_SIMD_TexturedTriangle);
 	////////////////////////////////////////////////////////////////////////////
 	// Convert color
 	////////////////////////////////////////////////////////////////////////////
@@ -1066,7 +1069,6 @@ FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3
 		p3.xy = pList[2];
 	}
 
-	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
 	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
 	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
 	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
@@ -1143,6 +1145,7 @@ FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
+	DTRDebug_BeginCycleCount("SIMD_TexturedTriangle_Rasterise", DTRDebugCycleCount_SIMD_TexturedTriangle_Rasterise);
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY += NUM_Y_PIXELS_TO_SIMD)
 	{
 		__m128 signedArea1 = signedAreaPixel1;
@@ -1151,6 +1154,8 @@ FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3
 		for (i32 bufferX = min.x; bufferX < max.x; bufferX += NUM_X_PIXELS_TO_SIMD)
 		{
 
+			DTRDebug_BeginCycleCount("SIMD_TexturedTriangle_RasterisePixel",
+			                         DTRDebugCycleCount_SIMD_TexturedTriangle_RasterisePixel);
 			// Rasterise buffer(X, Y) pixel
 			{
 				__m128 checkArea    = signedArea1;
@@ -1179,6 +1184,7 @@ FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3
 				}
 				signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
 			}
+			DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMD_TexturedTriangle_RasterisePixel);
 
 			// Rasterise buffer(X + 1, Y) pixel
 			{
@@ -1213,7 +1219,7 @@ FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3
 		signedAreaPixel1 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaY);
 		signedAreaPixel2 = _mm_add_ps(signedAreaPixel2, signedAreaPixelDeltaY);
 	}
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMD_TexturedTriangle_Rasterise);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Debug
@@ -1254,6 +1260,7 @@ FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3
 			DTRRender_Rectangle(renderBuffer, p3.xy - DqnV2_1f(5), p3.xy + DqnV2_1f(5), purple);
 		}
 	}
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMD_TexturedTriangle);
 }
 
 
@@ -1299,9 +1306,7 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, D
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
 	RasteriseTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color);
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Debug
@@ -1537,7 +1542,6 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 	const u32 zBufferPitch = renderBuffer->width;
 	if (globalDTRPlatformFlags.canUseSSE2)
 	{
@@ -1663,7 +1667,6 @@ void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
 			signedArea3 += signedArea3DeltaY;
 		}
 	}
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTriangle_Rasterise);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Debug

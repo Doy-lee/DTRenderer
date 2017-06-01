@@ -115,22 +115,30 @@ void DTRDebug_PushText(const char *const formatStr, ...)
 	}
 }
 
-void inline DTRDebug_BeginCycleCount(enum DTRDebugCycleCount tag)
+#pragma warning(push)
+#pragma warning(disable: 4127)
+void inline DTRDebug_BeginCycleCount(char *title, enum DTRDebugCycleCount tag)
 {
-	if (DTR_DEBUG_PROFILING)
+	if (DTR_DEBUG && DTR_DEBUG_PROFILING)
 	{
 		if (globalDTRPlatformFlags.canUseRdtsc)
 		{
 			DTRDebugCycles *const cycles = &globalDebug.cycles[tag];
 			cycles->tmpStartCycles       = __rdtsc();
 			cycles->numInvokes++;
+
+			if (!cycles->name)
+			{
+				cycles->name = (char *)DqnMemStack_Push(&globalDebug.memStack, 128 * sizeof(char));
+				if (cycles->name) Dqn_sprintf(cycles->name, "%s", title);
+			}
 		}
 	}
 }
 
 void inline DTRDebug_EndCycleCount(enum DTRDebugCycleCount tag)
 {
-	if (DTR_DEBUG_PROFILING)
+	if (DTR_DEBUG && DTR_DEBUG_PROFILING)
 	{
 		if (globalDTRPlatformFlags.canUseRdtsc)
 		{
@@ -139,6 +147,7 @@ void inline DTRDebug_EndCycleCount(enum DTRDebugCycleCount tag)
 		}
 	}
 }
+#pragma warning(pop)
 
 FILE_SCOPE void PushMemStackText(const char *const name, const DqnMemStack *const stack)
 {
@@ -201,6 +210,7 @@ void DTRDebug_Update(DTRState *const state,
 			PushMemStackText("MainStack", &memory->mainStack);
 			PushMemStackText("TempStack", &memory->tempStack);
 			PushMemStackText("AssetStack", &memory->assetStack);
+			PushMemStackText("DebugStack", &debug->memStack);
 		}
 
 		DTRDebug_PushText("Mouse: %d, %d", input->mouse.x, input->mouse.y);
@@ -224,7 +234,12 @@ void DTRDebug_Update(DTRState *const state,
 
 			u64 invocations = (cycles->numInvokes == 0) ? 1 : cycles->numInvokes;
 			u64 avgCycles   = cycles->totalCycles / invocations;
-			DTRDebug_PushText("%d: %'lld avg cycles", i, avgCycles);
+
+			if (avgCycles > 0)
+			{
+				DTRDebug_PushText("%d:%s: %'lld avg cycles", i, cycles->name, avgCycles);
+			}
+			cycles->name = NULL;
 
 			// *cycles = emptyDebugCycles;
 		}

@@ -959,30 +959,27 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 	if (!memory->isInit)
 	{
-		DebugTestStrToF32Converter();
 		DTR_DEBUG_EP_TIMED_BLOCK("DTR_Update Memory Initialisation");
-
-		DTRAsset_InitGlobalState();
-
-		memory->isInit  = true;
 		memory->context = DqnMemStack_Push(&memory->mainStack, sizeof(DTRState));
+		memory->isInit  = (memory->context) ? true : false;
 
+		if (!memory->isInit) return;
+		state = (DTRState *)memory->context;
+
+		////////////////////////////////////////////////////////////////////////
+		// Init Memory Stacks
+		////////////////////////////////////////////////////////////////////////
 		DqnMemStack *const assetStack = &memory->assetStack;
 		DqnMemStack *const tempStack  = &memory->tempStack;
-		DQN_ASSERT(memory->context);
-		state = (DTRState *)memory->context;
+
+		////////////////////////////////////////////////////////////////////////
+		// Init Assets
+		////////////////////////////////////////////////////////////////////////
+		DTRAsset_InitGlobalState();
 		DTRAsset_LoadFontToBitmap(input->api, &memory->mainStack, tempStack, &state->font,
 		                          "Roboto-bold.ttf", DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 12);
 		DTRAsset_LoadBitmap(input->api, assetStack,
 		                    tempStack, &state->bitmap, "tree00.bmp");
-
-		if (DTR_DEBUG)
-		{
-			DTRBitmap test      = {};
-			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->tempStack);
-			DTRAsset_LoadBitmap(input->api, assetStack, &memory->tempStack, &test, "byte_read_check.bmp");
-			DqnMemStack_EndTempRegion(tmp);
-		}
 
 		if (DTRAsset_LoadWavefrontObj(input->api, assetStack, &state->mesh, "african_head.obj"))
 		{
@@ -990,10 +987,28 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			                    "african_head_diffuse.tga");
 		}
 
-		DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
+		////////////////////////////////////////////////////////////////////////
+		// Init Debug
+		////////////////////////////////////////////////////////////////////////
+		if (DTR_DEBUG)
+		{
+			DebugTestStrToF32Converter();
+			DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
+
+			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->tempStack);
+			DTRBitmap test      = {};
+			DTRAsset_LoadBitmap(input->api, assetStack, &memory->tempStack, &test, "byte_read_check.bmp");
+			DqnMemStack_EndTempRegion(tmp);
+
+		}
 	}
 
-	DqnTempMemStack transMemTmpRegion = DqnMemStack_BeginTempRegion(&memory->tempStack);
+	DqnTempMemStack tempStackMemRegion = DqnMemStack_BeginTempRegion(&memory->tempStack);
+
+	size_t debugSize = DQN_MEGABYTE(1);
+	u8 *debugMemory  = (u8 *)DqnMemStack_Push(&memory->tempStack, debugSize);
+	DqnMemStack_InitWithFixedMem(&globalDebug.memStack, debugMemory, debugSize);
+	DTRDebug_BeginCycleCount("DTR_Update", DTRDebugCycleCount_DTR_Update);
 
 	DTRRenderBuffer renderBuffer = {};
 	renderBuffer.width           = platformRenderBuffer->width;
@@ -1006,7 +1021,6 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	                                               zBufferSize * sizeof(*renderBuffer.zBuffer));
 
 	for (u32 i = 0; i < zBufferSize; i++) renderBuffer.zBuffer[i] = DQN_F32_MIN;
-
 	////////////////////////////////////////////////////////////////////////////
 	// Update and Render
 	////////////////////////////////////////////////////////////////////////////
@@ -1034,15 +1048,22 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
 		rotatingXform.rotation           = rotation;
 
-		DTRRender_Triangle(&renderBuffer, t0[0], t0[1], t0[2], colorRed);
-		DTRRender_Triangle(&renderBuffer, t1[0], t1[1], t1[2], colorRed);
-		DTRRender_Triangle(&renderBuffer, t3[0], t3[1], t3[2], colorRed, rotatingXform);
-		DTRRender_Triangle(&renderBuffer, t2[0], t2[1], t2[2], colorRed);
-		DTRRender_Triangle(&renderBuffer, t4[0], t4[1], t4[2], colorRed);
-		DTRRender_Triangle(&renderBuffer, t5[0], t5[1], t5[2], colorRed);
+		if (0)
+		{
+			DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
+			                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
+			DTRRender_Triangle(&renderBuffer, t0[0], t0[1], t0[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t1[0], t1[1], t1[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t3[0], t3[1], t3[2], colorRed, rotatingXform);
+			DTRRender_Triangle(&renderBuffer, t2[0], t2[1], t2[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t4[0], t4[1], t4[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t5[0], t5[1], t5[2], colorRed);
+			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
+		}
 
 		if (1)
 		{
+			DTRDebug_BeginCycleCount("DTR_Update_RenderModel", DTRDebugCycleCount_DTR_Update_RenderModel);
 			////////////////////////////////////////////////////////////////////////
 			// Draw Loaded Model
 			////////////////////////////////////////////////////////////////////////
@@ -1052,6 +1073,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DqnV3 modelP = DqnV3_3f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f, 0);
 
 			DTRRender_Mesh(&renderBuffer, mesh, modelP, MODEL_SCALE, LIGHT);
+			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderModel);
 		}
 	}
 
@@ -1083,14 +1105,12 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 #else
 	// CompAssignment(renderBuffer, input, memory);
 #endif
-
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update);
 	DTRDebug_Update(state, &renderBuffer, input, memory);
+	DqnMemStack_EndTempRegion(tempStackMemRegion);
 	////////////////////////////////////////////////////////////////////////////
 	// End Update
 	////////////////////////////////////////////////////////////////////////////
-	DqnMemStack_EndTempRegion(transMemTmpRegion);
-	DqnMemStack_ClearCurrBlock(&memory->tempStack, true);
-
 	for (i32 i = 0; i < DQN_ARRAY_COUNT(memory->stacks); i++)
 		DQN_ASSERT(memory->stacks[i].tempStackCount == 0);
 }

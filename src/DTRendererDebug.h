@@ -43,10 +43,13 @@ enum DTRDebugCounter
 
 enum DTRDebugCycleCount
 {
-	DTRDebugCycleCount_RenderTexturedTriangle_Rasterise,
-	DTRDebugCycleCount_RenderTexturedTriangle_SampleTextureFunction,
-	DTRDebugCycleCount_RenderTexturedTriangle_SampleTexture,
-	DTRDebugCycleCount_RenderTriangle_Rasterise,
+	DTRDebugCycleCount_DTR_Update,
+	DTRDebugCycleCount_DTR_Update_RenderModel,
+	DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles,
+	DTRDebugCycleCount_SIMD_TexturedTriangle,
+	DTRDebugCycleCount_SIMD_TexturedTriangle_Rasterise,
+	DTRDebugCycleCount_SIMD_TexturedTriangle_RasterisePixel,
+	DTRDebugCycleCount_SIMD_TexturedTriangle_SampleTexture,
 	DTRDebugCycleCount_Count,
 };
 
@@ -64,6 +67,7 @@ typedef struct DTRDebug
 	struct DTRFont         *font;
 	struct DTRRenderBuffer *renderBuffer;
 	struct PlatformInput   *input;
+	DqnMemStack             memStack;
 
 	DqnV4 displayColor;
 	DqnV2 displayP;
@@ -80,7 +84,7 @@ void        DTRDebug_TestMeshFaceAndVertexParser(struct DTRMesh *const mesh);
 void        DTRDebug_DumpZBuffer                (struct DTRRenderBuffer *const renderBuffer, struct DqnMemStack *const transMemStack);
 void        DTRDebug_PushText                   (const char *const formatStr, ...);
 void        DTRDebug_Update                     (struct DTRState *const state, struct DTRRenderBuffer *const renderBuffer, struct PlatformInput *const input, struct PlatformMemory *const memory);
-void inline DTRDebug_BeginCycleCount            (enum DTRDebugCycleCount tag);
+void inline DTRDebug_BeginCycleCount            (char *title, enum DTRDebugCycleCount tag);
 void inline DTRDebug_EndCycleCount              (enum DTRDebugCycleCount tag);
 void inline DTRDebug_CounterIncrement           (enum DTRDebugCounter tag);
 

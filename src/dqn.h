@@ -1439,17 +1439,17 @@ DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem(DqnMemStack *const stack,
                                                   const u32 byteAlign)
 {
 	if (!stack || !mem) return false;
-	DQN_ASSERT(!stack->block);
 
 	// TODO(doyle): Better logging
 	if (memSize < sizeof(DqnMemStackBlock))
 		DQN_ASSERT(DQN_INVALID_CODE_PATH);
 
-	stack->block         = (DqnMemStackBlock *)mem;
-	stack->block->memory = mem + sizeof(DqnMemStackBlock);
-	stack->block->used   = 0;
-	stack->block->size   = memSize - sizeof(DqnMemStackBlock);
-	stack->flags         = (DqnMemStackFlag_IsFixedMemoryFromUser | DqnMemStackFlag_IsNotExpandable);
+	stack->block            = (DqnMemStackBlock *)mem;
+	stack->block->memory    = mem + sizeof(DqnMemStackBlock);
+	stack->block->used      = 0;
+	stack->block->size      = memSize - sizeof(DqnMemStackBlock);
+	stack->block->prevBlock = NULL;
+	stack->flags = (DqnMemStackFlag_IsFixedMemoryFromUser | DqnMemStackFlag_IsNotExpandable);
 
 	const u32 DEFAULT_ALIGNMENT = 4;
 	stack->tempStackCount     = 0;
