@@ -713,6 +713,7 @@ FILE_SCOPE void *STBImageMalloc(size_t size)
 {
 	DQN_ASSERT(globalSTBImageAllocator);
 	if (!globalSTBImageAllocator) return NULL;
+
 	void *result = DqnMemStack_Push(globalSTBImageAllocator, size);
 	return result;
 }
@@ -746,19 +747,21 @@ bool DTRAsset_LoadBitmap(const PlatformAPI api, DqnMemStack *const memStack,
 
 	// IMPORTANT(doyle): Look at this line!!! To remind you anytime you think of modifying code here
 	globalSTBImageAllocator = memStack;
-	size_t usageBeforeSTB   = memStack->block->used;
+
+	// TODO(doyle): We don't need this atm since we are still using a temp stack in this code.
+	// size_t usageBeforeSTB   = memStack->block->used;
 
 	const u32 FORCE_4_BPP = 4;
 	bitmap->bytesPerPixel = FORCE_4_BPP;
 	u8 *pixels = stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w, &bitmap->dim.h,
 	                                   NULL, FORCE_4_BPP);
-
 	if (!pixels) goto cleanup;
+	result         = true;
 
-	result                      = true;
+    // TODO(doyle): See above. Since we use temp stack we can allocate straight into the AssetStack.
+#if 0
 	size_t pixelsSizeInBytes    = bitmap->dim.w * bitmap->dim.h * FORCE_4_BPP;
 	memStack->block->used = usageBeforeSTB;
-
 	if ((usageBeforeSTB + pixelsSizeInBytes) < memStack->block->size)
 	{
 		u8 *dest = memStack->block->memory + memStack->block->used;
@@ -771,7 +774,9 @@ bool DTRAsset_LoadBitmap(const PlatformAPI api, DqnMemStack *const memStack,
 		// Otherwise, stbi will call STBImageMalloc which uses our MemStack and
 		// MemStack will allocate a new block for us if it can, so it'll already
 		// be somewhat "suitably" sitting in our memory system.
+		DQN_ASSERT(DQN_INVALID_CODE_PATH);
 	}
+#endif
 
 	bitmap->memory = pixels;
 
@@ -805,6 +810,7 @@ bool DTRAsset_LoadBitmap(const PlatformAPI api, DqnMemStack *const memStack,
 	}
 
 cleanup:
+	globalSTBImageAllocator = NULL;
 	DqnMemStack_EndTempRegion(tmpMemRegion);
 	api.FileClose(&file);
 

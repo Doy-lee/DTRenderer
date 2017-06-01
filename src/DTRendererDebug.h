@@ -46,10 +46,19 @@ enum DTRDebugCycleCount
 	DTRDebugCycleCount_DTR_Update,
 	DTRDebugCycleCount_DTR_Update_RenderModel,
 	DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles,
-	DTRDebugCycleCount_SIMD_TexturedTriangle,
-	DTRDebugCycleCount_SIMD_TexturedTriangle_Rasterise,
-	DTRDebugCycleCount_SIMD_TexturedTriangle_RasterisePixel,
-	DTRDebugCycleCount_SIMD_TexturedTriangle_SampleTexture,
+
+	DTRDebugCycleCount_SIMDTexturedTriangle,
+	DTRDebugCycleCount_SIMDTexturedTriangle_Rasterise,
+	DTRDebugCycleCount_SIMDTexturedTriangle_RasterisePixel,
+	DTRDebugCycleCount_SIMDTexturedTriangle_SampleTexture,
+
+	DTRDebugCycleCount_SIMDTriangle,
+	DTRDebugCycleCount_SIMDTriangle_Rasterise,
+	DTRDebugCycleCount_SIMDTriangle_RasterisePixel,
+
+	DTRDebugCycleCount_SlowTriangle,
+	DTRDebugCycleCount_SlowTriangle_Rasterise,
+	DTRDebugCycleCount_SlowTriangle_RasterisePixel,
 	DTRDebugCycleCount_Count,
 };
 

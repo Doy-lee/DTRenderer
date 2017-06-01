@@ -1048,7 +1048,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
 		rotatingXform.rotation           = rotation;
 
-		if (0)
+		if (1)
 		{
 			DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
 			                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
@@ -1061,7 +1061,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 		}
 
-		if (1)
+		if (0)
 		{
 			DTRDebug_BeginCycleCount("DTR_Update_RenderModel", DTRDebugCycleCount_DTR_Update_RenderModel);
 			////////////////////////////////////////////////////////////////////////
@@ -1093,8 +1093,8 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRRenderTransform transform = DTRRender_DefaultTransform();
 		transform.scale              = DqnV2_1f(2.0f);
 
-		LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(300, 250);
-		bitmapP.x += 3.0f * sinf((f32)input->timeNowInS * 0.5f);
+		LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(500, 250);
+		bitmapP.x += 2.0f * sinf((f32)input->timeNowInS * 0.5f);
 
 		f32 cAngle  = (f32)input->timeNowInS;
 		DqnV4 color = DqnV4_4f(0.5f + 0.5f * sinf(cAngle), 0.5f + 0.5f * sinf(2.9f * cAngle),
