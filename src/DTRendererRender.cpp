@@ -11,6 +11,18 @@
 
 FILE_SCOPE const f32 COLOR_EPSILON = 0.9f;
 
+inline void Make3PointsClockwise(DqnV3 *p1, DqnV3 *p2, DqnV3 *p3)
+{
+	f32 area2Times = ((p2->x - p1->x) * (p2->y + p1->y)) +
+	                 ((p3->x - p2->x) * (p3->y + p2->y)) +
+	                 ((p1->x - p3->x) * (p1->y + p3->y));
+	if (area2Times > 0)
+	{
+		// Clockwise swap any point to make it clockwise
+		DQN_SWAP(DqnV3, *p2, *p3);
+	}
+}
+
 FILE_SCOPE inline DqnV4 PreMultiplyAlpha1(const DqnV4 color)
 {
 	DQN_ASSERT(color.a >= 0.0f && color.a <= 1.0f);
@@ -61,20 +73,9 @@ inline f32 DTRRender_SRGB1ToLinearSpacef(f32 val)
 inline DqnV4 DTRRender_SRGB1ToLinearSpaceV4(DqnV4 color)
 {
 	DqnV4 result;
-	if (globalDTRPlatformFlags.canUseSSE2)
-	{
-		__m128 simdColor  = _mm_set_ps(color.r, color.g, color.b, 0);
-		__m128 simdResult = _mm_mul_ps(simdColor, simdColor);
-		result.r          = ((f32 *)&simdResult)[3];
-		result.g          = ((f32 *)&simdResult)[2];
-		result.b          = ((f32 *)&simdResult)[1];
-	}
-	else
-	{
-		result.r = DTRRender_SRGB1ToLinearSpacef(color.r);
-		result.g = DTRRender_SRGB1ToLinearSpacef(color.g);
-		result.b = DTRRender_SRGB1ToLinearSpacef(color.b);
-	}
+	result.r = DTRRender_SRGB1ToLinearSpacef(color.r);
+	result.g = DTRRender_SRGB1ToLinearSpacef(color.g);
+	result.b = DTRRender_SRGB1ToLinearSpacef(color.b);
 	result.a = color.a;
 
 	return result;
@@ -91,20 +92,9 @@ inline f32 DTRRender_LinearToSRGB1Spacef(f32 val)
 inline DqnV4 DTRRender_LinearToSRGB1SpaceV4(DqnV4 color)
 {
 	DqnV4 result;
-	if (globalDTRPlatformFlags.canUseSSE2)
-	{
-		__m128 simdColor  = _mm_set_ps(color.r, color.g, color.b, 0);
-		__m128 simdResult = _mm_sqrt_ps(simdColor);
-		result.r          = ((f32 *)&simdResult)[3];
-		result.g          = ((f32 *)&simdResult)[2];
-		result.b          = ((f32 *)&simdResult)[1];
-	}
-	else
-	{
-		result.r = DTRRender_LinearToSRGB1Spacef(color.r);
-		result.g = DTRRender_LinearToSRGB1Spacef(color.g);
-		result.b = DTRRender_LinearToSRGB1Spacef(color.b);
-	}
+	result.r = DTRRender_LinearToSRGB1Spacef(color.r);
+	result.g = DTRRender_LinearToSRGB1Spacef(color.g);
+	result.b = DTRRender_LinearToSRGB1Spacef(color.b);
 	result.a = color.a;
 
 	return result;
@@ -139,7 +129,6 @@ FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x
 	if (needGammaFix) color = DTRRender_SRGB1ToLinearSpaceV4(color);
 
 	u32 src = bitmapPtr[x + (y * pitchInU32)];
-#if 0
 	f32 srcR = (f32)((src >> 16) & 0xFF) * DTRRENDER_INV_255;
 	f32 srcG = (f32)((src >> 8) & 0xFF)  * DTRRENDER_INV_255;
 	f32 srcB = (f32)((src >> 0) & 0xFF)  * DTRRENDER_INV_255;
@@ -180,44 +169,6 @@ FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x
 	{
 		destB = 255;
 	}
-
-#else
-	__m128 simdSrc = _mm_set_ps(0.0f,
-	                            (f32)((src >> 16) & 0xFF),
-	                            (f32)((src >> 8) & 0xFF),
-	                            (f32)((src >> 0) & 0xFF));
-
-	__m128 inv255_4x = _mm_set_ps1(DTRRENDER_INV_255);
-	simdSrc          = _mm_mul_ps(simdSrc, inv255_4x);
-	simdSrc          = _mm_mul_ps(simdSrc, simdSrc); // to linear
-
-	f32 invANorm       = 1 - color.a;
-	__m128 invANorm_4x = _mm_set_ps1(invANorm);
-	__m128 const255_4x = _mm_set_ps1(255.0f);
-
-	__m128 simdColor = _mm_set_ps(0, color.r, color.g, color.b);
-	__m128 dest      = _mm_add_ps(simdColor, _mm_mul_ps(simdSrc, invANorm_4x)); // to 0->1 range
-	dest             = _mm_sqrt_ps(dest);                                   // to srgb
-	dest             = _mm_mul_ps(dest, const255_4x);                       // to 0->255 range
-
-	DQN_ASSERT(((f32 *)&dest)[2] >= 0);
-	DQN_ASSERT(((f32 *)&dest)[1] >= 0);
-	DQN_ASSERT(((f32 *)&dest)[0] >= 0);
-
-	if (DTR_DEBUG)
-	{
-		DQN_ASSERT((((f32 *)&dest)[2] - 255.0f) < COLOR_EPSILON);
-		DQN_ASSERT((((f32 *)&dest)[1] - 255.0f) < COLOR_EPSILON);
-		DQN_ASSERT((((f32 *)&dest)[0] - 255.0f) < COLOR_EPSILON);
-	}
-
-	dest = _mm_min_ps(dest, const255_4x);
-
-	f32 destR = ((f32 *)&dest)[2];
-	f32 destG = ((f32 *)&dest)[1];
-	f32 destB = ((f32 *)&dest)[0];
-
-#endif
 
 	u32 pixel = // ((u32)(destA) << 24 |
 	             (u32)(destR) << 16 |
@@ -582,29 +533,24 @@ typedef struct TriangleInclusionTest
 
 typedef struct SIMDTriangleInclusionTest
 {
-	DqnV2i boundsMin;
-	DqnV2i boundsMax;
-
 	__m128 vertexZValues;
 	__m128 signedAreaPixelDeltaX;
 	__m128 signedAreaPixelDeltaY;
 	__m128 invSignedAreaParallelogram_4x;
-
 	__m128 startPixel;
+
+	DqnV2i boundsMin;
+	DqnV2i boundsMax;
+	DqnV3  p1;
+	DqnV3  p2;
+	DqnV3  p3;
 } SIMDTriangleInclusionTest;
 
 FILE_SCOPE TriangleInclusionTest CreateTriangleInclusionTest(const i32 clipWidth,
                                                              const i32 clipHeight, DqnV3 p1,
                                                              DqnV3 p2, DqnV3 p3)
 {
-	f32 area2Times = ((p2.x - p1.x) * (p2.y + p1.y)) + ((p3.x - p2.x) * (p3.y + p2.y)) +
-	                 ((p1.x - p3.x) * (p1.y + p3.y));
-	if (area2Times > 0)
-	{
-		// Clockwise swap any point to make it clockwise
-		DQN_SWAP(DqnV3, p2, p3);
-	}
-
+	Make3PointsClockwise(&p1, &p2, &p3);
 	TriangleInclusionTest result = {};
 
 	result.boundsMin   = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x), DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
@@ -757,6 +703,9 @@ FILE_SCOPE SIMDTriangleInclusionTest CreateSimdTriangleInclusionTest(
 	result.boundsMax = inclusionTest.boundsMax;
 
 	// NOTE: Order is important here!
+	result.p1 = p1;
+	result.p2 = p2;
+	result.p3 = p3;
 	result.vertexZValues         = _mm_set_ps(0, p3.z, p2.z, p1.z);
 	result.signedAreaPixelDeltaX = _mm_set_ps(0,
 	                                          inclusionTest.signedAreaP3DeltaX,
@@ -773,7 +722,6 @@ FILE_SCOPE SIMDTriangleInclusionTest CreateSimdTriangleInclusionTest(
 	                                  inclusionTest.signedAreaP1);
 	return result;
 }
-
 
 inline void RasteriseTexturedTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1,
                                       const DqnV3 p2, const DqnV3 p3, const DqnV2 uv1,
@@ -910,14 +858,215 @@ inline void RasteriseTexturedTriangle(DTRRenderBuffer *const renderBuffer, const
 	}
 }
 
-inline void SIMDRasteriseTexturedTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1,
-                                          const DqnV3 p2, const DqnV3 p3, const DqnV2 uv1,
-                                          const DqnV2 uv2, const DqnV2 uv3,
-                                          DTRBitmap *const texture, const DqnV4 color)
+FILE_SCOPE inline f32 Triangle2TimesSignedArea(const DqnV2 a, const DqnV2 b, const DqnV2 c)
 {
+	f32 result = ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
+	return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// SIMD
+////////////////////////////////////////////////////////////////////////////////
+// color: _mm_set_ps(a, b, g, r) ie. 0=r, 1=g, 2=b, 3=a
+FILE_SCOPE inline void SIMDDebug_ColorInRange(__m128 color, f32 min, f32 max)
+{
+	if (DTR_DEBUG)
+	{
+		f32 r = ((f32 *)&color)[0];
+		f32 g = ((f32 *)&color)[1];
+		f32 b = ((f32 *)&color)[2];
+		f32 a = ((f32 *)&color)[3];
+		DQN_ASSERT(r >= min && r <= max);
+		DQN_ASSERT(g >= min && g <= max);
+		DQN_ASSERT(b >= min && b <= max);
+		DQN_ASSERT(a >= min && a <= max);
+	}
+}
+
+FILE_SCOPE inline __m128 SIMD_SRGB1ToLinearSpace(__m128 color)
+{
+	SIMDDebug_ColorInRange(color, 0.0f, 1.0f);
+
+	f32 preserveAlpha   = ((f32 *)&color)[3];
+	__m128 result       = _mm_mul_ps(color, color);
+	((f32 *)&result)[3] = preserveAlpha;
+
+	return result;
+}
+
+FILE_SCOPE inline __m128 SIMD_SRGB255ToLinearSpace1(__m128 color)
+{
+	LOCAL_PERSIST const __m128 INV255_4X = _mm_set_ps1(DTRRENDER_INV_255);
+	color                                = _mm_mul_ps(color, INV255_4X);
+
+	f32 preserveAlpha   = ((f32 *)&color)[3];
+	__m128 result       = _mm_mul_ps(color, color);
+	((f32 *)&result)[3] = preserveAlpha;
+
+	return result;
+}
+
+FILE_SCOPE inline __m128 SIMD_LinearSpace1ToSRGB1(__m128 color)
+{
+	SIMDDebug_ColorInRange(color, 0.0f, 1.0f);
+
+	f32 preserveAlpha   = ((f32 *)&color)[3];
+	__m128 result       = _mm_sqrt_ps(color);
+	((f32 *)&result)[3] = preserveAlpha;
+
+	return result;
+}
+
+
+// color: _mm_set_ps(a, b, g, r) ie. 0=r, 1=g, 2=b, 3=a
+FILE_SCOPE inline __m128 SIMD_PreMultiplyAlpha1(__m128 color)
+{
+	f32 alpha        = ((f32 *)&color)[3];
+	__m128 simdAlpha = _mm_set_ps(1, alpha, alpha, alpha);
+	__m128 result    = _mm_mul_ps(color, simdAlpha);
+
+	return result;
+}
+
+FILE_SCOPE inline DqnV2 Get2DOriginFromTransformAnchor(const DqnV2 p1, const DqnV2 p2,
+                                                       const DqnV2 p3,
+                                                       const DTRRenderTransform transform)
+{
+	DqnV2 p1p2 = p2 - p1;
+	DqnV2 p1p3 = p3 - p1;
+
+	DqnV2 p1p2Anchored = p1p2 * transform.anchor;
+	DqnV2 p1p3Anchored = p1p3 * transform.anchor;
+	DqnV2 origin       = p1 + p1p2Anchored + p1p3Anchored;
+
+	return origin;
+}
+
+// color: _mm_set_ps(a, b, g, r) ie. 0=r, 1=g, 2=b, 3=a
+FILE_SCOPE inline void SIMD_SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x, const i32 y,
+                                     __m128 color,
+                                     const enum ColorSpace colorSpace = ColorSpace_SRGB)
+{
+	if (!renderBuffer) return;
+	if (x < 0 || x > (renderBuffer->width - 1)) return;
+	if (y < 0 || y > (renderBuffer->height - 1)) return;
+
+	DTR_DEBUG_EP_TIMED_FUNCTION();
+	SIMDDebug_ColorInRange(color, 0.0f, 1.0f);
+
+	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
+	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
+
+	// If some alpha is involved, we need to apply gamma correction, but if the
+	// new pixel is totally opaque or invisible then we're just flat out
+	// overwriting/keeping the state of the pixel so we can save cycles by skipping.
+	f32 alpha = ((f32 *)&color)[3];
+	bool needGammaFix = (alpha > 0.0f || alpha < (1.0f + COLOR_EPSILON)) && (colorSpace == ColorSpace_SRGB);
+	if (needGammaFix) color = SIMD_SRGB1ToLinearSpace(color);
+
+	// Format: u32 == (XX, RR, GG, BB)
+	u32 srcPixel = bitmapPtr[x + (y * pitchInU32)];
+	__m128 src = _mm_set_ps(0,
+	                        (f32)((srcPixel >> 0) & 0xFF),
+	                        (f32)((srcPixel >> 8) & 0xFF),
+	                        (f32)((srcPixel >> 16) & 0xFF));
+	src = SIMD_SRGB255ToLinearSpace1(src);
+
+	f32 invA       = 1 - alpha;
+	__m128 invA_4x = _mm_set_ps1(invA);
+
+	// PreAlphaMulColor + (1 - Alpha) * Src
+	__m128 oneMinusAlphaSrc = _mm_mul_ps(invA_4x, src);
+	__m128 dest             = _mm_add_ps(color, oneMinusAlphaSrc);
+	dest                    = SIMD_LinearSpace1ToSRGB1(dest);
+	dest                    = _mm_mul_ps(dest, _mm_set_ps1(255.0f)); // to 0->255 range
+
+	SIMDDebug_ColorInRange(dest, 0.0f, 255.0f);
+
+	f32 destR = ((f32 *)&dest)[0];
+	f32 destG = ((f32 *)&dest)[1];
+	f32 destB = ((f32 *)&dest)[2];
+
+	u32 pixel = // ((u32)(destA) << 24 |
+	             (u32)(destR) << 16 |
+	             (u32)(destG) << 8 |
+	             (u32)(destB) << 0;
+	bitmapPtr[x + (y * pitchInU32)] = pixel;
+
+	DTRDebug_CounterIncrement(DTRDebugCounter_SetPixels);
+}
+
+// colorModulate: _mm_set_ps(a, b, g, r)     ie. 0=r, 1=g, 2=b, 3=a
+// barycentric:   _mm_set_ps(xx, p3, p2, p1) ie. 0=p1, 1=p2, 2=p3, 3=a
+FILE_SCOPE __m128 SIMD_SampleTextureForTriangle(DTRBitmap *const texture, const DqnV2 uv1,
+                                                const DqnV2 uv2SubUv1, const DqnV2 uv3SubUv1,
+                                                const __m128 barycentric)
+{
+	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_SampleTextureFunction);
+	LOCAL_PERSIST const __m128 INV255_4X = _mm_set_ps1(1.0f / 255.0f);
+
+	const f32 barycentricP2 = ((f32 *)&barycentric)[1];
+	const f32 barycentricP3 = ((f32 *)&barycentric)[2];
+	DqnV2 uv                = uv1 + (uv2SubUv1 * barycentricP2) + (uv3SubUv1 * barycentricP3);
+
+	const f32 EPSILON = 0.1f;
+	DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
+	DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
+	uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
+	uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
+
+	f32 texelXf = uv.x * texture->dim.w;
+	f32 texelYf = uv.y * texture->dim.h;
+	DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
+	DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
+
+	i32 texelX = (i32)texelXf;
+	i32 texelY = (i32)texelYf;
+
+	const u32 texturePitch     = texture->bytesPerPixel * texture->dim.w;
+	const u8 *const texturePtr = texture->memory;
+	u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) + (texelY * texturePitch));
+
+	__m128 color = _mm_set_ps((f32)(texel1 >> 24),
+	                          (f32)((texel1 >> 16) & 0xFF),
+	                          (f32)((texel1 >> 8) & 0xFF),
+	                          (f32)((texel1 >> 0) & 0xFF));
+
+	color = SIMD_SRGB255ToLinearSpace1(color);
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_SampleTextureFunction);
+	return color;
+}
+
+FILE_SCOPE void SIMD_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2,
+                                      DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3,
+                                      DTRBitmap *const texture, DqnV4 color,
+                                      const DTRRenderTransform transform)
+{
+	DTR_DEBUG_EP_TIMED_FUNCTION();
 	////////////////////////////////////////////////////////////////////////////
-	// Calculate Bounding Box
+	// Convert color
 	////////////////////////////////////////////////////////////////////////////
+	__m128 simdColor = _mm_set_ps(color.a, color.b, color.g, color.r);
+	simdColor        = SIMD_SRGB1ToLinearSpace(simdColor);
+	simdColor        = SIMD_PreMultiplyAlpha1(simdColor);
+
+	////////////////////////////////////////////////////////////////////////////
+	// Transform vertexes p1, p2, p3 inplace
+	////////////////////////////////////////////////////////////////////////////
+	{
+		Make3PointsClockwise(&p1, &p2, &p3);
+
+		// TODO(doyle): Transform is only in 2d right now
+		DqnV2 origin   = Get2DOriginFromTransformAnchor(p1.xy, p2.xy, p3.xy, transform);
+		DqnV2 pList[3] = {p1.xy - origin, p2.xy - origin, p3.xy - origin};
+		TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale, transform.rotation);
+
+		p1.xy = pList[0];
+		p2.xy = pList[1];
+		p3.xy = pList[2];
+	}
+
+	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
 	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x),
 	                       DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
 	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x),
@@ -927,56 +1076,73 @@ inline void SIMDRasteriseTexturedTriangle(DTRRenderBuffer *const renderBuffer, c
 	max.x = DQN_MIN(max.x, renderBuffer->width - 1);
 	max.y = DQN_MIN(max.y, renderBuffer->height - 1);
 
-	const u32 zBufferPitch = renderBuffer->width;
-	const DqnV3 a          = p1;
-	const DqnV3 b          = p2;
-	const DqnV3 c          = p3;
 
-	DqnV2i startP         = min;
-	f32 signedAreaC       = ((b.x - a.x) * (startP.y - a.y)) - ((b.y - a.y) * (startP.x - a.x));
-	f32 signedAreaCDeltaX = a.y - b.y;
-	f32 signedAreaCDeltaY = b.x - a.x;
-
-	f32 signedAreaA       = ((c.x - b.x) * (startP.y - b.y)) - ((c.y - b.y) * (startP.x - b.x));
-	f32 signedAreaADeltaX = b.y - c.y;
-	f32 signedAreaADeltaY = c.x - b.x;
-
-	f32 signedAreaB       = ((a.x - c.x) * (startP.y - c.y)) - ((a.y - c.y) * (startP.x - c.x));
-	f32 signedAreaBDeltaX = c.y - a.y;
-	f32 signedAreaBDeltaY = a.x - c.x;
-
-	f32 signedAreaParallelogram = signedAreaC + signedAreaA + signedAreaB;
-	if (signedAreaParallelogram == 0) return;
-	f32 invSignedAreaParallelogram = 1.0f / signedAreaParallelogram;
-
-	__m128 invSignedAreaParallelogram_4x = _mm_set_ps1(invSignedAreaParallelogram);
-
-	// NOTE: Order is important here!
-	__m128 triangleZ             = _mm_set_ps(0, b.z, a.z, c.z);
-	__m128 signedAreaPixelDeltaX = _mm_set_ps(0, signedAreaBDeltaX, signedAreaADeltaX, signedAreaCDeltaX);
-	__m128 signedAreaPixelDeltaY = _mm_set_ps(0, signedAreaBDeltaY, signedAreaADeltaY, signedAreaCDeltaY);
-	__m128 signedAreaPixel1      = _mm_set_ps(0, signedAreaB, signedAreaA, signedAreaC);
-	__m128 signedAreaPixel2      = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaX);
+	////////////////////////////////////////////////////////////////////////////
+	// Setup SIMD data
+	////////////////////////////////////////////////////////////////////////////
+	const u32 NUM_X_PIXELS_TO_SIMD = 2;
+	const u32 NUM_Y_PIXELS_TO_SIMD = 1;
 
 	const __m128 INV255_4X    = _mm_set_ps1(1.0f / 255.0f);
 	const __m128 ZERO_4X      = _mm_set_ps1(0.0f);
 	const u32 IS_GREATER_MASK = 0xF;
 
-	const u32 NUM_X_PIXELS_TO_SIMD = 2;
-	const u32 NUM_Y_PIXELS_TO_SIMD = 1;
-	const __m128 STEP_X_4X         = _mm_set_ps1((f32)NUM_X_PIXELS_TO_SIMD);
-	const __m128 STEP_Y_4X         = _mm_set_ps1((f32)NUM_Y_PIXELS_TO_SIMD);
+	// SignedArea: _mm_set_ps(unused, p3, p2, p1) ie 0=p1, 1=p1, 2=p3, 3=unused
+	__m128 signedAreaPixel1;
+	__m128 signedAreaPixel2;
 
-	// NOTE: Increase step size to the number of pixels rasterised with SIMD
-	signedAreaPixelDeltaX = _mm_mul_ps(signedAreaPixelDeltaX, STEP_X_4X);
-	signedAreaPixelDeltaY = _mm_mul_ps(signedAreaPixelDeltaY, STEP_Y_4X);
+	__m128 signedAreaPixelDeltaX;
+	__m128 signedAreaPixelDeltaY;
+	__m128 invSignedAreaParallelogram_4x;
+
+	__m128 triangleZ = _mm_set_ps(0, p3.z, p2.z, p1.z);
+	{
+		DqnV2i startP         = min;
+		f32 signedArea1Start  = Triangle2TimesSignedArea(p2.xy, p3.xy, DqnV2_V2i(startP));
+		f32 signedArea1DeltaX = p2.y - p3.y;
+		f32 signedArea1DeltaY = p3.x - p2.x;
+
+		f32 signedArea2Start  = Triangle2TimesSignedArea(p3.xy, p1.xy, DqnV2_V2i(startP));
+		f32 signedArea2DeltaX = p3.y - p1.y;
+		f32 signedArea2DeltaY = p1.x - p3.x;
+
+		f32 signedArea3Start  = Triangle2TimesSignedArea(p1.xy, p2.xy, DqnV2_V2i(startP));
+		f32 signedArea3DeltaX = p1.y - p2.y;
+		f32 signedArea3DeltaY = p2.x - p1.x;
+
+		f32 signedAreaParallelogram = signedArea1Start + signedArea2Start + signedArea3Start;
+		if (signedAreaParallelogram == 0) return;
+
+		f32 invSignedAreaParallelogram = 1.0f / signedAreaParallelogram;
+		invSignedAreaParallelogram_4x  = _mm_set_ps1(invSignedAreaParallelogram);
+
+		// NOTE: Order is important here!
+		signedAreaPixelDeltaX = _mm_set_ps(0, signedArea3DeltaX, signedArea2DeltaX, signedArea1DeltaX);
+		signedAreaPixelDeltaY = _mm_set_ps(0, signedArea3DeltaY, signedArea2DeltaY, signedArea1DeltaY);
+
+		signedAreaPixel1 = _mm_set_ps(0, signedArea3Start, signedArea2Start, signedArea1Start);
+		signedAreaPixel2 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaX);
+
+		// NOTE: Increase step size to the number of pixels rasterised with SIMD
+		{
+			const __m128 STEP_X_4X = _mm_set_ps1((f32)NUM_X_PIXELS_TO_SIMD);
+			const __m128 STEP_Y_4X = _mm_set_ps1((f32)NUM_Y_PIXELS_TO_SIMD);
+
+			signedAreaPixelDeltaX = _mm_mul_ps(signedAreaPixelDeltaX, STEP_X_4X);
+			signedAreaPixelDeltaY = _mm_mul_ps(signedAreaPixelDeltaY, STEP_Y_4X);
+		}
+
+	}
 
 	const DqnV2 uv2SubUv1      = uv2 - uv1;
 	const DqnV2 uv3SubUv1      = uv3 - uv1;
-	const __m128 colorModulate = _mm_set_ps(color.a, color.b, color.g, color.r);
 	const u32 texturePitch     = texture->bytesPerPixel * texture->dim.w;
 	const u8 *const texturePtr = texture->memory;
+	const u32 zBufferPitch     = renderBuffer->width;
 
+	////////////////////////////////////////////////////////////////////////////
+	// Scan and Render
+	////////////////////////////////////////////////////////////////////////////
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY += NUM_Y_PIXELS_TO_SIMD)
 	{
 		__m128 signedArea1 = signedAreaPixel1;
@@ -984,6 +1150,7 @@ inline void SIMDRasteriseTexturedTriangle(DTRRenderBuffer *const renderBuffer, c
 
 		for (i32 bufferX = min.x; bufferX < max.x; bufferX += NUM_X_PIXELS_TO_SIMD)
 		{
+
 			// Rasterise buffer(X, Y) pixel
 			{
 				__m128 checkArea    = signedArea1;
@@ -992,58 +1159,25 @@ inline void SIMDRasteriseTexturedTriangle(DTRRenderBuffer *const renderBuffer, c
 				i32 posX            = bufferX;
 				i32 posY            = bufferY;
 
-				if ((isGreaterResult & IS_GREATER_MASK) == IS_GREATER_MASK && posX < max.x)
+				if ((isGreaterResult & IS_GREATER_MASK) == IS_GREATER_MASK)
 				{
 					__m128 barycentric  = _mm_mul_ps(checkArea, invSignedAreaParallelogram_4x);
 					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
 					i32 zBufferIndex = posX + (posY * zBufferPitch);
 					f32 pixelZValue  = ((f32 *)&barycentricZ)[0] +
-					                    ((f32 *)&barycentricZ)[1] +
-					                    ((f32 *)&barycentricZ)[2];
+					                   ((f32 *)&barycentricZ)[1] +
+					                   ((f32 *)&barycentricZ)[2];
 					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
 					if (pixelZValue > currZValue)
 					{
 						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-
-						f32 barycentricB = ((f32 *)&barycentric)[2];
-						f32 barycentricC = ((f32 *)&barycentric)[0];
-						DqnV2 uv = uv1 + (uv2SubUv1 * barycentricB) + (uv3SubUv1 * barycentricC);
-
-						const f32 EPSILON = 0.1f;
-						DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
-						DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
-						uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
-						uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
-
-						f32 texelXf = uv.x * texture->dim.w;
-						f32 texelYf = uv.y * texture->dim.h;
-						DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
-						DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
-
-						i32 texelX = (i32)texelXf;
-						i32 texelY = (i32)texelYf;
-
-						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) + (texelY * texturePitch));
-
-						__m128 color1 = _mm_set_ps((f32)(texel1 >> 24),
-						                           (f32)((texel1 >> 16) & 0xFF),
-						                           (f32)((texel1 >> 8) & 0xFF),
-						                           (f32)((texel1 >> 0) & 0xFF));
-						color1              = _mm_mul_ps(color1, INV255_4X);
-						f32 preserveAlpha   = ((f32 *)&color1)[3];
-						color1              = _mm_mul_ps(color1, color1); // to linear space
-						((f32 *)&color1)[3] = preserveAlpha;
-						color1              = _mm_mul_ps(color1, colorModulate);
-
-						DqnV4 blend = {};
-						blend.r     = ((f32 *)&color1)[0];
-						blend.g     = ((f32 *)&color1)[1];
-						blend.b     = ((f32 *)&color1)[2];
-						blend.a     = ((f32 *)&color1)[3];
-						SetPixel(renderBuffer, posX, posY, blend, ColorSpace_Linear);
+						__m128 texSampledColor = SIMD_SampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
+						__m128 finalColor      = _mm_mul_ps(texSampledColor, simdColor);
+						SIMD_SetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
 				}
+				signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
 			}
 
 			// Rasterise buffer(X + 1, Y) pixel
@@ -1066,60 +1200,73 @@ inline void SIMDRasteriseTexturedTriangle(DTRRenderBuffer *const renderBuffer, c
 					if (pixelZValue > currZValue)
 					{
 						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-
-						f32 barycentricB = ((f32 *)&barycentric)[2];
-						f32 barycentricC = ((f32 *)&barycentric)[0];
-						DqnV2 uv = uv1 + (uv2SubUv1 * barycentricB) + (uv3SubUv1 * barycentricC);
-
-						const f32 EPSILON = 0.1f;
-						DQN_ASSERT(uv.x >= 0 && uv.x < 1.0f + EPSILON);
-						DQN_ASSERT(uv.y >= 0 && uv.y < 1.0f + EPSILON);
-						uv.x = DqnMath_Clampf(uv.x, 0.0f, 1.0f);
-						uv.y = DqnMath_Clampf(uv.y, 0.0f, 1.0f);
-
-						f32 texelXf = uv.x * texture->dim.w;
-						f32 texelYf = uv.y * texture->dim.h;
-						DQN_ASSERT(texelXf >= 0 && texelXf < texture->dim.w);
-						DQN_ASSERT(texelYf >= 0 && texelYf < texture->dim.h);
-
-						i32 texelX = (i32)texelXf;
-						i32 texelY = (i32)texelYf;
-
-						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) + (texelY * texturePitch));
-
-						__m128 color1 = _mm_set_ps((f32)(texel1 >> 24),
-						                           (f32)((texel1 >> 16) & 0xFF),
-						                           (f32)((texel1 >> 8) & 0xFF),
-						                           (f32)((texel1 >> 0) & 0xFF));
-						color1              = _mm_mul_ps(color1, INV255_4X);
-						f32 preserveAlpha   = ((f32 *)&color1)[3];
-						color1              = _mm_mul_ps(color1, color1); // to linear space
-						((f32 *)&color1)[3] = preserveAlpha;
-						color1              = _mm_mul_ps(color1, colorModulate);
-
-						DqnV4 blend = {};
-						blend.r     = ((f32 *)&color1)[0];
-						blend.g     = ((f32 *)&color1)[1];
-						blend.b     = ((f32 *)&color1)[2];
-						blend.a     = ((f32 *)&color1)[3];
-						SetPixel(renderBuffer, posX, posY, blend, ColorSpace_Linear);
+						__m128 texSampledColor = SIMD_SampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
+						__m128 finalColor      = _mm_mul_ps(texSampledColor, simdColor);
+						SIMD_SetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
 				}
+				signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
 			}
 
-			signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
-			signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
 		}
 
 		signedAreaPixel1 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaY);
 		signedAreaPixel2 = _mm_add_ps(signedAreaPixel2, signedAreaPixelDeltaY);
 	}
+	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
+
+	////////////////////////////////////////////////////////////////////////////
+	// Debug
+	////////////////////////////////////////////////////////////////////////////
+	DTRDebug_CounterIncrement(DTRDebugCounter_RenderTriangle);
+	if (DTR_DEBUG_RENDER)
+	{
+		DqnV2 origin = Get2DOriginFromTransformAnchor(p1.xy, p2.xy, p3.xy, transform);
+		// Draw Bounding box
+		if (0)
+		{
+			DTRRender_Line(renderBuffer, DqnV2i_2i(min.x, min.y), DqnV2i_2i(min.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(min.x, max.y), DqnV2i_2i(max.x, max.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(max.x, max.y), DqnV2i_2i(max.x, min.y), color);
+			DTRRender_Line(renderBuffer, DqnV2i_2i(max.x, min.y), DqnV2i_2i(min.x, min.y), color);
+		}
+
+		// Draw Triangle Coordinate Basis
+		if (0)
+		{
+			DqnV2 xAxis = DqnV2_2f(cosf(transform.rotation), sinf(transform.rotation)) * transform.scale.x;
+			DqnV2 yAxis         = DqnV2_2f(-xAxis.y, xAxis.x) * transform.scale.y;
+			DqnV4 coordSysColor = DqnV4_4f(0, 1, 1, 1);
+			i32 axisLen = 50;
+			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(origin), DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
+		}
+
+		// Draw axis point
+		if (0)
+		{
+			DqnV4 green  = DqnV4_4f(0, 1, 0, 1);
+			DqnV4 blue   = DqnV4_4f(0, 0, 1, 1);
+			DqnV4 purple = DqnV4_4f(1, 0, 1, 1);
+
+			DTRRender_Rectangle(renderBuffer, p1.xy - DqnV2_1f(5), p1.xy + DqnV2_1f(5), green);
+			DTRRender_Rectangle(renderBuffer, p2.xy - DqnV2_1f(5), p2.xy + DqnV2_1f(5), blue);
+			DTRRender_Rectangle(renderBuffer, p3.xy - DqnV2_1f(5), p3.xy + DqnV2_1f(5), purple);
+		}
+	}
 }
+
 
 void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
                                 DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
                                 DqnV4 color, const DTRRenderTransform transform)
 {
+	if (globalDTRPlatformFlags.canUseSSE2)
+	{
+		SIMD_TexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color, transform);
+		return;
+	}
+
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
@@ -1149,18 +1296,11 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, D
 		DQN_SWAP(DqnV3, p2, p3);
 	}
 
-	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	if (globalDTRPlatformFlags.canUseSSE2)
-	{
-		SIMDRasteriseTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color);
-	}
-	else
-	{
-		RasteriseTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color);
-	}
+	DTRDebug_BeginCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
+	RasteriseTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color);
 	DTRDebug_EndCycleCount(DTRDebugCycleCount_RenderTexturedTriangle_Rasterise);
 
 	////////////////////////////////////////////////////////////////////////////
@@ -1250,12 +1390,14 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 		// TODO(doyle): Why do we need rounding here? Maybe it's because
 		// I don't do any interpolation in the triangle routine for jagged
 		// edges.
+#if 1
 		screenVA.x = (f32)(i32)(screenVA.x + 0.5f);
 		screenVA.y = (f32)(i32)(screenVA.y + 0.5f);
 		screenVB.x = (f32)(i32)(screenVB.x + 0.5f);
 		screenVB.y = (f32)(i32)(screenVB.y + 0.5f);
 		screenVC.x = (f32)(i32)(screenVC.x + 0.5f);
 		screenVC.y = (f32)(i32)(screenVC.y + 0.5f);
+#endif
 
 		i32 textureAIndex = face.texIndex[0];
 		i32 textureBIndex = face.texIndex[1];
@@ -1295,7 +1437,7 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 
 FILE_SCOPE inline void SIMDRasteriseTriangle(DTRRenderBuffer *const renderBuffer,
                                              const SIMDTriangleInclusionTest simdTri,
-                                             const i32 posX, const i32 posY, const DqnV4 color,
+                                             const i32 posX, const i32 posY, DqnV4 color,
                                              __m128 *const signedArea)
 {
 	__m128 ZERO_4X         = _mm_set_ps1(0.0f);
@@ -1316,7 +1458,52 @@ FILE_SCOPE inline void SIMDRasteriseTriangle(DTRRenderBuffer *const renderBuffer
 		if (pixelZValue > currZValue)
 		{
 			renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+#if 1
+			// NOTE: Supersampling
+			const i32 NUM_SUB_PIXEL        = 8;
+			const f32 STEP_SIZE            = 1.0f / NUM_SUB_PIXEL;
+			const f32 COVERAGE_GRANULARITY = 1.0f / (f32)DQN_SQUARED(NUM_SUB_PIXEL);
+
+			f32 coverage = 0;
+			const __m128 STEP_SIZE_4X = _mm_set_ps1(STEP_SIZE);
+			const __m128 SUB_PIXEL_DELTA_X = _mm_mul_ps(simdTri.signedAreaPixelDeltaX, STEP_SIZE_4X);
+			const __m128 SUB_PIXEL_DELTA_Y = _mm_mul_ps(simdTri.signedAreaPixelDeltaY, STEP_SIZE_4X);
+
+			DqnV2 sample = DqnV2_2f(posX + (0.5f / NUM_SUB_PIXEL),
+			                        posY + (0.5f / NUM_SUB_PIXEL));
+			f32 resultP1 = Triangle2TimesSignedArea(simdTri.p2.xy, simdTri.p3.xy, sample);
+			f32 resultP2 = Triangle2TimesSignedArea(simdTri.p3.xy, simdTri.p1.xy, sample);
+			f32 resultP3 = Triangle2TimesSignedArea(simdTri.p1.xy, simdTri.p2.xy, sample);
+
+			__m128 startSubPixel = _mm_set_ps(0, resultP3, resultP2, resultP1);
+			__m128 checkPixel    = startSubPixel;
+			for (i32 subY = 0; subY < NUM_SUB_PIXEL; subY++)
+			{
+				checkPixel = startSubPixel;
+				for (i32 subX = 0; subX < NUM_SUB_PIXEL; subX++)
+				{
+					resultP1 = ((f32 *)&checkPixel)[0];
+					resultP2 = ((f32 *)&checkPixel)[1];
+					resultP3 = ((f32 *)&checkPixel)[2];
+					if ((resultP1 >= 0 && resultP2 >= 0 && resultP3 >= 0) ||
+					    (resultP1 < 0 && resultP2 < 0 && resultP3 < 0))
+					{
+						coverage += COVERAGE_GRANULARITY;
+					}
+
+					checkPixel = _mm_add_ps(checkPixel, SUB_PIXEL_DELTA_X);
+				}
+
+				startSubPixel = _mm_add_ps(startSubPixel, SUB_PIXEL_DELTA_Y);
+			}
+			if (coverage > 0)
+			{
+				color *= coverage;
+				SetPixel(renderBuffer, posX, posY, color, ColorSpace_Linear);
+			}
+#else
 			SetPixel(renderBuffer, posX, posY, color, ColorSpace_Linear);
+#endif
 		}
 	}
 	*signedArea = _mm_add_ps(*signedArea, simdTri.signedAreaPixelDeltaX);

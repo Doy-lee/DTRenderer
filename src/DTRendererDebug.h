@@ -44,12 +44,15 @@ enum DTRDebugCounter
 enum DTRDebugCycleCount
 {
 	DTRDebugCycleCount_RenderTexturedTriangle_Rasterise,
+	DTRDebugCycleCount_RenderTexturedTriangle_SampleTextureFunction,
+	DTRDebugCycleCount_RenderTexturedTriangle_SampleTexture,
 	DTRDebugCycleCount_RenderTriangle_Rasterise,
 	DTRDebugCycleCount_Count,
 };
 
 typedef struct DTRDebugCycles
 {
+	char *name;
 	u64 totalCycles;
 	u64 numInvokes;
 
