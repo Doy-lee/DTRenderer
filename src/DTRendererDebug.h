@@ -5,33 +5,31 @@
 
 // NOTE: When DTR_DEBUG is 0, _ALL_ debug code is compiled out.
 #define DTR_DEBUG 1
+#define DTR_DEBUG_RENDER 1
 
-#if DTR_DEBUG
-	#define DTR_DEBUG_RENDER 1
+// For inbuilt profiling DTRDebug_BeginCycleCount .. etc
+#define DTR_DEBUG_PROFILING 1
 
-	#define DTR_DEBUG_PROFILING_EASY_PROFILER 0
-	#if DTR_DEBUG_PROFILING_EASY_PROFILER
-		#define BUILD_WITH_EASY_PROFILER 1
-		#include "external/easy/profiler.h"
-
-		#define DTR_DEBUG_EP_PROFILE_START() profiler::startListen()
-		#define DTR_DEBUG_EP_PROFILE_END()   profiler::stopListen()
-
-		#define DTR_DEBUG_EP_TIMED_BLOCK(name)           EASY_BLOCK(name)
-		#define DTR_DEBUG_EP_TIMED_NONSCOPED_BLOCK(name) EASY_NONSCOPED_BLOCK(name)
-		#define DTR_DEBUG_EP_TIMED_END_BLOCK()           EASY_END_BLOCK()
-		#define DTR_DEBUG_EP_TIMED_FUNCTION()            EASY_FUNCTION()
-	#else
-		#define DTR_DEBUG_EP_PROFILE_START()
-		#define DTR_DEBUG_EP_PROFILE_END()
-
-		#define DTR_DEBUG_EP_TIMED_BLOCK(name)
-		#define DTR_DEBUG_EP_TIMED_NONSCOPED_BLOCK(name)
-		#define DTR_DEBUG_EP_TIMED_END_BLOCK()
-		#define DTR_DEBUG_EP_TIMED_FUNCTION()
-	#endif
-
-	#define DTR_DEBUG_PROFILING 1
+#define DTR_DEBUG_PROFILING_EASY_PROFILER 0
+#if DTR_DEBUG_PROFILING_EASY_PROFILER
+	#define BUILD_WITH_EASY_PROFILER 0
+	#include "external/easy/profiler.h"
+	
+	#define DTR_DEBUG_EP_PROFILE_START() profiler::startListen()
+	#define DTR_DEBUG_EP_PROFILE_END() profiler::stopListen()
+	
+	#define DTR_DEBUG_EP_TIMED_BLOCK(name) EASY_BLOCK(name)
+	#define DTR_DEBUG_EP_TIMED_NONSCOPED_BLOCK(name) EASY_NONSCOPED_BLOCK(name)
+	#define DTR_DEBUG_EP_TIMED_END_BLOCK() EASY_END_BLOCK
+	#define DTR_DEBUG_EP_TIMED_FUNCTION() EASY_FUNCTION()
+#else
+	#define DTR_DEBUG_EP_PROFILE_START()
+	#define DTR_DEBUG_EP_PROFILE_END()
+	
+	#define DTR_DEBUG_EP_TIMED_BLOCK(name)
+	#define DTR_DEBUG_EP_TIMED_NONSCOPED_BLOCK(name)
+	#define DTR_DEBUG_EP_TIMED_END_BLOCK()
+	#define DTR_DEBUG_EP_TIMED_FUNCTION()
 #endif
 
 enum DTRDebugCounter
@@ -48,15 +46,32 @@ enum DTRDebugCycleCount
 	DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles,
 
 	DTRDebugCycleCount_SIMDTexturedTriangle,
+	DTRDebugCycleCount_SIMDTexturedTriangle_Preamble,
+	DTRDebugCycleCount_SIMDTexturedTriangle_Preamble_SArea,
+	DTRDebugCycleCount_SIMDTexturedTriangle_Preamble_SIMDStep,
 	DTRDebugCycleCount_SIMDTexturedTriangle_Rasterise,
 	DTRDebugCycleCount_SIMDTexturedTriangle_RasterisePixel,
 	DTRDebugCycleCount_SIMDTexturedTriangle_SampleTexture,
 
 	DTRDebugCycleCount_SIMDTriangle,
+	DTRDebugCycleCount_SIMDTriangle_Preamble,
+	DTRDebugCycleCount_SIMDTriangle_Preamble_SArea,
+	DTRDebugCycleCount_SIMDTriangle_Preamble_SIMDStep,
 	DTRDebugCycleCount_SIMDTriangle_Rasterise,
 	DTRDebugCycleCount_SIMDTriangle_RasterisePixel,
 
+	DTRDebugCycleCount_SlowTexturedTriangle,
+	DTRDebugCycleCount_SlowTexturedTriangle_Preamble,
+	DTRDebugCycleCount_SlowTexturedTriangle_Preamble_SArea,
+	DTRDebugCycleCount_SlowTexturedTriangle_Preamble_SIMDStep,
+	DTRDebugCycleCount_SlowTexturedTriangle_Rasterise,
+	DTRDebugCycleCount_SlowTexturedTriangle_RasterisePixel,
+	DTRDebugCycleCount_SlowTexturedTriangle_SampleTexture,
+
 	DTRDebugCycleCount_SlowTriangle,
+	DTRDebugCycleCount_SlowTriangle_Preamble,
+	DTRDebugCycleCount_SlowTriangle_Preamble_SArea,
+	DTRDebugCycleCount_SlowTriangle_Preamble_SIMDStep,
 	DTRDebugCycleCount_SlowTriangle_Rasterise,
 	DTRDebugCycleCount_SlowTriangle_RasterisePixel,
 	DTRDebugCycleCount_Count,

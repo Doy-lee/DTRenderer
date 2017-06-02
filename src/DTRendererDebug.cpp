@@ -240,8 +240,7 @@ void DTRDebug_Update(DTRState *const state,
 				DTRDebug_PushText("%d:%s: %'lld avg cycles", i, cycles->name, avgCycles);
 			}
 			cycles->name = NULL;
-
-			// *cycles = emptyDebugCycles;
+			// *cycles      = emptyDebugCycles;
 		}
 		DTRDebug_PushText("");
 

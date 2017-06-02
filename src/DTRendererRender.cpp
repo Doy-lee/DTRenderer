@@ -760,8 +760,27 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
-	DTRDebug_BeginCycleCount("SIMDTexturedTriangle", DTRDebugCycleCount_SIMDTexturedTriangle);
+#define DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(type)                                             \
+	do                                                                                             \
+	{                                                                                              \
+		if (texture)                                                                               \
+			DTRDebug_BeginCycleCount("SIMDTextured" #type, DTRDebugCycleCount_SIMDTextured##type); \
+		else                                                                                       \
+			DTRDebug_BeginCycleCount("SIMD" #type, DTRDebugCycleCount_SIMD##type);                 \
+	} while (0)
 
+#define DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(type)                                               \
+	do                                                                                             \
+	{                                                                                              \
+		if (texture)                                                                               \
+			DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMDTextured##type);                                 \
+		else                                                                                       \
+			DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMD##type);                                 \
+	} while (0)
+
+	DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle);
+
+	DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble);
 	////////////////////////////////////////////////////////////////////////////
 	// Convert color
 	////////////////////////////////////////////////////////////////////////////
@@ -789,19 +808,39 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 
 	__m128 triangleZ = _mm_set_ps(0, p3.z, p2.z, p1.z);
 	{
-		DqnV2i startP         = min;
-		f32 signedArea1Start  = Triangle2TimesSignedArea(p2.xy, p3.xy, DqnV2_V2i(startP));
+		DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble_SArea);
+		DTR_DEBUG_EP_TIMED_BLOCK("SIMDTexturedTriangle_Preamble_SArea");
+		DqnV2 startP          = DqnV2_V2i(min);
+#if 1
+		f32 signedArea1Start  = Triangle2TimesSignedArea(p2.xy, p3.xy, startP);
 		f32 signedArea1DeltaX = p2.y - p3.y;
 		f32 signedArea1DeltaY = p3.x - p2.x;
 
-		f32 signedArea2Start  = Triangle2TimesSignedArea(p3.xy, p1.xy, DqnV2_V2i(startP));
+		f32 signedArea2Start  = Triangle2TimesSignedArea(p3.xy, p1.xy, startP);
 		f32 signedArea2DeltaX = p3.y - p1.y;
 		f32 signedArea2DeltaY = p1.x - p3.x;
 
-		f32 signedArea3Start  = Triangle2TimesSignedArea(p1.xy, p2.xy, DqnV2_V2i(startP));
+		f32 signedArea3Start  = Triangle2TimesSignedArea(p1.xy, p2.xy, startP);
+		f32 signedArea3DeltaX = p1.y - p2.y;
+		f32 signedArea3DeltaY = p2.x - p1.x;
+#else
+		f32 signedArea1Start  = ((p3.x - p2.x) * (startP.y - p2.y)) - ((p3.y - p2.y) * (startP.x - p2.x));
+		f32 signedArea1DeltaX = p2.y - p3.y;
+		f32 signedArea1DeltaY = p3.x - p2.x;
+
+		f32 signedArea2Start  = ((p1.x - p3.x) * (startP.y - p3.y)) - ((p1.y - p3.y) * (startP.x - p3.x));
+		f32 signedArea2DeltaX = p3.y - p1.y;
+		f32 signedArea2DeltaY = p1.x - p3.x;
+
+		f32 signedArea3Start = ((p2.x - p1.x) * (startP.y - p1.y)) - ((p2.y - p1.y) * (startP.x - p1.x));
 		f32 signedArea3DeltaX = p1.y - p2.y;
 		f32 signedArea3DeltaY = p2.x - p1.x;
 
+#endif
+		DTR_DEBUG_EP_TIMED_END_BLOCK();
+		DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble_SArea);
+
+		DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble_SIMDStep);
 		f32 signedAreaParallelogram = signedArea1Start + signedArea2Start + signedArea3Start;
 		if (signedAreaParallelogram == 0) return;
 
@@ -823,18 +862,20 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 			signedAreaPixelDeltaX = _mm_mul_ps(signedAreaPixelDeltaX, STEP_X_4X);
 			signedAreaPixelDeltaY = _mm_mul_ps(signedAreaPixelDeltaY, STEP_Y_4X);
 		}
+		DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble_SIMDStep);
 	}
 
 	const DqnV2 uv2SubUv1      = uv2 - uv1;
 	const DqnV2 uv3SubUv1      = uv3 - uv1;
-	const u32 texturePitch     = texture->bytesPerPixel * texture->dim.w;
-	const u8 *const texturePtr = texture->memory;
+	const u32 texturePitch     = (texture) ? (texture->bytesPerPixel * texture->dim.w) : 0;
+	const u8 *const texturePtr = (texture) ? (texture->memory) : NULL;
 	const u32 zBufferPitch     = renderBuffer->width;
+	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
-	DTRDebug_BeginCycleCount("SIMDTexturedTriangle_Rasterise", DTRDebugCycleCount_SIMDTexturedTriangle_Rasterise);
+	DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Rasterise);
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY += NUM_Y_PIXELS_TO_SIMD)
 	{
 		__m128 signedArea1 = signedAreaPixel1;
@@ -843,8 +884,6 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 		for (i32 bufferX = min.x; bufferX < max.x; bufferX += NUM_X_PIXELS_TO_SIMD)
 		{
 
-			DTRDebug_BeginCycleCount("SIMDTexturedTriangle_RasterisePixel",
-			                         DTRDebugCycleCount_SIMDTexturedTriangle_RasterisePixel);
 			// Rasterise buffer(X, Y) pixel
 			{
 				__m128 checkArea    = signedArea1;
@@ -855,6 +894,7 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 
 				if ((isGreaterResult & IS_GREATER_MASK) == IS_GREATER_MASK)
 				{
+					DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_RasterisePixel);
 					__m128 barycentric  = _mm_mul_ps(checkArea, invSignedAreaParallelogram_4x);
 					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
@@ -866,14 +906,19 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 					if (pixelZValue > currZValue)
 					{
 						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-						__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
-						__m128 finalColor      = _mm_mul_ps(texSampledColor, simdColor);
+
+						__m128 finalColor = simdColor;
+						if (texture)
+						{
+							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
+							finalColor             = _mm_mul_ps(texSampledColor, simdColor);
+						}
 						SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
+					DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 				}
 				signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
 			}
-			DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMDTexturedTriangle_RasterisePixel);
 
 			// Rasterise buffer(X + 1, Y) pixel
 			{
@@ -895,8 +940,13 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 					if (pixelZValue > currZValue)
 					{
 						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-						__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
-						__m128 finalColor      = _mm_mul_ps(texSampledColor, simdColor);
+
+						__m128 finalColor = simdColor;
+						if (texture)
+						{
+							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
+							finalColor             = _mm_mul_ps(texSampledColor, simdColor);
+						}
 						SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
 				}
@@ -907,8 +957,8 @@ FILE_SCOPE void SIMDTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 		signedAreaPixel1 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaY);
 		signedAreaPixel2 = _mm_add_ps(signedAreaPixel2, signedAreaPixelDeltaY);
 	}
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMDTexturedTriangle_Rasterise);
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMDTexturedTriangle);
+	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Rasterise);
+	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle);
 }
 
 FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1,
@@ -917,6 +967,28 @@ FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
                                      DqnV4 color, const DqnV2i min, const DqnV2i max)
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
+
+#define DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(type)                                             \
+	do                                                                                             \
+	{                                                                                              \
+		if (texture)                                                                               \
+			DTRDebug_BeginCycleCount("SlowTextured" #type, DTRDebugCycleCount_SlowTextured##type); \
+		else                                                                                       \
+			DTRDebug_BeginCycleCount("Slow" #type, DTRDebugCycleCount_Slow##type);                 \
+	} while (0)
+
+#define DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(type)                                               \
+	do                                                                                             \
+	{                                                                                              \
+		if (texture)                                                                               \
+			DTRDebug_EndCycleCount(DTRDebugCycleCount_SlowTextured##type);                                 \
+		else                                                                                       \
+			DTRDebug_EndCycleCount(DTRDebugCycleCount_Slow##type);                                 \
+	} while (0)
+
+	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle);
+
+	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble);
 	////////////////////////////////////////////////////////////////////////////
 	// Convert Color
 	////////////////////////////////////////////////////////////////////////////
@@ -926,6 +998,7 @@ FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 	////////////////////////////////////////////////////////////////////////////
 	// Scan and Render
 	////////////////////////////////////////////////////////////////////////////
+	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble_SArea);
 	DqnV2i startP         = min;
 	f32 signedArea1Pixel  = Triangle2TimesSignedArea(p2.xy, p3.xy, DqnV2_V2i(startP));
 	f32 signedArea1DeltaX = p2.y - p3.y;
@@ -938,22 +1011,25 @@ FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 	f32 signedArea3Pixel  = Triangle2TimesSignedArea(p1.xy, p2.xy, DqnV2_V2i(startP));
 	f32 signedArea3DeltaX = p1.y - p2.y;
 	f32 signedArea3DeltaY = p2.x - p1.x;
+	DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble_SArea);
+	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble_SIMDStep);
 
 	f32 signedAreaParallelogram = signedArea1Pixel + signedArea2Pixel + signedArea3Pixel;
 	if (signedAreaParallelogram == 0) return;
 
 	f32 invSignedAreaParallelogram = 1.0f / signedAreaParallelogram;
+	DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble_SIMDStep);
 
-	const DqnV3 p2SubP1   = p2 - p1;
-	const DqnV3 p3SubP1   = p3 - p1;
-	const DqnV2 uv2SubUv1 = uv2 - uv1;
-	const DqnV2 uv3SubUv1 = uv3 - uv1;
-
+	const DqnV3 p2SubP1        = p2 - p1;
+	const DqnV3 p3SubP1        = p3 - p1;
+	const DqnV2 uv2SubUv1      = uv2 - uv1;
+	const DqnV2 uv3SubUv1      = uv3 - uv1;
+	const u32 texturePitch     = (texture) ? (texture->bytesPerPixel * texture->dim.w) : 0;
+	const u8 *const texturePtr = (texture) ? (texture->memory) : NULL;
 	const u32 zBufferPitch     = renderBuffer->width;
-	const u8 *const texturePtr = texture->memory;
-	const u32 texturePitch     = texture->bytesPerPixel * texture->dim.w;
-
-	const f32 INV_255 = 1 / 255.0f;
+	const f32 INV_255          = 1 / 255.0f;
+	DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble);
+	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Rasterise);
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
 	{
 		f32 signedArea1 = signedArea1Pixel;
@@ -964,32 +1040,9 @@ FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 		{
 			if (signedArea1 >= 0 && signedArea2 >= 0 && signedArea3 >= 0)
 			{
-				f32 barycentricB = signedArea3 * invSignedAreaParallelogram;
-				f32 barycentricC = signedArea1 * invSignedAreaParallelogram;
-
-				if (DTR_DEBUG)
-				{
-					const f32 EPSILON = 0.1f;
-					f32 debugSignedArea1 = ((p2.x - p1.x) * (bufferY - p1.y)) - ((p2.y - p1.y) * (bufferX - p1.x));
-					f32 debugSignedArea2 = ((p3.x - p2.x) * (bufferY - p2.y)) - ((p3.y - p2.y) * (bufferX - p2.x));
-					f32 debugSignedArea3 = ((p1.x - p3.x) * (bufferY - p3.y)) - ((p1.y - p3.y) * (bufferX - p3.x));
-
-					f32 deltaSignedArea1 = DQN_ABS(debugSignedArea1 - signedArea1);
-					f32 deltaSignedArea2 = DQN_ABS(debugSignedArea2 - signedArea2);
-					f32 deltaSignedArea3 = DQN_ABS(debugSignedArea3 - signedArea3);
-					DQN_ASSERT(deltaSignedArea1 < EPSILON && deltaSignedArea2 < EPSILON &&
-					           deltaSignedArea3 < EPSILON)
-
-					f32 debugBarycentricA, debugBarycentricB, debugBarycentricC;
-					DebugBarycentricInternal(DqnV2_2i(bufferX, bufferY), p1.xy, p2.xy, p3.xy,
-					                         &debugBarycentricA, &debugBarycentricB,
-					                         &debugBarycentricC);
-
-					f32 deltaBaryB = DQN_ABS(barycentricB - debugBarycentricB);
-					f32 deltaBaryC = DQN_ABS(barycentricC - debugBarycentricC);
-
-					DQN_ASSERT(deltaBaryB < EPSILON && deltaBaryC < EPSILON)
-				}
+				DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_RasterisePixel);
+				f32 barycentricB = signedArea2 * invSignedAreaParallelogram;
+				f32 barycentricC = signedArea3 * invSignedAreaParallelogram;
 
 				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
 				f32 pixelZValue  = p1.z + (barycentricB * (p2SubP1.z)) + (barycentricC * (p3SubP1.z));
@@ -1017,7 +1070,8 @@ FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 						i32 texelX = (i32)texelXf;
 						i32 texelY = (i32)texelYf;
 
-						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) + (texelY * texturePitch));
+						u32 texel1 = *(u32 *)(texturePtr + (texelX * texture->bytesPerPixel) +
+						                      (texelY * texturePitch));
 
 						DqnV4 color1;
 						color1.a = (f32)(texel1 >> 24);
@@ -1034,6 +1088,7 @@ FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 					{
 						SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
 					}
+					DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 				}
 			}
 
@@ -1046,345 +1101,9 @@ FILE_SCOPE void SlowTexturedTriangle(DTRRenderBuffer *const renderBuffer, const 
 		signedArea2Pixel += signedArea2DeltaY;
 		signedArea3Pixel += signedArea3DeltaY;
 	}
+	DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Rasterise);
+	DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle);
 }
-
-FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1, const DqnV3 p2,
-                             const DqnV3 p3, DqnV4 color)
-{
-	DTR_DEBUG_EP_TIMED_FUNCTION();
-	DTRDebug_BeginCycleCount("SIMDTriangle", DTRDebugCycleCount_SIMDTriangle);
-
-	////////////////////////////////////////////////////////////////////////////
-	// Convert color
-	////////////////////////////////////////////////////////////////////////////
-	__m128 simdColor = _mm_set_ps(color.a, color.b, color.g, color.r);
-	simdColor        = SIMDSRGB1ToLinearSpace(simdColor);
-	simdColor        = SIMDPreMultiplyAlpha1(simdColor);
-
-	////////////////////////////////////////////////////////////////////////////
-	// Render Bounds
-	////////////////////////////////////////////////////////////////////////////
-	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x), DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
-	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x), DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
-	min.x      = DQN_MAX(min.x, 0);
-	min.y      = DQN_MAX(min.y, 0);
-	max.x      = DQN_MIN(max.x, renderBuffer->width - 1);
-	max.y      = DQN_MIN(max.y, renderBuffer->height - 1);
-
-	////////////////////////////////////////////////////////////////////////////
-	// Setup SIMD data
-	////////////////////////////////////////////////////////////////////////////
-	const u32 NUM_X_PIXELS_TO_SIMD = 2;
-	const u32 NUM_Y_PIXELS_TO_SIMD = 1;
-
-	const __m128 INV255_4X    = _mm_set_ps1(1.0f / 255.0f);
-	const __m128 ZERO_4X      = _mm_set_ps1(0.0f);
-	const u32 IS_GREATER_MASK = 0xF;
-
-	// SignedArea: _mm_set_ps(unused, p3, p2, p1) ie 0=p1, 1=p1, 2=p3, 3=unused
-	__m128 signedAreaPixel1;
-	__m128 signedAreaPixel2;
-
-	__m128 signedAreaPixelDeltaX;
-	__m128 signedAreaPixelDeltaY;
-	__m128 invSignedAreaParallelogram_4x;
-
-	__m128 triangleZ = _mm_set_ps(0, p3.z, p2.z, p1.z);
-	{
-		DqnV2i startP         = min;
-		f32 signedArea1Start  = Triangle2TimesSignedArea(p2.xy, p3.xy, DqnV2_V2i(startP));
-		f32 signedArea1DeltaX = p2.y - p3.y;
-		f32 signedArea1DeltaY = p3.x - p2.x;
-
-		f32 signedArea2Start  = Triangle2TimesSignedArea(p3.xy, p1.xy, DqnV2_V2i(startP));
-		f32 signedArea2DeltaX = p3.y - p1.y;
-		f32 signedArea2DeltaY = p1.x - p3.x;
-
-		f32 signedArea3Start  = Triangle2TimesSignedArea(p1.xy, p2.xy, DqnV2_V2i(startP));
-		f32 signedArea3DeltaX = p1.y - p2.y;
-		f32 signedArea3DeltaY = p2.x - p1.x;
-
-		f32 signedAreaParallelogram = signedArea1Start + signedArea2Start + signedArea3Start;
-		if (signedAreaParallelogram == 0) return;
-
-		f32 invSignedAreaParallelogram = 1.0f / signedAreaParallelogram;
-		invSignedAreaParallelogram_4x  = _mm_set_ps1(invSignedAreaParallelogram);
-
-		// NOTE: Order is important here!
-		signedAreaPixelDeltaX = _mm_set_ps(0, signedArea3DeltaX, signedArea2DeltaX, signedArea1DeltaX);
-		signedAreaPixelDeltaY = _mm_set_ps(0, signedArea3DeltaY, signedArea2DeltaY, signedArea1DeltaY);
-
-		signedAreaPixel1 = _mm_set_ps(0, signedArea3Start, signedArea2Start, signedArea1Start);
-		signedAreaPixel2 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaX);
-
-		// NOTE: Increase step size to the number of pixels rasterised with SIMD
-		{
-			const __m128 STEP_X_4X = _mm_set_ps1((f32)NUM_X_PIXELS_TO_SIMD);
-			const __m128 STEP_Y_4X = _mm_set_ps1((f32)NUM_Y_PIXELS_TO_SIMD);
-
-			signedAreaPixelDeltaX = _mm_mul_ps(signedAreaPixelDeltaX, STEP_X_4X);
-			signedAreaPixelDeltaY = _mm_mul_ps(signedAreaPixelDeltaY, STEP_Y_4X);
-		}
-	}
-
-	const u32 zBufferPitch     = renderBuffer->width;
-	////////////////////////////////////////////////////////////////////////////
-	// Scan and Render
-	////////////////////////////////////////////////////////////////////////////
-	DTRDebug_BeginCycleCount("SIMDTriangle_Rasterise", DTRDebugCycleCount_SIMDTriangle_Rasterise);
-	for (i32 bufferY = min.y; bufferY < max.y; bufferY += NUM_Y_PIXELS_TO_SIMD)
-	{
-		__m128 signedArea1 = signedAreaPixel1;
-		__m128 signedArea2 = signedAreaPixel2;
-
-		for (i32 bufferX = min.x; bufferX < max.x; bufferX += NUM_X_PIXELS_TO_SIMD)
-		{
-
-			// Rasterise buffer(X, Y) pixel
-			{
-				__m128 checkArea    = signedArea1;
-				__m128 isGreater    = _mm_cmpge_ps(checkArea, ZERO_4X);
-				i32 isGreaterResult = _mm_movemask_ps(isGreater);
-				i32 posX            = bufferX;
-				i32 posY            = bufferY;
-
-				if ((isGreaterResult & IS_GREATER_MASK) == IS_GREATER_MASK)
-				{
-					DTRDebug_BeginCycleCount("SIMDTriangle_RasterisePixel",
-					                         DTRDebugCycleCount_SIMDTriangle_RasterisePixel);
-					__m128 barycentric  = _mm_mul_ps(checkArea, invSignedAreaParallelogram_4x);
-					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
-
-					i32 zBufferIndex = posX + (posY * zBufferPitch);
-					f32 pixelZValue  = ((f32 *)&barycentricZ)[0] +
-					                   ((f32 *)&barycentricZ)[1] +
-					                   ((f32 *)&barycentricZ)[2];
-					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
-					if (pixelZValue > currZValue)
-					{
-						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-						SIMDSetPixel(renderBuffer, posX, posY, simdColor, ColorSpace_Linear);
-					}
-					DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMDTriangle_RasterisePixel);
-				}
-				signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
-			}
-
-			// Rasterise buffer(X + 1, Y) pixel
-			{
-				__m128 checkArea    = signedArea2;
-				__m128 isGreater    = _mm_cmpge_ps(checkArea, ZERO_4X);
-				i32 isGreaterResult = _mm_movemask_ps(isGreater);
-				i32 posX            = bufferX + 1;
-				i32 posY            = bufferY;
-				if ((isGreaterResult & IS_GREATER_MASK) == IS_GREATER_MASK && posX < max.x)
-				{
-					__m128 barycentric  = _mm_mul_ps(checkArea, invSignedAreaParallelogram_4x);
-					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
-
-					i32 zBufferIndex = posX + (posY * zBufferPitch);
-					f32 pixelZValue  = ((f32 *)&barycentricZ)[0] +
-					                    ((f32 *)&barycentricZ)[1] +
-					                    ((f32 *)&barycentricZ)[2];
-					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
-					if (pixelZValue > currZValue)
-					{
-						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-						SIMDSetPixel(renderBuffer, posX, posY, simdColor, ColorSpace_Linear);
-					}
-				}
-				signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
-			}
-
-		}
-
-		signedAreaPixel1 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaY);
-		signedAreaPixel2 = _mm_add_ps(signedAreaPixel2, signedAreaPixelDeltaY);
-	}
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMDTriangle_Rasterise);
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMDTriangle);
-}
-
-FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1, const DqnV3 p2,
-                             const DqnV3 p3, DqnV4 color)
-{
-	DTRDebug_BeginCycleCount("SlowTriangle", DTRDebugCycleCount_SlowTriangle);
-	color = DTRRender_SRGB1ToLinearSpaceV4(color);
-	color = PreMultiplyAlpha1(color);
-
-	DqnV2i max = DqnV2i_2f(DQN_MAX(DQN_MAX(p1.x, p2.x), p3.x), DQN_MAX(DQN_MAX(p1.y, p2.y), p3.y));
-	DqnV2i min = DqnV2i_2f(DQN_MIN(DQN_MIN(p1.x, p2.x), p3.x), DQN_MIN(DQN_MIN(p1.y, p2.y), p3.y));
-	min.x      = DQN_MAX(min.x, 0);
-	min.y      = DQN_MAX(min.y, 0);
-	max.x      = DQN_MIN(max.x, renderBuffer->width - 1);
-	max.y      = DQN_MIN(max.y, renderBuffer->height - 1);
-
-	/*
-	   /////////////////////////////////////////////////////////////////////////
-	   // Rearranging the Determinant
-	   /////////////////////////////////////////////////////////////////////////
-	   Given two points that form a line and an extra point to test, we can
-	   determine whether a point lies on the line, or is to the left or right of
-	   a the line.
-
-	   We can do this using the PerpDotProduct conceptually known as the cross
-	   product in 2D. This can be expressed using the determinant and is the
-	   method we are using.
-
-	   First forming a 3x3 matrix of our terms with a, b being from the triangle
-	   and test point c, we can derive a 2x2 matrix by subtracting the 1st
-	   column from the 2nd and 1st column from the third.
-
-	       | ax bx cx |     | (bx - ax)  (cx - ax) |
-	   m = | ay by cy | ==> | (by - ay)  (cy - ay) |
-	       | 1  1  1  |
-
-	   From our 2x2 representation we can calculate the determinant which gives
-	   us the signed area of the triangle extended into a parallelogram.
-
-	   det(m) = (bx - ax)(cy - ay) - (by - ay)(cx - ax)
-
-	   Depending on the order of the vertices supplied, if it's
-	   - CCW and c(x,y) is outside the line (triangle), the signed area is negative
-	   - CCW and c(x,y) is inside  the line (triangle), the signed area is positive
-	   - CW  and c(x,y) is outside the line (triangle), the signed area is positive
-	   - CW  and c(x,y) is inside  the line (triangle), the signed area is negative
-
-	   /////////////////////////////////////////////////////////////////////////
-	   // Optimising the Determinant Calculation
-	   /////////////////////////////////////////////////////////////////////////
-	   The det(m) can be rearranged if expanded to be
-	   SignedArea(cx, cy) = (ay - by)cx + (bx - ay)cy + (ax*by - ay*bx)
-
-	   When we scan to fill our triangle we go pixel by pixel, left to right,
-	   bottom to top, notice that this translates to +1 for x and +1 for y, i.e.
-
-	   The first pixel's signed area is cx, then cx+1, cx+2 .. etc
-	   SignedArea(cx, cy)   = (ay - by)cx   + (bx - ax)cy + (ax*by - ay*bx)
-	   SignedArea(cx+1, cy) = (ay - by)cx+1 + (bx - ax)cy + (ax*by - ay*bx)
-
-	   Then
-	   SignedArea(cx+1, cy) - SignedArea(cx, cy) =
-	     (ay - by)cx+1 + (bx - ax)cy + (ax*by - ay*bx)
-	   - (ay - by)cx   + (bx - ax)cy + (ax*by - ay*bx)
-	   = (ay - by)cx+1 - (ay - by)cx
-	   = (ay - by)(cx+1 - cx)
-	   = (ay - by)(1)         = (ay - by)
-
-	   Similarly when progressing in y
-	   SignedArea(cx, cy)   = (ay - by)cx + (bx - ay)cy   + (ax*by - ay*bx)
-	   SignedArea(cx, cy+1) = (ay - by)cx + (bx - ay)cy+1 + (ax*by - ay*bx)
-
-	   Then
-	   SignedArea(cx, cy+1) - SignedArea(cx, cy) =
-	     (ay - by)cx + (bx - ax)cy+1 + (ax*by - ay*bx)
-	   - (ay - by)cx + (bx - ax)cy   + (ax*by - ay*bx)
-	   = (bx - ax)cy+1 - (bx - ax)cy
-	   = (bx - ax)(cy+1 - cy)
-	   = (bx - ax)(1)         = (bx - ax)
-
-	   Then we can see that when we progress along x, we only need to change by
-	   the value of SignedArea by (ay - by) and similarly for y, (bx - ax)
-
-	   /////////////////////////////////////////////////////////////////////////
-	   // Barycentric Coordinates
-	   /////////////////////////////////////////////////////////////////////////
-	   At this point we have an equation that can be used to calculate the
-	   2x the signed area of a triangle, or the signed area of a parallelogram,
-	   the two of which are equivalent.
-
-	   det(m)             = (bx - ax)(cy - ay) - (by - ay)(cx - ax)
-	   SignedArea(cx, cy) = (ay - by)cx + (bx - ay)cy + (ax*by - ay*bx)
-
-	   A barycentric coordinate is some coefficient on A, B, C that allows us to
-	   specify an arbitrary point in the triangle as a linear combination of the
-	   three usually with some coefficient [0, 1].
-
-	   The SignedArea turns out to be actually the barycentric coord for c(x, y)
-	   normalised to the sum of the parallelogram area. For example a triangle
-	   with points, A, B, C and an arbitrary point P inside the triangle. Then
-
-	   SignedArea(P) with vertex A and B = Barycentric Coordinate for C
-	   SignedArea(P) with vertex B and C = Barycentric Coordinate for A
-	   SignedArea(P) with vertex C and A = Barycentric Coordinate for B
-
-	       B
-	      / \
-	     /   \
-	    /  P  \
-	   /_______\
-	  A        C
-
-	   This is normalised to the area's sum, but we can trivially turn this into
-	   a normalised version by dividing the area of the parallelogram, i.e.
-
-	   BaryCentricC(P) = (SignedArea(P) with vertex A and B)/SignedArea(with the orig triangle vertex)
-	   BaryCentricA(P) = (SignedArea(P) with vertex B and C)/SignedArea(with the orig triangle vertex)
-	   BaryCentricB(P) = (SignedArea(P) with vertex C and A)/SignedArea(with the orig triangle vertex)
-	*/
-
-	DqnV2i startP         = min;
-	f32 signedArea1Start  = Triangle2TimesSignedArea(p2.xy, p3.xy, DqnV2_V2i(startP));
-	f32 signedArea1DeltaX = p2.y - p3.y;
-	f32 signedArea1DeltaY = p3.x - p2.x;
-
-	f32 signedArea2Start  = Triangle2TimesSignedArea(p3.xy, p1.xy, DqnV2_V2i(startP));
-	f32 signedArea2DeltaX = p3.y - p1.y;
-	f32 signedArea2DeltaY = p1.x - p3.x;
-
-	f32 signedArea3Start  = Triangle2TimesSignedArea(p1.xy, p2.xy, DqnV2_V2i(startP));
-	f32 signedArea3DeltaX = p1.y - p2.y;
-	f32 signedArea3DeltaY = p2.x - p1.x;
-
-	f32 signedAreaParallelogram = signedArea1Start + signedArea2Start + signedArea3Start;
-	if (signedAreaParallelogram == 0) return;
-
-	f32 invSignedAreaParallelogram = 1.0f / signedAreaParallelogram;
-
-	const DqnV3 p2SubP1    = p2 - p1;
-	const DqnV3 p3SubP1    = p3 - p1;
-	const u32 zBufferPitch = renderBuffer->width;
-	DTRDebug_BeginCycleCount("SlowTriangle_Rasterise", DTRDebugCycleCount_SlowTriangle_Rasterise);
-	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
-	{
-		f32 signedArea1 = signedArea1Start;
-		f32 signedArea2 = signedArea2Start;
-		f32 signedArea3 = signedArea3Start;
-
-		for (i32 bufferX = min.x; bufferX < max.x; bufferX++)
-		{
-			if (signedArea1 >= 0 && signedArea2 >= 0 && signedArea3 >= 0)
-			{
-				DTRDebug_BeginCycleCount("SlowTriangle_RasterisePixel",
-				                         DTRDebugCycleCount_SlowTriangle_RasterisePixel);
-				f32 barycentricB = signedArea3 * invSignedAreaParallelogram;
-				f32 barycentricC = signedArea1 * invSignedAreaParallelogram;
-
-				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
-				f32 pixelZValue  = p1.z + (barycentricB * (p2SubP1.z)) + (barycentricC * (p3SubP1.z));
-				f32 currZValue  = renderBuffer->zBuffer[zBufferIndex];
-				DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
-				if (pixelZValue > currZValue)
-				{
-					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-					SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
-				}
-				DTRDebug_EndCycleCount(DTRDebugCycleCount_SlowTriangle_RasterisePixel);
-			}
-
-			signedArea1 += signedArea1DeltaX;
-			signedArea2 += signedArea2DeltaX;
-			signedArea3 += signedArea3DeltaX;
-		}
-
-		signedArea1Start += signedArea1DeltaY;
-		signedArea2Start += signedArea2DeltaY;
-		signedArea3Start += signedArea3DeltaY;
-	}
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_SlowTriangle_Rasterise);
-	DTRDebug_EndCycleCount(DTRDebugCycleCount_SlowTriangle);
-}
-
 
 void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
                                 DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
@@ -1413,27 +1132,13 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, D
 	////////////////////////////////////////////////////////////////////////////
 	// SIMD/Slow Path
 	////////////////////////////////////////////////////////////////////////////
-	if (texture)
+	if (globalDTRPlatformFlags.canUseSSE2 && 1)
 	{
-		if (globalDTRPlatformFlags.canUseSSE2)
-		{
-			SIMDTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color, min, max);
-		}
-		else
-		{
-			SlowTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color, min, max);
-		}
+		SIMDTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color, min, max);
 	}
 	else
 	{
-		if (globalDTRPlatformFlags.canUseSSE2)
-		{
-			SIMDTriangle(renderBuffer, p1, p2, p3, color);
-		}
-		else
-		{
-			SlowTriangle(renderBuffer, p1, p2, p3, color);
-		}
+		SlowTexturedTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color, min, max);
 	}
 
 	////////////////////////////////////////////////////////////////////////////
@@ -1536,56 +1241,8 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
                         DqnV4 color, const DTRRenderTransform transform)
 {
-#if 0
-	DTR_DEBUG_EP_TIMED_FUNCTION();
-	////////////////////////////////////////////////////////////////////////////
-	// Transform vertexes p1, p2, p3 inplace
-	////////////////////////////////////////////////////////////////////////////
-	Make3PointsClockwise(&p1, &p2, &p3);
-
-	// TODO(doyle): Transform is only in 2d right now
-	DqnV2 origin   = Get2DOriginFromTransformAnchor(p1.xy, p2.xy, p3.xy, transform);
-	DqnV2 pList[3] = {p1.xy - origin, p2.xy - origin, p3.xy - origin};
-	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale, transform.rotation);
-
-	p1.xy = pList[0];
-	p2.xy = pList[1];
-	p3.xy = pList[2];
-
-	DqnRect bounds      = GetBoundingBox(pList, DQN_ARRAY_COUNT(pList));
-	DqnRect screenSpace = DqnRect_4i(0, 0, renderBuffer->width - 1, renderBuffer->height - 1);
-	bounds              = DqnRect_ClipRect(bounds, screenSpace);
-	DqnV2i min          = DqnV2i_V2(bounds.min);
-	DqnV2i max          = DqnV2i_V2(bounds.max);
-
-	////////////////////////////////////////////////////////////////////////////
-	// SIMD/Slow Path
-	////////////////////////////////////////////////////////////////////////////
-	if (globalDTRPlatformFlags.canUseSSE2)
-	{
-		SIMDTriangle(renderBuffer, p1, p2, p3, color);
-	}
-	else
-	{
-		SlowTriangle(renderBuffer, p1, p2, p3, color);
-	}
-
-	////////////////////////////////////////////////////////////////////////////
-	// Debug
-	////////////////////////////////////////////////////////////////////////////
-	DTRDebug_CounterIncrement(DTRDebugCounter_RenderTriangle);
-	{
-		bool drawBoundingBox   = true;
-		bool drawBasis         = true;
-		bool drawVertexMarkers = true;
-
-		DebugRenderMarkers(renderBuffer, pList, DQN_ARRAY_COUNT(pList), transform, drawBoundingBox,
-		                   drawBasis, drawVertexMarkers);
-	}
-#else
 	const DqnV2 noUV = {};
 	DTRRender_TexturedTriangle(renderBuffer, p1, p2, p3, noUV, noUV, noUV, NULL, color, transform);
-#endif
 }
 
 void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2 pos,

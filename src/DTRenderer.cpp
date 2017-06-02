@@ -952,7 +952,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	globalDTRPlatformFlags = input->flags;
 	if (globalDTRPlatformFlags.executableReloaded)
 	{
-		DTR_DEBUG_EP_PROFILE_END();
+		// DTR_DEBUG_EP_PROFILE_END();
 		DTR_DEBUG_EP_PROFILE_START();
 	}
 

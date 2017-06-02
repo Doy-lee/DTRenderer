@@ -578,7 +578,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		////////////////////////////////////////////////////////////////////////
 		f64 startFrameTimeInS = DqnTime_NowInS();
 
-		FILETIME lastWriteTime      = Win32GetLastWriteTime(dllPath);
+		FILETIME lastWriteTime = Win32GetLastWriteTime(dllPath);
 		if (CompareFileTime(&lastWriteTime, &dllCode.lastWriteTime) != 0)
 		{
 			Win32UnloadExternalDLL(&dllCode);
