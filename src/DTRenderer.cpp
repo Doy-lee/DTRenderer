@@ -1061,7 +1061,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 		}
 
-		if (0)
+		if (1)
 		{
 			DTRDebug_BeginCycleCount("DTR_Update_RenderModel", DTRDebugCycleCount_DTR_Update_RenderModel);
 			////////////////////////////////////////////////////////////////////////
