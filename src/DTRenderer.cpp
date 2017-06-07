@@ -981,11 +981,19 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRAsset_LoadBitmap(input->api, assetStack,
 		                    tempStack, &state->bitmap, "tree00.bmp");
 
+#if 1
 		if (DTRAsset_LoadWavefrontObj(input->api, assetStack, &state->mesh, "african_head.obj"))
 		{
 			DTRAsset_LoadBitmap(input->api, assetStack, tempStack, &state->mesh.tex,
 			                    "african_head_diffuse.tga");
 		}
+#else
+		if (DTRAsset_LoadWavefrontObj(input->api, assetStack, &state->mesh, "chalet.obj"))
+		{
+			DTRAsset_LoadBitmap(input->api, assetStack, tempStack, &state->mesh.tex,
+			                    "chalet.jpg");
+		}
+#endif
 
 		////////////////////////////////////////////////////////////////////////
 		// Init Debug
@@ -993,7 +1001,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		if (DTR_DEBUG)
 		{
 			DebugTestStrToF32Converter();
-			DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
+			// DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
 
 			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->tempStack);
 			DTRBitmap test      = {};
@@ -1048,7 +1056,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
 		rotatingXform.rotation           = rotation;
 
-		if (1)
+		if (0)
 		{
 			DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
 			                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
@@ -1063,16 +1071,23 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 
 		if (1)
 		{
+			LOCAL_PERSIST bool runTinyRendererOnce = true;
+			if (1 && runTinyRendererOnce)
+			{
+				DTRDebug_RunTinyRenderer();
+				runTinyRendererOnce = false;
+			}
+
 			DTRDebug_BeginCycleCount("DTR_Update_RenderModel", DTRDebugCycleCount_DTR_Update_RenderModel);
 			////////////////////////////////////////////////////////////////////////
 			// Draw Loaded Model
 			////////////////////////////////////////////////////////////////////////
 			const DqnV3 LIGHT     = DqnV3_3i(0, 0, -1);
-			const f32 MODEL_SCALE = DQN_MIN(renderBuffer.width, renderBuffer.height) * 0.5f;
+			const f32 MODEL_SCALE = 1;
 			DTRMesh *const mesh   = &state->mesh;
-			DqnV3 modelP = DqnV3_3f(renderBuffer.width * 0.5f, renderBuffer.height * 0.5f, 0);
+			DqnV3 modelP          = DqnV3_3f(0, 0, 0);
 
-			DTRRender_Mesh(&renderBuffer, mesh, modelP, MODEL_SCALE, LIGHT);
+			DTRRender_Mesh(&renderBuffer, mesh, modelP, MODEL_SCALE, LIGHT, input->deltaForFrame);
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderModel);
 		}
 	}

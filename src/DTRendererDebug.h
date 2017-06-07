@@ -106,6 +106,7 @@ extern DTRDebug globalDebug;
 
 void        DTRDebug_TestMeshFaceAndVertexParser(struct DTRMesh *const mesh);
 void        DTRDebug_DumpZBuffer                (struct DTRRenderBuffer *const renderBuffer, struct DqnMemStack *const transMemStack);
+void        DTRDebug_RunTinyRenderer            ();
 void        DTRDebug_PushText                   (const char *const formatStr, ...);
 void        DTRDebug_Update                     (struct DTRState *const state, struct DTRRenderBuffer *const renderBuffer, struct PlatformInput *const input, struct PlatformMemory *const memory);
 void inline DTRDebug_BeginCycleCount            (char *title, enum DTRDebugCycleCount tag);

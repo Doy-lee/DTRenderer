@@ -529,8 +529,9 @@ typedef union DqnV3i
 } DqnV3i;
 
 // DqnV3
-DQN_FILE_SCOPE DqnV3 DqnV3_3i(i32 x, i32 y, i32 z); // Create a vector using ints and typecast to floats
+DQN_FILE_SCOPE DqnV3 DqnV3_1f(f32 xyz);
 DQN_FILE_SCOPE DqnV3 DqnV3_3f(f32 x, f32 y, f32 z);
+DQN_FILE_SCOPE DqnV3 DqnV3_3i(i32 x, i32 y, i32 z); // Create a vector using ints and typecast to floats
 
 DQN_FILE_SCOPE DqnV3 DqnV3_Add     (DqnV3 a, DqnV3 b);
 DQN_FILE_SCOPE DqnV3 DqnV3_Sub     (DqnV3 a, DqnV3 b);
@@ -541,19 +542,23 @@ DQN_FILE_SCOPE f32   DqnV3_Dot     (DqnV3 a, DqnV3 b);
 DQN_FILE_SCOPE bool  DqnV3_Equals  (DqnV3 a, DqnV3 b);
 DQN_FILE_SCOPE DqnV3 DqnV3_Cross   (DqnV3 a, DqnV3 b);
 
-DQN_FILE_SCOPE DqnV3 DqnV3_Normalise(DqnV3 a);
+DQN_FILE_SCOPE DqnV3 DqnV3_Normalise    (DqnV3 a);
+DQN_FILE_SCOPE f32   DqnV3_Length       (DqnV3 a, DqnV3 b);
+DQN_FILE_SCOPE f32   DqnV3_LengthSquared(DqnV3 a, DqnV3 b);
 
-DQN_FILE_SCOPE inline DqnV3  operator- (DqnV3  a, DqnV3 b) { return      DqnV3_Sub     (a, b);  }
-DQN_FILE_SCOPE inline DqnV3  operator+ (DqnV3  a, DqnV3 b) { return      DqnV3_Add     (a, b);  }
-DQN_FILE_SCOPE inline DqnV3  operator* (DqnV3  a, DqnV3 b) { return      DqnV3_Hadamard(a, b);  }
-DQN_FILE_SCOPE inline DqnV3  operator* (DqnV3  a, f32   b) { return      DqnV3_Scalef  (a, b);  }
-DQN_FILE_SCOPE inline DqnV3  operator* (DqnV3  a, i32   b) { return      DqnV3_Scalei  (a, b);  }
-DQN_FILE_SCOPE inline DqnV3 &operator*=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Hadamard(a, b)); }
-DQN_FILE_SCOPE inline DqnV3 &operator*=(DqnV3 &a, f32   b) { return (a = DqnV3_Scalef  (a, b)); }
-DQN_FILE_SCOPE inline DqnV3 &operator*=(DqnV3 &a, i32   b) { return (a = DqnV3_Scalei  (a, b)); }
-DQN_FILE_SCOPE inline DqnV3 &operator-=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Sub     (a, b)); }
-DQN_FILE_SCOPE inline DqnV3 &operator+=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Add     (a, b)); }
-DQN_FILE_SCOPE inline bool   operator==(DqnV3  a, DqnV3 b) { return      DqnV3_Equals  (a, b);  }
+DQN_FILE_SCOPE inline DqnV3  operator- (DqnV3  a, DqnV3 b) { return      DqnV3_Sub     (a, b);           }
+DQN_FILE_SCOPE inline DqnV3  operator+ (DqnV3  a, DqnV3 b) { return      DqnV3_Add     (a, b);           }
+DQN_FILE_SCOPE inline DqnV3  operator+ (DqnV3  a, f32   b) { return      DqnV3_Add     (a, DqnV3_1f(b)); }
+DQN_FILE_SCOPE inline DqnV3  operator* (DqnV3  a, DqnV3 b) { return      DqnV3_Hadamard(a, b);           }
+DQN_FILE_SCOPE inline DqnV3  operator* (DqnV3  a, f32   b) { return      DqnV3_Scalef  (a, b);           }
+DQN_FILE_SCOPE inline DqnV3  operator* (DqnV3  a, i32   b) { return      DqnV3_Scalei  (a, b);           }
+DQN_FILE_SCOPE inline DqnV3  operator/ (DqnV3  a, f32   b) { return      DqnV3_Scalef  (a, (1.0f/b));    }
+DQN_FILE_SCOPE inline DqnV3 &operator*=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Hadamard(a, b));          }
+DQN_FILE_SCOPE inline DqnV3 &operator*=(DqnV3 &a, f32   b) { return (a = DqnV3_Scalef  (a, b));          }
+DQN_FILE_SCOPE inline DqnV3 &operator*=(DqnV3 &a, i32   b) { return (a = DqnV3_Scalei  (a, b));          }
+DQN_FILE_SCOPE inline DqnV3 &operator-=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Sub     (a, b));          }
+DQN_FILE_SCOPE inline DqnV3 &operator+=(DqnV3 &a, DqnV3 b) { return (a = DqnV3_Add     (a, b));          }
+DQN_FILE_SCOPE inline bool   operator==(DqnV3  a, DqnV3 b) { return      DqnV3_Equals  (a, b);           }
 
 // DqnV3i
 DQN_FILE_SCOPE DqnV3i DqnV3i_3i(i32 x, i32 y, i32 z);
@@ -580,6 +585,7 @@ typedef union DqnV4 {
 // Create a vector using ints and typecast to floats
 DQN_FILE_SCOPE DqnV4 DqnV4_4i(i32 x, i32 y, i32 z, f32 w);
 DQN_FILE_SCOPE DqnV4 DqnV4_4f(f32 x, f32 y, f32 z, f32 w);
+DQN_FILE_SCOPE DqnV4 DqnV4_V3(DqnV3 a, f32 w);
 DQN_FILE_SCOPE DqnV4 DqnV4_1f(f32 xyzw);
 
 DQN_FILE_SCOPE DqnV4 DqnV4_Add     (DqnV4 a, DqnV4 b);
@@ -608,18 +614,20 @@ DQN_FILE_SCOPE inline bool   operator==(DqnV4  a, DqnV4 b) { return      DqnV4_E
 ////////////////////////////////////////////////////////////////////////////////
 typedef union DqnMat4
 {
+	// TODO(doyle): Row/column instead? More cache friendly since multiplication
+	// prefers rows.
 	DqnV4 col[4];
-	// Column/row
-	f32 e[4][4];
+	f32   e[4][4]; // Column/row
 } DqnMat4;
 
-DQN_FILE_SCOPE DqnMat4 DqnMat4_Identity ();
-DQN_FILE_SCOPE DqnMat4 DqnMat4_Ortho    (f32 left, f32 right, f32 bottom, f32 top, f32 zNear, f32 zFar);
-DQN_FILE_SCOPE DqnMat4 DqnMat4_Translate(f32 x, f32 y, f32 z);
-DQN_FILE_SCOPE DqnMat4 DqnMat4_Rotate   (f32 radians, f32 x, f32 y, f32 z);
-DQN_FILE_SCOPE DqnMat4 DqnMat4_Scale    (f32 x, f32 y, f32 z);
-DQN_FILE_SCOPE DqnMat4 DqnMat4_Mul      (DqnMat4 a, DqnMat4 b);
-DQN_FILE_SCOPE DqnV4   DqnMat4_MulV4    (DqnMat4 a, DqnV4 b);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Identity    ();
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Orthographic(f32 left, f32 right, f32 bottom, f32 top, f32 zNear, f32 zFar);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Perspective (f32 fovYDegrees, f32 aspectRatio, f32 zNear, f32 zFar);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Translate   (f32 x, f32 y, f32 z);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Rotate      (f32 radians, f32 x, f32 y, f32 z);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Scale       (f32 x, f32 y, f32 z);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Mul         (DqnMat4 a, DqnMat4 b);
+DQN_FILE_SCOPE DqnV4   DqnMat4_MulV4       (DqnMat4 a, DqnV4 b);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Other Math
@@ -2065,18 +2073,21 @@ DQN_FILE_SCOPE bool DqnV2i_Equals(DqnV2i a, DqnV2i b)
 ////////////////////////////////////////////////////////////////////////////////
 // Vec3
 ////////////////////////////////////////////////////////////////////////////////
+DQN_FILE_SCOPE DqnV3 DqnV3_1f(f32 xyz)
+{
+	DqnV3 result = {xyz, xyz, xyz};
+	return result;
+}
+
 DQN_FILE_SCOPE DqnV3 DqnV3_3f(f32 x, f32 y, f32 z)
 {
-	DqnV3 result = {};
-	result.x       = x;
-	result.y       = y;
-	result.z       = z;
+	DqnV3 result = {x, y, z};
 	return result;
 }
 
 DQN_FILE_SCOPE DqnV3 DqnV3_3i(i32 x, i32 y, i32 z)
 {
-	DqnV3 result = DqnV3_3f((f32)x, (f32)y, (f32)z);
+	DqnV3 result = {(f32)x, (f32)y, (f32)z};
 	return result;
 }
 
@@ -2174,6 +2185,24 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Normalise(DqnV3 a)
 	return result;
 }
 
+DQN_FILE_SCOPE f32 DqnV3_LengthSquared(DqnV3 a, DqnV3 b)
+{
+	f32 x      = b.x - a.x;
+	f32 y      = b.y - a.y;
+	f32 z      = b.z - a.z;
+	f32 result = (DQN_SQUARED(x) + DQN_SQUARED(y) + DQN_SQUARED(z));
+	return result;
+}
+
+DQN_FILE_SCOPE f32 DqnV3_Length(DqnV3 a, DqnV3 b)
+{
+	f32 lengthSq = DqnV3_LengthSquared(a, b);
+	if (lengthSq == 0) return 0;
+
+	f32 result = DqnMath_Sqrtf(lengthSq);
+	return result;
+}
+
 DQN_FILE_SCOPE DqnV3i DqnV3i_3i(i32 x, i32 y, i32 z)
 {
 	DqnV3i result = {x, y, z};
@@ -2198,6 +2227,14 @@ DQN_FILE_SCOPE DqnV4 DqnV4_4f(f32 x, f32 y, f32 z, f32 w)
 DQN_FILE_SCOPE DqnV4 DqnV4_4i(i32 x, i32 y, i32 z, i32 w)
 {
 	DqnV4 result = DqnV4_4f((f32)x, (f32)y, (f32)z, (f32)w);
+	return result;
+}
+
+DQN_FILE_SCOPE DqnV4 DqnV4_V3(DqnV3 a, f32 w)
+{
+	DqnV4 result;
+	result.xyz = a;
+	result.w   = w;
 	return result;
 }
 
@@ -2281,7 +2318,7 @@ DQN_FILE_SCOPE bool DqnV4_Equals(DqnV4 a, DqnV4 b)
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Identity()
 {
-	DqnMat4 result    = {0};
+	DqnMat4 result = {0};
 	result.e[0][0] = 1;
 	result.e[1][1] = 1;
 	result.e[2][2] = 1;
@@ -2289,17 +2326,35 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_Identity()
 	return result;
 }
 
-DQN_FILE_SCOPE DqnMat4
-DqnMat4_Ortho(f32 left, f32 right, f32 bottom, f32 top, f32 zNear, f32 zFar)
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Orthographic(f32 left, f32 right, f32 bottom, f32 top, f32 zNear,
+                                            f32 zFar)
 {
 	DqnMat4 result = DqnMat4_Identity();
-	result.e[0][0] = +2.0f   / (right - left);
-	result.e[1][1] = +2.0f   / (top   - bottom);
-	result.e[2][2] = -2.0f   / (zFar  - zNear);
+	result.e[0][0] = +2.0f / (right - left);
+	result.e[1][1] = +2.0f / (top   - bottom);
+	result.e[2][2] = -2.0f / (zFar  - zNear);
 
 	result.e[3][0] = -(right + left)   / (right - left);
 	result.e[3][1] = -(top   + bottom) / (top   - bottom);
 	result.e[3][2] = -(zFar  + zNear)  / (zFar  - zNear);
+
+	return result;
+}
+
+DQN_FILE_SCOPE DqnMat4 DqnMat4_Perspective(f32 fovYDegrees, f32 aspectRatio, f32 zNear, f32 zFar)
+{
+	f32 fovYRadians         = DQN_DEGREES_TO_RADIANS(fovYDegrees);
+	f32 fovYRadiansOver2    = fovYRadians * 0.5f;
+	f32 tanFovYRadiansOver2 = tanf(fovYRadiansOver2);
+	f32 zNearSubZFar        = zNear - zFar;
+
+	DqnMat4 result = DqnMat4_Identity();
+	result.e[0][0] = 1.0f / (tanFovYRadiansOver2 * aspectRatio);
+	result.e[1][1] = 1.0f / tanFovYRadiansOver2;
+	result.e[2][2] = (zNear + zFar) / zNearSubZFar;
+	result.e[2][3] = -1.0f;
+	result.e[3][2] = (2.0f * zNear * zFar) / zNearSubZFar;
+	result.e[3][3] = 0.0f;
 
 	return result;
 }
@@ -2350,7 +2405,8 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_Mul(DqnMat4 a, DqnMat4 b)
 {
 	DqnMat4 result = {0};
 	for (i32 j = 0; j < 4; j++) {
-		for (i32 i = 0; i < 4; i++) {
+		for (i32 i = 0; i < 4; i++)
+		{
 			result.e[j][i] = a.e[0][i] * b.e[j][0]
 			               + a.e[1][i] * b.e[j][1]
 			               + a.e[2][i] * b.e[j][2]
@@ -2364,15 +2420,10 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_Mul(DqnMat4 a, DqnMat4 b)
 DQN_FILE_SCOPE DqnV4 DqnMat4_MulV4(DqnMat4 a, DqnV4 b)
 {
 	DqnV4 result = {0};
-
-	result.x = (a.e[0][0] * b.x) + (a.e[1][0] * b.y) + (a.e[2][0] * b.z) +
-	           (a.e[3][0] * b.w);
-	result.y = (a.e[0][1] * b.x) + (a.e[1][1] * b.y) + (a.e[2][1] * b.z) +
-	           (a.e[3][1] * b.w);
-	result.z = (a.e[0][2] * b.x) + (a.e[1][2] * b.y) + (a.e[2][2] * b.z) +
-	           (a.e[3][2] * b.w);
-	result.w = (a.e[0][3] * b.x) + (a.e[1][3] * b.y) + (a.e[2][3] * b.z) +
-	           (a.e[3][3] * b.w);
+	result.x = (a.e[0][0] * b.x) + (a.e[1][0] * b.y) + (a.e[2][0] * b.z) + (a.e[3][0] * b.w);
+	result.y = (a.e[0][1] * b.x) + (a.e[1][1] * b.y) + (a.e[2][1] * b.z) + (a.e[3][1] * b.w);
+	result.z = (a.e[0][2] * b.x) + (a.e[1][2] * b.y) + (a.e[2][2] * b.z) + (a.e[3][2] * b.w);
+	result.w = (a.e[0][3] * b.x) + (a.e[1][3] * b.y) + (a.e[2][3] * b.z) + (a.e[3][3] * b.w);
 
 	return result;
 }

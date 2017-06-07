@@ -162,6 +162,31 @@ WavefModelFaceInit(i32 capacity = 3, DqnMemAPI memAPI = DqnMemAPI_DefaultUseCall
 	return result;
 }
 
+FILE_SCOPE size_t FindFirstNewlineFeedChar(char *ptr)
+{
+	size_t offset = 0;
+	while (ptr && (*ptr != '\n' && *ptr != '\r'))
+	{
+		offset++;
+		ptr++;
+	}
+
+	return offset;
+}
+
+FILE_SCOPE size_t FindFirstCharNotLinefeedOrSpace(char *ptr)
+{
+	size_t offset = 0;
+	while (ptr && (*ptr == ' ' || *ptr == '\n' || *ptr == '\r'))
+	{
+		offset++;
+		ptr++;
+	}
+
+	return offset;
+
+}
+
 bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStack,
                                DTRMesh *const mesh, const char *const path)
 {
@@ -246,7 +271,7 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 				for (;;)
 				{
 					char *f32StartPtr = scan;
-					for (; *scan != ' ' && *scan != '\n';)
+					for (; *scan != ' ' && *scan != '\n' && *scan != '\r';)
 					{
 						DQN_ASSERT(DqnChar_IsDigit(*scan) || (*scan == '.') || (*scan == '-') ||
 						           *scan == 'e');
@@ -257,13 +282,12 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 					v4.e[vIndex++] = Dqn_StrToF32(f32StartPtr, f32Len);
 					DQN_ASSERT(vIndex < DQN_ARRAY_COUNT(v4.e));
 
-					while (scan && (*scan == ' ' || *scan == '\n')) scan++;
-
+					scan += FindFirstCharNotLinefeedOrSpace(scan);
 					if (!scan) break;
 					if (!(DqnChar_IsDigit(*scan) || *scan == '-')) break;
 				}
 
-				DQN_ASSERT(vIndex == 3 || vIndex == 4);
+				DQN_ASSERT(vIndex >= 2 && vIndex <= 4);
 				if (type == WavefVertexType_Geometric)
 				{
 					DqnArray_Push(&obj->geometryArray, v4);
@@ -325,10 +349,10 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 			case 'f':
 			{
 				scan++;
-				while (scan && (*scan == ' ' || *scan == '\n')) scan++;
+				scan += FindFirstCharNotLinefeedOrSpace(scan);
 				if (!scan) continue;
 
-				WavefModelFace face   = WavefModelFaceInit(3, memAPI);
+				WavefModelFace face      = WavefModelFaceInit(3, memAPI);
 				i32 numVertexesParsed    = 0;
 				bool moreVertexesToParse = true;
 				while (moreVertexesToParse)
@@ -373,9 +397,7 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 
 					if (scan)
 					{
-						// Move to next "non-empty" character
-						while (scan && (*scan == ' ' || *scan == '\n'))
-							scan++;
+						scan += FindFirstCharNotLinefeedOrSpace(scan);
 
 						// If it isn't a digit, then we've read all the
 						// vertexes for this face
@@ -401,14 +423,12 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 			case 'g':
 			{
 				scan++;
-				while (scan && (*scan == ' ' || *scan == '\n')) scan++;
-
+				scan += FindFirstCharNotLinefeedOrSpace(scan);
 				if (!scan) continue;
 
 				// Iterate to end of the name, i.e. move ptr to first space
 				char *namePtr = scan;
-				while (scan && (*scan != ' ' && *scan != '\n'))
-					scan++;
+				scan += FindFirstCharNotLinefeedOrSpace(scan);
 
 				if (scan)
 				{
@@ -428,8 +448,7 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 						obj->groupName[obj->groupNameIndex - 1][i] = namePtr[i];
 #endif
 
-					while (scan && (*scan == ' ' || *scan == '\n'))
-						scan++;
+					scan += FindFirstCharNotLinefeedOrSpace(scan);
 				}
 			}
 			break;
@@ -439,14 +458,13 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 			// not to be used it can be specified as "off" or a value of 0.
 			case 's':
 			{
-				// Advance to first non space char after identifier
 				scan++;
-				while (scan && *scan == ' ' || *scan == '\n') scan++;
+				scan += FindFirstCharNotLinefeedOrSpace(scan);
 
 				if (scan && DqnChar_IsDigit(*scan))
 				{
 					char *numStartPtr = scan;
-					while (scan && (*scan != ' ' && *scan != '\n'))
+					while (scan && (*scan != ' ' && *scan != '\n' && *scan != '\r'))
 					{
 						DQN_ASSERT(DqnChar_IsDigit(*scan));
 						scan++;
@@ -457,26 +475,25 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 					obj->groupSmoothing = groupSmoothing;
 				}
 
-				while (scan && *scan == ' ' || *scan == '\n') scan++;
+				scan += FindFirstCharNotLinefeedOrSpace(scan);
 			}
 			break;
 
 			// Comment
 			case '#':
 			{
-				// Skip comment line until new line
-				while (scan && *scan != '\n')
-					scan++;
-
-				// Skip new lines and any leading white spaces
-				while (scan && (*scan == '\n' || *scan == ' '))
-					scan++;
+				scan += FindFirstNewlineFeedChar(scan);
+				scan += FindFirstCharNotLinefeedOrSpace(scan);
 			}
 			break;
 
 			default:
 			{
-				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+				// TODO(doyle): Ignore unrecognised items.
+				// DQN_ASSERT(DQN_INVALID_CODE_PATH);
+
+				scan += FindFirstNewlineFeedChar(scan);
+				scan += FindFirstCharNotLinefeedOrSpace(scan);
 			}
 			break;
 		}
@@ -723,9 +740,6 @@ FILE_SCOPE void *STBImageMalloc(size_t size)
 #define STBI_FREE(ptr)                            STBImageFree(ptr)
 
 #define STBI_NO_STDIO
-#define STBI_ONLY_PNG
-#define STBI_ONLY_TGA
-#define STBI_ONLY_BMP
 #define STB_IMAGE_IMPLEMENTATION
 #include "external/stb_image.h"
 
@@ -755,7 +769,12 @@ bool DTRAsset_LoadBitmap(const PlatformAPI api, DqnMemStack *const memStack,
 	bitmap->bytesPerPixel = FORCE_4_BPP;
 	u8 *pixels = stbi_load_from_memory(rawData, (i32)file.size, &bitmap->dim.w, &bitmap->dim.h,
 	                                   NULL, FORCE_4_BPP);
-	if (!pixels) goto cleanup;
+	if (!pixels)
+	{
+		const char *failReason = stbi_failure_reason();
+		api.Print(failReason);
+		goto cleanup;
+	}
 	result         = true;
 
     // TODO(doyle): See above. Since we use temp stack we can allocate straight into the AssetStack.

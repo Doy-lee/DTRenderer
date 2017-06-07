@@ -6,9 +6,9 @@
 
 #include "dqn.h"
 
-#include "external/tests/tinyrenderer/geometry.h"
-#include "external/tests/tinyrenderer/model.cpp"
-#include <vector>
+#if DTR_DEBUG
+	#include "external/tests/tinyrenderer/tinyrenderer.cpp"
+#endif
 
 DTRDebug globalDebug;
 void DTRDebug_TestMeshFaceAndVertexParser(DTRMesh *const mesh)
@@ -16,12 +16,12 @@ void DTRDebug_TestMeshFaceAndVertexParser(DTRMesh *const mesh)
 	if (DTR_DEBUG)
 	{
 		if (!mesh) DQN_ASSERT(DQN_INVALID_CODE_PATH);
-		Model model = Model("african_head.obj");
+		Model tmpModel = Model("african_head.obj");
 
-		DQN_ASSERT((i64)mesh->numFaces == model.nfaces());
-		for (i32 i = 0; i < model.nfaces(); i++)
+		DQN_ASSERT((i64)mesh->numFaces == tmpModel.nfaces());
+		for (i32 i = 0; i < tmpModel.nfaces(); i++)
 		{
-			std::vector<i32> correctFace = model.face(i);
+			std::vector<i32> correctFace = tmpModel.face(i);
 			DTRMeshFace *myFace          = &mesh->faces[i];
 
 			DQN_ASSERT(myFace->numVertexIndex == correctFace.size());
@@ -31,7 +31,7 @@ void DTRDebug_TestMeshFaceAndVertexParser(DTRMesh *const mesh)
 				// Ensure the vertex index references are correct per face
 				DQN_ASSERT(myFace->vertexIndex[j] == correctFace[j]);
 
-				Vec3f tmp           = model.vert(correctFace[j]);
+				Vec3f tmp           = tmpModel.vert(correctFace[j]);
 				DqnV3 correctVertex = DqnV3_3f(tmp[0], tmp[1], tmp[2]);
 				DqnV3 myVertex      = (mesh->vertexes[myFace->vertexIndex[j]]).xyz;
 
@@ -89,6 +89,14 @@ void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *cons
 		api->FileClose(&file);
 
 		DqnMemStack_EndTempRegion(tmpMemRegion);
+	}
+}
+
+void DTRDebug_RunTinyRenderer()
+{
+	if (DTR_DEBUG)
+	{
+		tinyrenderer(0, NULL);
 	}
 }
 
