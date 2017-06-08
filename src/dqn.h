@@ -621,8 +621,11 @@ typedef union DqnMat4
 } DqnMat4;
 
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Identity    ();
+
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Orthographic(f32 left, f32 right, f32 bottom, f32 top, f32 zNear, f32 zFar);
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Perspective (f32 fovYDegrees, f32 aspectRatio, f32 zNear, f32 zFar);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_LookAt      (DqnV3 eye, DqnV3 center, DqnV3 up);
+
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Translate   (f32 x, f32 y, f32 z);
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Rotate      (f32 radians, f32 x, f32 y, f32 z);
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Scale       (f32 x, f32 y, f32 z);
@@ -2359,6 +2362,33 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_Perspective(f32 fovYDegrees, f32 aspectRatio, f32
 	return result;
 }
 
+DQN_FILE_SCOPE DqnMat4 DqnMat4_LookAt(DqnV3 eye, DqnV3 center, DqnV3 up)
+{
+	DqnMat4 result = {0};
+
+	DqnV3 f = DqnV3_Normalise(DqnV3_Sub(eye, center));
+	DqnV3 s = DqnV3_Normalise(DqnV3_Cross(up, f));
+	DqnV3 u = DqnV3_Cross(f, s);
+
+	result.e[0][0] = s.x;
+	result.e[0][1] = u.x;
+	result.e[0][2] = f.x;
+
+	result.e[1][0] = s.y;
+	result.e[1][1] = u.y;
+	result.e[1][2] = f.y;
+
+	result.e[2][0] = s.z;
+	result.e[2][1] = u.z;
+	result.e[2][2] = f.z;
+
+	result.e[3][0] = DqnV3_Dot(s, eye);
+	result.e[3][1] = DqnV3_Dot(u, eye);
+	result.e[3][2] = -DqnV3_Dot(f, eye);
+	result.e[3][3] = 1.0f;
+	return result;
+}
+
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Translate(f32 x, f32 y, f32 z)
 {
 	DqnMat4 result = DqnMat4_Identity();
@@ -2370,23 +2400,22 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_Translate(f32 x, f32 y, f32 z)
 
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Rotate(f32 radians, f32 x, f32 y, f32 z)
 {
-	DqnMat4 result = DqnMat4_Identity();
-	f32 sinVal = sinf(radians);
-	f32 cosVal = cosf(radians);
+	DqnMat4 result     = DqnMat4_Identity();
+	f32 sinVal         = sinf(radians);
+	f32 cosVal         = cosf(radians);
+	f32 oneMinusCosVal = 1 - cosVal;
 
-	result.e[0][0] = (cosVal + (DQN_SQUARED(x) * (1.0f - cosVal)));
-	result.e[0][1] = ((y * z * (1.0f - cosVal)) + (z * sinVal));
-	result.e[0][2] = ((z * x * (1.0f - cosVal)) - (y * sinVal));
+	result.e[0][0] = (DQN_SQUARED(x) * oneMinusCosVal) + cosVal;
+	result.e[0][1] = (x * y          * oneMinusCosVal) + (z * sinVal);
+	result.e[0][2] = (x * z          * oneMinusCosVal) - (y * sinVal);
 
-	result.e[1][0] = ((x * y * (1.0f - cosVal)) - (z * sinVal));
-	result.e[1][1] = (cosVal + (DQN_SQUARED(y) * (1.0f - cosVal)));
-	result.e[1][2] = ((z * y * (1.0f - cosVal)) + (x * sinVal));
+	result.e[1][0] = (y * x          * oneMinusCosVal) - (z * sinVal);
+	result.e[1][1] = (DQN_SQUARED(y) * oneMinusCosVal) + cosVal;
+	result.e[1][2] = (y * z          * oneMinusCosVal) + (x * sinVal);
 
-	result.e[2][0] = ((x * z * (1.0f - cosVal)) + (y * sinVal));
-	result.e[2][1] = ((y * z * (1.0f - cosVal)) - (x * sinVal));
-	result.e[2][2] = (cosVal + (DQN_SQUARED(z) * (1.0f - cosVal)));
-
-	result.e[3][3] = 1;
+	result.e[2][0] = (z * x          * oneMinusCosVal) + (y * sinVal);
+	result.e[2][1] = (z * y          * oneMinusCosVal) - (x * sinVal);
+	result.e[2][2] = (DQN_SQUARED(z) * oneMinusCosVal) + cosVal;
 
 	return result;
 }

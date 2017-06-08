@@ -25,7 +25,6 @@ void DTRDebug_TestMeshFaceAndVertexParser(DTRMesh *const mesh)
 			DTRMeshFace *myFace          = &mesh->faces[i];
 
 			DQN_ASSERT(myFace->numVertexIndex == correctFace.size());
-
 			for (i32 j = 0; j < (i32)myFace->numVertexIndex; j++)
 			{
 				// Ensure the vertex index references are correct per face
@@ -39,6 +38,20 @@ void DTRDebug_TestMeshFaceAndVertexParser(DTRMesh *const mesh)
 				for (i32 k = 0; k < DQN_ARRAY_COUNT(correctVertex.e); k++)
 				{
 					f32 delta = DQN_ABS(correctVertex.e[k] - myVertex.e[k]);
+					DQN_ASSERT(delta < 0.1f);
+				}
+			}
+
+			for (i32 j = 0; j < (i32)myFace->numNormalIndex; j++)
+			{
+				Vec3f tmp           = tmpModel.norm(i, j);
+				DqnV3 correctNormal = DqnV3_3f(tmp[0], tmp[1], tmp[2]);
+				DqnV3 myNormal      = (mesh->normals[myFace->normalIndex[j]]);
+
+				// Ensure the vertex values read are correct
+				for (i32 k = 0; k < DQN_ARRAY_COUNT(correctNormal.e); k++)
+				{
+					f32 delta = DQN_ABS(correctNormal.e[k] - myNormal.e[k]);
 					DQN_ASSERT(delta < 0.1f);
 				}
 			}

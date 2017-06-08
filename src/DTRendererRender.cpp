@@ -782,6 +782,9 @@ FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderBuffer *const renderBuffer,
 	const u32 IS_GREATER_MASK = 0xF;
 	const u32 zBufferPitch    = renderBuffer->width;
 
+	// TODO(doyle): Copy lighting work over. But not important since using this
+	// function causes performance problems.
+
 	// Rasterise buffer(X, Y) pixel
 	{
 		__m128 isGreater    = _mm_cmpge_ps(signedArea, ZERO_4X);
@@ -817,7 +820,9 @@ FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderBuffer *const renderBuffer,
 
 FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1, const DqnV3 p2,
                              const DqnV3 p3, const DqnV2 uv1, const DqnV2 uv2, const DqnV2 uv3,
-                             const DTRBitmap *const texture, const DqnV4 color, const DqnV2i min,
+                             const f32 lightIntensity1, const f32 lightIntensity2,
+                             const f32 lightIntensity3, const bool ignoreLight,
+                             DTRBitmap *const texture, DqnV4 color, const DqnV2i min,
                              const DqnV2i max)
 
 {
@@ -828,9 +833,23 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 	////////////////////////////////////////////////////////////////////////////
 	// Convert color
 	////////////////////////////////////////////////////////////////////////////
-	__m128 simdColor = _mm_set_ps(color.a, color.b, color.g, color.r);
-	simdColor        = SIMDSRGB1ToLinearSpace(simdColor);
-	simdColor        = SIMDPreMultiplyAlpha1(simdColor);
+	__m128 simdColor  = _mm_set_ps(color.a, color.b, color.g, color.r);
+	simdColor         = SIMDSRGB1ToLinearSpace(simdColor);
+	simdColor         = SIMDPreMultiplyAlpha1(simdColor);
+	f32 preserveAlpha = ((f32 *)&simdColor)[3];
+
+	const __m128 ZERO_4X       = _mm_set_ps1(0.0f);
+	__m128 simdLightIntensity1 = _mm_set_ps1(lightIntensity1);
+	__m128 simdLightIntensity2 = _mm_set_ps1(lightIntensity2);
+	__m128 simdLightIntensity3 = _mm_set_ps1(lightIntensity3);
+
+	simdLightIntensity1 = _mm_max_ps(simdLightIntensity1, ZERO_4X);
+	simdLightIntensity2 = _mm_max_ps(simdLightIntensity2, ZERO_4X);
+	simdLightIntensity3 = _mm_max_ps(simdLightIntensity3, ZERO_4X);
+
+	__m128 p1Light = _mm_mul_ps(simdColor, simdLightIntensity1);
+	__m128 p2Light = _mm_mul_ps(simdColor, simdLightIntensity2);
+	__m128 p3Light = _mm_mul_ps(simdColor, simdLightIntensity3);
 
 	////////////////////////////////////////////////////////////////////////////
 	// Setup SIMD data
@@ -897,7 +916,6 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble);
 
 #if UNROLL_LOOP
-	const __m128 ZERO_4X      = _mm_set_ps1(0.0f);
 	const u32 IS_GREATER_MASK = 0xF;
 	const u32 zBufferPitch    = renderBuffer->width;
 #endif
@@ -936,12 +954,29 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 					if (pixelZValue > currZValue)
 					{
 						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+						__m128 finalColor                   = simdColor;
+						if (!ignoreLight)
+						{
+							__m128 barycentricA_4x   = _mm_set_ps1(((f32 *)&barycentric)[0]);
+							__m128 barycentricB_4x   = _mm_set_ps1(((f32 *)&barycentric)[1]);
+							__m128 barycentricC_4x   = _mm_set_ps1(((f32 *)&barycentric)[2]);
 
-						__m128 finalColor = simdColor;
+							__m128 barycentricLight1 = _mm_mul_ps(p1Light, barycentricA_4x);
+							__m128 barycentricLight2 = _mm_mul_ps(p2Light, barycentricB_4x);
+							__m128 barycentricLight3 = _mm_mul_ps(p3Light, barycentricC_4x);
+
+							__m128 light =
+							    _mm_add_ps(barycentricLight3,
+							               _mm_add_ps(barycentricLight1, barycentricLight2));
+
+							finalColor = _mm_mul_ps(finalColor, light);
+							((f32 *)&finalColor)[3] = preserveAlpha;
+						}
+
 						if (texture)
 						{
 							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
-							finalColor             = _mm_mul_ps(texSampledColor, simdColor);
+							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
 						}
 						SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
@@ -970,12 +1005,30 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 					if (pixelZValue > currZValue)
 					{
 						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+						__m128 finalColor                   = simdColor;
 
-						__m128 finalColor = simdColor;
+						if (!ignoreLight)
+						{
+							__m128 barycentricA_4x   = _mm_set_ps1(((f32 *)&barycentric)[0]);
+							__m128 barycentricB_4x   = _mm_set_ps1(((f32 *)&barycentric)[1]);
+							__m128 barycentricC_4x   = _mm_set_ps1(((f32 *)&barycentric)[2]);
+
+							__m128 barycentricLight1 = _mm_mul_ps(p1Light, barycentricA_4x);
+							__m128 barycentricLight2 = _mm_mul_ps(p2Light, barycentricB_4x);
+							__m128 barycentricLight3 = _mm_mul_ps(p3Light, barycentricC_4x);
+
+							__m128 light =
+							    _mm_add_ps(barycentricLight3,
+							               _mm_add_ps(barycentricLight1, barycentricLight2));
+
+							finalColor = _mm_mul_ps(finalColor, light);
+							((f32 *)&finalColor)[3] = preserveAlpha;
+						}
+
 						if (texture)
 						{
 							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
-							finalColor             = _mm_mul_ps(texSampledColor, simdColor);
+							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
 						}
 						SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
@@ -1000,10 +1053,12 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle);
 }
 
-FILE_SCOPE void SlowTriangle(DTRRenderBuffer * const renderBuffer, const DqnV3 p1, const DqnV3 p2,
-	                         const DqnV3 p3, const DqnV2 uv1, const DqnV2 uv2, const DqnV2 uv3,
-	                         DTRBitmap *const texture, DqnV4 color, const DqnV2i min,
-	                         const DqnV2i max)
+FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1, const DqnV3 p2,
+                             const DqnV3 p3, const DqnV2 uv1, const DqnV2 uv2, const DqnV2 uv3,
+                             const f32 lightIntensity1, const f32 lightIntensity2,
+                             const f32 lightIntensity3, const bool ignoreLight,
+                             DTRBitmap *const texture, DqnV4 color, const DqnV2i min,
+                             const DqnV2i max)
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 
@@ -1069,6 +1124,10 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer * const renderBuffer, const DqnV3 p
 	const f32 INV_255          = 1 / 255.0f;
 	DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble);
 	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Rasterise);
+
+	DqnV3 p1Light = color.rgb * DQN_MAX(0, lightIntensity1);
+	DqnV3 p2Light = color.rgb * DQN_MAX(0, lightIntensity2);
+	DqnV3 p3Light = color.rgb * DQN_MAX(0, lightIntensity3);
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY++)
 	{
 		f32 signedArea1 = signedArea1Pixel;
@@ -1080,6 +1139,7 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer * const renderBuffer, const DqnV3 p
 			if (signedArea1 >= 0 && signedArea2 >= 0 && signedArea3 >= 0)
 			{
 				DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_RasterisePixel);
+				f32 barycentricA = signedArea1 * invSignedAreaParallelogram;
 				f32 barycentricB = signedArea2 * invSignedAreaParallelogram;
 				f32 barycentricC = signedArea3 * invSignedAreaParallelogram;
 
@@ -1091,6 +1151,15 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer * const renderBuffer, const DqnV3 p
 				if (pixelZValue > currZValue)
 				{
 					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+					DqnV4 finalColor                    = color;
+
+					if (!ignoreLight)
+					{
+						DqnV3 light = (p1Light * barycentricA) + (p2Light * barycentricB) +
+						              (p3Light * barycentricC);
+						finalColor.rgb *= light;
+					}
+
 					if (texture)
 					{
 						DqnV2 uv = uv1 + (uv2SubUv1 * barycentricB) + (uv3SubUv1 * barycentricC);
@@ -1119,16 +1188,13 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer * const renderBuffer, const DqnV3 p
 						color1.r = (f32)((texel1 >> 0) & 0xFF);
 
 						color1 *= INV_255;
-						color1      = DTRRender_SRGB1ToLinearSpaceV4(color1);
-						DqnV4 blend = color * color1;
-						SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+						color1 = DTRRender_SRGB1ToLinearSpaceV4(color1);
+						finalColor *= color1;
 					}
-					else
-					{
-						SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
-					}
-					DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
+
+					SetPixel(renderBuffer, bufferX, bufferY, finalColor, ColorSpace_Linear);
 				}
+				DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 			}
 
 			signedArea1 += signedArea1DeltaX;
@@ -1144,7 +1210,7 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer * const renderBuffer, const DqnV3 p
 	DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle);
 }
 
-DqnMat4 DqnMat4_GLViewport(f32 x, f32 y, f32 width, f32 height)
+DqnMat4 GLViewport(f32 x, f32 y, f32 width, f32 height)
 {
 	// Given a normalised coordinate from [-1, 1] for X, Y and Z, we want to map this
 	// back to viewport coordinates, or i.e. screen coordinates.
@@ -1171,44 +1237,16 @@ DqnMat4 DqnMat4_GLViewport(f32 x, f32 y, f32 width, f32 height)
 	return result;
 }
 
-DqnMat4 DqnMat4_LookAt(DqnV3 eye, DqnV3 center, DqnV3 up)
-{
-	DqnMat4 result = {0};
-
-	DqnV3 f = DqnV3_Normalise(DqnV3_Sub(eye, center));
-	DqnV3 s = DqnV3_Normalise(DqnV3_Cross(up, f));
-	DqnV3 u = DqnV3_Cross(f, s);
-
-	result.e[0][0] = s.x;
-	result.e[0][1] = u.x;
-	result.e[0][2] = f.x;
-
-	result.e[1][0] = s.y;
-	result.e[1][1] = u.y;
-	result.e[1][2] = f.y;
-
-	result.e[2][0] = s.z;
-	result.e[2][1] = u.z;
-	result.e[2][2] = f.z;
-
-	result.e[3][0] = DqnV3_Dot(s, eye);
-	result.e[3][1] = DqnV3_Dot(u, eye);
-	result.e[3][2] = -DqnV3_Dot(f, eye);
-	result.e[3][3] = 1.0f;
-	return result;
-}
-
-void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
-                                DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
-                                DqnV4 color, const DTRRenderTransform transform)
+void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DTRRenderLight lighting,
+                                DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3,
+                                DTRBitmap *const texture, DqnV4 color,
+                                const DTRRenderTransform transform)
 {
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes p1, p2, p3 inplace
 	////////////////////////////////////////////////////////////////////////////
 	Make3PointsClockwise(&p1, &p2, &p3);
 
-#if 0
-	// TODO(doyle): Transform is only in 2d right now
 	DqnV2 origin  = Get2DOriginFromTransformAnchor(p1.xy, p2.xy, p3.xy, transform);
 	DqnV2 pList[] = {p1.xy - origin, p2.xy - origin, p3.xy - origin};
 	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale, transform.rotation);
@@ -1216,9 +1254,6 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, D
 	p1.xy = pList[0];
 	p2.xy = pList[1];
 	p3.xy = pList[2];
-#else
-	DqnV2 pList[] = {p1.xy, p2.xy, p3.xy};
-#endif
 
 	DqnRect bounds      = GetBoundingBox(pList, DQN_ARRAY_COUNT(pList));
 	DqnRect screenSpace = DqnRect_4i(0, 0, renderBuffer->width - 1, renderBuffer->height - 1);
@@ -1227,16 +1262,49 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, D
 	DqnV2i max          = DqnV2i_V2(bounds.max);
 
 	////////////////////////////////////////////////////////////////////////////
-	// SIMD/Slow Path
+	// Calculate light
 	////////////////////////////////////////////////////////////////////////////
-	if (globalDTRPlatformFlags.canUseSSE2 && 1)
+	f32 lightIntensity1 = 1, lightIntensity2 = 1, lightIntensity3 = 1;
+	bool ignoreLight = false;
+	if (lighting.mode == DTRRenderShadingMode_FullBright)
 	{
-		SIMDTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color, min, max);
+		ignoreLight = true;
 	}
 	else
 	{
-		SlowTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, texture, color, min,
-		             max);
+		lighting.lightVector = DqnV3_Normalise(lighting.lightVector);
+		if (lighting.mode == DTRRenderShadingMode_Flat)
+		{
+			DqnV3 p2SubP1 = p2 - p1;
+			DqnV3 p3SubP1 = p3 - p1;
+
+			DqnV3 normal  = DqnV3_Normalise(DqnV3_Cross(p2SubP1, p3SubP1));
+			f32 intensity = DqnV3_Dot(normal, lighting.lightVector);
+			intensity     = DQN_MAX(0, intensity);
+			color.rgb *= intensity;
+		}
+		else
+		{
+			DQN_ASSERT(lighting.numNormals == 3);
+			DQN_ASSERT(lighting.mode == DTRRenderShadingMode_Gouraud);
+			lightIntensity1 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[0]), lighting.lightVector);
+			lightIntensity2 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[1]), lighting.lightVector);
+			lightIntensity3 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[2]), lighting.lightVector);
+		}
+	}
+
+	////////////////////////////////////////////////////////////////////////////
+	// SIMD/Slow Path
+	////////////////////////////////////////////////////////////////////////////
+	if (globalDTRPlatformFlags.canUseSSE2)
+	{
+		SIMDTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, lightIntensity1, lightIntensity2,
+		             lightIntensity3, ignoreLight, texture, color, min, max);
+	}
+	else
+	{
+		SlowTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, lightIntensity1, lightIntensity2,
+		             lightIntensity3, ignoreLight, texture, color, min, max);
 	}
 
 	////////////////////////////////////////////////////////////////////////////
@@ -1253,98 +1321,59 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, D
 	}
 }
 
-#define HANDMADE_MATH_IMPLEMENTATION
-#define HANDMADE_MATH_CPP_MODE
-#include "external/tests/HandmadeMath.h"
-FILE_SCOPE void Test()
-{
-	f32 aspectRatio = 1;
-	DqnMat4 dqnPerspective  = DqnMat4_Perspective(90, aspectRatio, 100, 1000);
-	hmm_mat4 hmmPerspective = HMM_Perspective    (90, aspectRatio, 100, 1000);
-
-	{
-		hmm_vec3 hmmVec       = HMM_Vec3i(1, 2, 3);
-		DqnV3 dqnVec          = DqnV3_3i(1, 2, 3);
-		DqnMat4 dqnTranslate  = DqnMat4_Translate(dqnVec.x, dqnVec.y, dqnVec.z);
-		hmm_mat4 hmmTranslate = HMM_Translate(hmmVec);
-
-		dqnVec *= 2;
-		hmmVec *= 2;
-		DqnMat4 dqnScale  = DqnMat4_Scale(dqnVec.x, dqnVec.y, dqnVec.z);
-		hmm_mat4 hmmScale = HMM_Scale(hmmVec);
-
-		DqnMat4 dqnTsMatrix  = DqnMat4_Mul(dqnTranslate, dqnScale);
-		hmm_mat4 hmmTsMatrix = HMM_MultiplyMat4(hmmTranslate, hmmScale);
-
-		for (i32 i = 0; i < 16; i++)
-		{
-			f32 *hmmTsMatrixf = (f32 *)&hmmTsMatrix;
-			f32 *dqnTsMatrixf = (f32 *)&dqnTsMatrix;
-			DQN_ASSERT(hmmTsMatrixf[i] == dqnTsMatrixf[i]);
-		}
-
-		int breakHere = 5;
-	}
-
-	{
-		DqnMat4 dqnViewMatrix = DqnMat4_LookAt(DqnV3_3f(4, 3, 3), DqnV3_1f(0), DqnV3_3f(0, 1, 0));
-		hmm_mat4 hmmViewMatrix =
-		    HMM_LookAt(HMM_Vec3(4, 3, 3), HMM_Vec3(0, 0, 0), HMM_Vec3(0, 1, 0));
-
-		for (i32 i = 0; i < 16; i++)
-		{
-			f32 *hmmViewMatrixf = (f32 *)&hmmViewMatrix;
-			f32 *dqnViewMatrixf = (f32 *)&dqnViewMatrix;
-			DQN_ASSERT(hmmViewMatrixf[i] == dqnViewMatrixf[i]);
-		}
-
-	}
-
-}
-
 void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, const DqnV3 pos,
                     const f32 scale, const DqnV3 lightVector, const f32 dt)
 {
 	if (!mesh) return;
 
-	Test();
-
 	for (u32 i = 0; i < mesh->numFaces; i++)
 	{
 		DTRMeshFace face = mesh->faces[i];
-		DQN_ASSERT(face.numVertexIndex == 3);
-		i32 vertAIndex = face.vertexIndex[0];
-		i32 vertBIndex = face.vertexIndex[1];
-		i32 vertCIndex = face.vertexIndex[2];
 
-		DqnV4 vertA = mesh->vertexes[vertAIndex];
-		DqnV4 vertB = mesh->vertexes[vertBIndex];
-		DqnV4 vertC = mesh->vertexes[vertCIndex];
+		DqnV4 v1, v2, v3;
+		DqnV3 norm1, norm2, norm3;
+		{
+			DQN_ASSERT(face.numVertexIndex == 3);
+			DQN_ASSERT(face.numNormalIndex == 3);
 
-		DQN_ASSERT(vertA.w == 1);
-		DQN_ASSERT(vertB.w == 1);
-		DQN_ASSERT(vertC.w == 1);
+			i32 v1Index = face.vertexIndex[0];
+			i32 v2Index = face.vertexIndex[1];
+			i32 v3Index = face.vertexIndex[2];
 
-		// TODO(doyle): Some models have -ve indexes to refer to relative
-		// vertices. We should resolve that to positive indexes at run time.
-		DQN_ASSERT(vertAIndex < (i32)mesh->numVertexes);
-		DQN_ASSERT(vertBIndex < (i32)mesh->numVertexes);
-		DQN_ASSERT(vertCIndex < (i32)mesh->numVertexes);
+			// TODO(doyle): Some models have -ve indexes to refer to relative
+			// vertices. We should resolve that to positive indexes at run time.
+			DQN_ASSERT(v1Index < (i32)mesh->numVertexes);
+			DQN_ASSERT(v2Index < (i32)mesh->numVertexes);
+			DQN_ASSERT(v3Index < (i32)mesh->numVertexes);
 
-		// TODO(doyle): Use normals from model
-		DqnV4 vertAB = vertB - vertA;
-		DqnV4 vertAC = vertC - vertA;
-		DqnV3 normal = DqnV3_Cross(vertAC.xyz, vertAB.xyz);
+			v1 = mesh->vertexes[v1Index];
+			v2 = mesh->vertexes[v2Index];
+			v3 = mesh->vertexes[v3Index];
 
-		f32 intensity = DqnV3_Dot(DqnV3_Normalise(normal), lightVector);
-		DqnV4 modelCol = DqnV4_4f(1, 1, 1, 1);
-		modelCol.rgb *= DQN_ABS(intensity);
+			DQN_ASSERT(v1.w == 1);
+			DQN_ASSERT(v2.w == 1);
+			DQN_ASSERT(v3.w == 1);
 
-        // Apply vertex shader, model view projection
+			i32 norm1Index = face.normalIndex[0];
+			i32 norm2Index = face.normalIndex[1];
+			i32 norm3Index = face.normalIndex[2];
+
+			DQN_ASSERT(norm1Index < (i32)mesh->numNormals);
+			DQN_ASSERT(norm2Index < (i32)mesh->numNormals);
+			DQN_ASSERT(norm3Index < (i32)mesh->numNormals);
+
+			norm1 = mesh->normals[norm1Index];
+			norm2 = mesh->normals[norm2Index];
+			norm3 = mesh->normals[norm3Index];
+		}
+
+		// Apply vertex shader, model view projection
 		DqnMat4 modelMatrix = {};
 		{
 			LOCAL_PERSIST f32 rotateDegrees = 0;
 			rotateDegrees += (dt * 0.0025f);
+			rotateDegrees           = 0.0f;
+
 			DqnMat4 translateMatrix = DqnMat4_Translate(pos.x, pos.y, pos.z);
 			DqnMat4 scaleMatrix     = DqnMat4_Scale(scale, scale, scale);
 			DqnMat4 rotateMatrix    = DqnMat4_Rotate(DQN_DEGREES_TO_RADIANS(rotateDegrees), 0.0f, 1.0f, 0.0f);
@@ -1362,71 +1391,83 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 		perspective         = DqnMat4_Identity();
 		perspective.e[2][3] = -1.0f / DqnV3_Length(eye, center);
 
-		DqnMat4 viewport  = DqnMat4_GLViewport(0, 0, (f32)renderBuffer->width, (f32)renderBuffer->height);
+		DqnMat4 viewport = GLViewport(0, 0, (f32)renderBuffer->width, (f32)renderBuffer->height);
 
 		DqnMat4 modelView                = DqnMat4_Mul(viewMatrix, modelMatrix);
 		DqnMat4 modelViewProjection      = DqnMat4_Mul(perspective, modelView);
 		DqnMat4 viewPModelViewProjection = DqnMat4_Mul(viewport, modelViewProjection);
 
-		vertA = DqnMat4_MulV4(viewPModelViewProjection, vertA);
-		vertB = DqnMat4_MulV4(viewPModelViewProjection, vertB);
-		vertC = DqnMat4_MulV4(viewPModelViewProjection, vertC);
+		v1 = DqnMat4_MulV4(viewPModelViewProjection, v1);
+		v2 = DqnMat4_MulV4(viewPModelViewProjection, v2);
+		v3 = DqnMat4_MulV4(viewPModelViewProjection, v3);
 
 		// Perspective Divide to Normalise Device Coordinates
-		vertA.xyz = (vertA.xyz / vertA.w);
-		vertB.xyz = (vertB.xyz / vertB.w);
-		vertC.xyz = (vertC.xyz / vertC.w);
+		v1.xyz = (v1.xyz / v1.w);
+		v2.xyz = (v2.xyz / v2.w);
+		v3.xyz = (v3.xyz / v3.w);
 
 		// NOTE: Because we need to draw on pixel boundaries. We need to round
 		// up to closest pixel otherwise we will have gaps.
-		vertA.x = (f32)(i32)(vertA.x + 0.5f);
-		vertA.y = (f32)(i32)(vertA.y + 0.5f);
-		vertB.x = (f32)(i32)(vertB.x + 0.5f);
-		vertB.y = (f32)(i32)(vertB.y + 0.5f);
-		vertC.x = (f32)(i32)(vertC.x + 0.5f);
-		vertC.y = (f32)(i32)(vertC.y + 0.5f);
+		v1.x = (f32)(i32)(v1.x + 0.5f);
+		v1.y = (f32)(i32)(v1.y + 0.5f);
+		v2.x = (f32)(i32)(v2.x + 0.5f);
+		v2.y = (f32)(i32)(v2.y + 0.5f);
+		v3.x = (f32)(i32)(v3.x + 0.5f);
+		v3.y = (f32)(i32)(v3.y + 0.5f);
 
 		i32 textureAIndex = face.texIndex[0];
 		i32 textureBIndex = face.texIndex[1];
 		i32 textureCIndex = face.texIndex[2];
 
-		DqnV2 texA = mesh->texUV[textureAIndex].xy;
-		DqnV2 texB = mesh->texUV[textureBIndex].xy;
-		DqnV2 texC = mesh->texUV[textureCIndex].xy;
+		DqnV2 uv1 = mesh->texUV[textureAIndex].xy;
+		DqnV2 uv2 = mesh->texUV[textureBIndex].xy;
+		DqnV2 uv3 = mesh->texUV[textureCIndex].xy;
 		DQN_ASSERT(textureAIndex < (i32)mesh->numTexUV);
 		DQN_ASSERT(textureBIndex < (i32)mesh->numTexUV);
 		DQN_ASSERT(textureCIndex < (i32)mesh->numTexUV);
 
 		bool DEBUG_SIMPLE_MODE = false;
+		DqnV4 modelCol         = DqnV4_1f(1);
+
+		DTRRenderLight lighting = {};
+		lighting.mode           = DTRRenderShadingMode_Gouraud;
+		lighting.lightVector    = lightVector;
+		lighting.normals[0]     = norm1;
+		lighting.normals[1]     = norm2;
+		lighting.normals[2]     = norm3;
+		lighting.numNormals     = 3;
+
 		if (DTR_DEBUG && DEBUG_SIMPLE_MODE)
 		{
-			DTRRender_Triangle(renderBuffer, vertA.xyz, vertB.xyz, vertC.xyz, modelCol);
+			DTRRender_Triangle(renderBuffer, lighting, v1.xyz, v2.xyz, v3.xyz, modelCol);
 		}
 		else
 		{
-			DTRRender_TexturedTriangle(renderBuffer, vertA.xyz, vertB.xyz, vertC.xyz, texA, texB,
-			                           texC, &mesh->tex, modelCol);
+			DTRRender_TexturedTriangle(renderBuffer, lighting, v1.xyz, v2.xyz, v3.xyz, uv1, uv2,
+			                           uv3, &mesh->tex, modelCol);
 		}
 
 		bool DEBUG_WIREFRAME = false;
 		if (DTR_DEBUG && DEBUG_WIREFRAME)
 		{
 			DqnV4 wireColor = DqnV4_4f(1.0f, 1.0f, 1.0f, 0.01f);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(vertA.xy), DqnV2i_V2(vertB.xy),
+			DTRRender_Line(renderBuffer, DqnV2i_V2(v1.xy), DqnV2i_V2(v2.xy),
 			               wireColor);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(vertB.xy), DqnV2i_V2(vertC.xy),
+			DTRRender_Line(renderBuffer, DqnV2i_V2(v2.xy), DqnV2i_V2(v3.xy),
 			               wireColor);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(vertC.xy), DqnV2i_V2(vertA.xy),
+			DTRRender_Line(renderBuffer, DqnV2i_V2(v3.xy), DqnV2i_V2(v1.xy),
 			               wireColor);
 		}
 	}
 }
 
-void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
-                        DqnV4 color, const DTRRenderTransform transform)
+void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DTRRenderLight lighting,
+                        DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV4 color,
+                        const DTRRenderTransform transform)
 {
 	const DqnV2 noUV = {};
-	DTRRender_TexturedTriangle(renderBuffer, p1, p2, p3, noUV, noUV, noUV, NULL, color, transform);
+	DTRRender_TexturedTriangle(renderBuffer, lighting, p1, p2, p3, noUV, noUV, noUV, NULL, color,
+	                           transform);
 }
 
 void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2 pos,

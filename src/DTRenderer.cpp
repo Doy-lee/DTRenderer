@@ -869,78 +869,6 @@ void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const in
 	}
 }
 
-FILE_SCOPE void DebugTestStrToF32Converter()
-{
-	const f32 EPSILON = 0.001f;
-	const char a[]    = "-0.66248";
-	f32 vA            = Dqn_StrToF32(a, DQN_ARRAY_COUNT(a));
-	DQN_ASSERT(DQN_ABS(vA) - DQN_ABS(-0.66248f) < EPSILON);
-
-	const char b[] = "-0.632053";
-	f32 vB         = Dqn_StrToF32(b, DQN_ARRAY_COUNT(b));
-	DQN_ASSERT(DQN_ABS(vB) - DQN_ABS(-0.632053f) < EPSILON);
-
-	const char c[] = "-0.244271";
-	f32 vC         = Dqn_StrToF32(c, DQN_ARRAY_COUNT(c));
-	DQN_ASSERT(DQN_ABS(vC) - DQN_ABS(-0.244271f) < EPSILON);
-
-	const char d[] = "-0.511812";
-	f32 vD         = Dqn_StrToF32(d, DQN_ARRAY_COUNT(d));
-	DQN_ASSERT(DQN_ABS(vD) - DQN_ABS(-0.511812f) < EPSILON);
-
-	const char e[] = "-0.845392";
-	f32 vE         = Dqn_StrToF32(e, DQN_ARRAY_COUNT(e));
-	DQN_ASSERT(DQN_ABS(vE) - DQN_ABS(-0.845392f) < EPSILON);
-
-	const char f[] = "0.127809";
-	f32 vF         = Dqn_StrToF32(f, DQN_ARRAY_COUNT(f));
-	DQN_ASSERT(DQN_ABS(vF) - DQN_ABS(-0.127809f) < EPSILON);
-
-	const char g[] = "0.532";
-	f32 vG         = Dqn_StrToF32(g, DQN_ARRAY_COUNT(g));
-	DQN_ASSERT(DQN_ABS(vG) - DQN_ABS(-0.532f) < EPSILON);
-
-	const char h[] = "0.923";
-	f32 vH         = Dqn_StrToF32(h, DQN_ARRAY_COUNT(h));
-	DQN_ASSERT(DQN_ABS(vH) - DQN_ABS(-0.923f) < EPSILON);
-
-	const char i[] = "0.000";
-	f32 vI         = Dqn_StrToF32(i, DQN_ARRAY_COUNT(i));
-	DQN_ASSERT(DQN_ABS(vI) - DQN_ABS(-0.000f) < EPSILON);
-
-	const char j[] = "0.000283538";
-	f32 vJ         = Dqn_StrToF32(j, DQN_ARRAY_COUNT(j));
-	DQN_ASSERT(DQN_ABS(vJ) - DQN_ABS(-0.000283538f) < EPSILON);
-
-	const char k[] = "-1.25";
-	f32 vK         = Dqn_StrToF32(k, DQN_ARRAY_COUNT(k));
-	DQN_ASSERT(DQN_ABS(vK) - DQN_ABS(-1.25f) < EPSILON);
-
-	const char l[] = "0.286843";
-	f32 vL         = Dqn_StrToF32(l, DQN_ARRAY_COUNT(l));
-	DQN_ASSERT(DQN_ABS(vL) - DQN_ABS(-0.286843f) < EPSILON);
-
-	const char m[] = "-0.406";
-	f32 vM         = Dqn_StrToF32(m, DQN_ARRAY_COUNT(m));
-	DQN_ASSERT(DQN_ABS(vM) - DQN_ABS(-0.406f) < EPSILON);
-
-	const char n[] = "-0.892";
-	f32 vN         = Dqn_StrToF32(n, DQN_ARRAY_COUNT(n));
-	DQN_ASSERT(DQN_ABS(vN) - DQN_ABS(-0.892f) < EPSILON);
-
-	const char o[] = "0.201";
-	f32 vO         = Dqn_StrToF32(o, DQN_ARRAY_COUNT(o));
-	DQN_ASSERT(DQN_ABS(vO) - DQN_ABS(-0.201f) < EPSILON);
-
-	const char p[] = "1.25";
-	f32 vP         = Dqn_StrToF32(p, DQN_ARRAY_COUNT(p));
-	DQN_ASSERT(DQN_ABS(vP) - DQN_ABS(1.25f) < EPSILON);
-
-	const char q[] = "9.64635e-05";
-	f32 vQ         = Dqn_StrToF32(q, DQN_ARRAY_COUNT(q));
-	DQN_ASSERT(DQN_ABS(vQ) - DQN_ABS(9.64635e-05) < EPSILON);
-}
-
 extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
                            PlatformInput *const input,
                            PlatformMemory *const memory)
@@ -1000,8 +928,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		////////////////////////////////////////////////////////////////////////
 		if (DTR_DEBUG)
 		{
-			DebugTestStrToF32Converter();
-			// DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
+			DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
 
 			DqnTempMemStack tmp = DqnMemStack_BeginTempRegion(&memory->tempStack);
 			DTRBitmap test      = {};
@@ -1060,18 +987,22 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		{
 			DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
 			                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
-			DTRRender_Triangle(&renderBuffer, t0[0], t0[1], t0[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, t1[0], t1[1], t1[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, t3[0], t3[1], t3[2], colorRed, rotatingXform);
-			DTRRender_Triangle(&renderBuffer, t2[0], t2[1], t2[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, t4[0], t4[1], t4[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, t5[0], t5[1], t5[2], colorRed);
+
+			DTRRenderLight lighting = {};
+			lighting.mode           = DTRRenderShadingMode_FullBright;
+
+			DTRRender_Triangle(&renderBuffer, lighting, t0[0], t0[1], t0[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, lighting, t1[0], t1[1], t1[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, lighting, t3[0], t3[1], t3[2], colorRed, rotatingXform);
+			DTRRender_Triangle(&renderBuffer, lighting, t2[0], t2[1], t2[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, lighting, t4[0], t4[1], t4[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, lighting, t5[0], t5[1], t5[2], colorRed);
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 		}
 
 		if (1)
 		{
-			LOCAL_PERSIST bool runTinyRendererOnce = true;
+			LOCAL_PERSIST bool runTinyRendererOnce = false;
 			if (1 && runTinyRendererOnce)
 			{
 				DTRDebug_RunTinyRenderer();
@@ -1082,7 +1013,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			////////////////////////////////////////////////////////////////////////
 			// Draw Loaded Model
 			////////////////////////////////////////////////////////////////////////
-			const DqnV3 LIGHT     = DqnV3_3i(0, 0, -1);
+			const DqnV3 LIGHT     = DqnV3_Normalise(DqnV3_3f(1, -1, 1.0f));
 			const f32 MODEL_SCALE = 1;
 			DTRMesh *const mesh   = &state->mesh;
 			DqnV3 modelP          = DqnV3_3f(0, 0, 0);
