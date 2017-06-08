@@ -1326,6 +1326,37 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 {
 	if (!mesh) return;
 
+	DqnMat4 viewPModelViewProjection = {};
+	{
+		LOCAL_PERSIST f32 rotateDegrees = 0;
+		rotateDegrees += dt * 20.0f;
+
+		// Create model matrix
+		DqnMat4 translateMatrix = DqnMat4_Translate(pos.x, pos.y, pos.z);
+		DqnMat4 scaleMatrix     = DqnMat4_Scale(scale, scale, scale);
+		DqnMat4 rotateMatrix =
+		    DqnMat4_Rotate(DQN_DEGREES_TO_RADIANS(rotateDegrees), 0.0f, 1.0f, 0.0f);
+		DqnMat4 modelMatrix = DqnMat4_Mul(translateMatrix, DqnMat4_Mul(rotateMatrix, scaleMatrix));
+
+		// Create camera matrix
+		DqnV3 eye          = DqnV3_3f(0, 0, 1);
+		DqnV3 up           = DqnV3_3f(0, 1, 0);
+		DqnV3 center       = DqnV3_3f(0, 0, 0);
+		DqnMat4 viewMatrix = DqnMat4_LookAt(eye, center, up);
+
+		// Create projection matrix
+		f32 aspectRatio     = (f32)renderBuffer->width / (f32)renderBuffer->height;
+		DqnMat4 perspective = DqnMat4_Perspective(80.0f, aspectRatio, 0.5f, 100.0f);
+		perspective         = DqnMat4_Identity();
+		perspective.e[2][3] = -1.0f / DqnV3_Length(eye, center);
+
+		// Combine matrix + matrix that maps NDC to screen space
+		DqnMat4 viewport  = GLViewport(0, 0, (f32)renderBuffer->width, (f32)renderBuffer->height);
+		DqnMat4 modelView = DqnMat4_Mul(viewMatrix, modelMatrix);
+		DqnMat4 modelViewProjection = DqnMat4_Mul(perspective, modelView);
+		viewPModelViewProjection    = DqnMat4_Mul(viewport, modelViewProjection);
+	}
+
 	for (u32 i = 0; i < mesh->numFaces; i++)
 	{
 		DTRMeshFace face = mesh->faces[i];
@@ -1367,36 +1398,6 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 			norm3 = mesh->normals[norm3Index];
 		}
 
-		// Apply vertex shader, model view projection
-		DqnMat4 modelMatrix = {};
-		{
-			LOCAL_PERSIST f32 rotateDegrees = 0;
-			rotateDegrees += (dt * 0.0025f);
-			rotateDegrees           = 0.0f;
-
-			DqnMat4 translateMatrix = DqnMat4_Translate(pos.x, pos.y, pos.z);
-			DqnMat4 scaleMatrix     = DqnMat4_Scale(scale, scale, scale);
-			DqnMat4 rotateMatrix    = DqnMat4_Rotate(DQN_DEGREES_TO_RADIANS(rotateDegrees), 0.0f, 1.0f, 0.0f);
-			modelMatrix             = DqnMat4_Mul(translateMatrix, DqnMat4_Mul(rotateMatrix, scaleMatrix));
-		}
-
-		DqnV3 eye    = DqnV3_3f(0, 0, 1);
-		DqnV3 up     = DqnV3_3f(0, 1, 0);
-		DqnV3 center = DqnV3_3f(0, 0, 0);
-
-		DqnMat4 viewMatrix = DqnMat4_LookAt(eye, center, up);
-
-		f32 aspectRatio     = (f32)renderBuffer->width / (f32)renderBuffer->height;
-		DqnMat4 perspective = DqnMat4_Perspective(80.0f, aspectRatio, 0.5f, 100.0f);
-		perspective         = DqnMat4_Identity();
-		perspective.e[2][3] = -1.0f / DqnV3_Length(eye, center);
-
-		DqnMat4 viewport = GLViewport(0, 0, (f32)renderBuffer->width, (f32)renderBuffer->height);
-
-		DqnMat4 modelView                = DqnMat4_Mul(viewMatrix, modelMatrix);
-		DqnMat4 modelViewProjection      = DqnMat4_Mul(perspective, modelView);
-		DqnMat4 viewPModelViewProjection = DqnMat4_Mul(viewport, modelViewProjection);
-
 		v1 = DqnMat4_MulV4(viewPModelViewProjection, v1);
 		v2 = DqnMat4_MulV4(viewPModelViewProjection, v2);
 		v3 = DqnMat4_MulV4(viewPModelViewProjection, v3);
@@ -1415,16 +1416,17 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 		v3.x = (f32)(i32)(v3.x + 0.5f);
 		v3.y = (f32)(i32)(v3.y + 0.5f);
 
-		i32 textureAIndex = face.texIndex[0];
-		i32 textureBIndex = face.texIndex[1];
-		i32 textureCIndex = face.texIndex[2];
+		i32 uv1Index = face.texIndex[0];
+		i32 uv2Index = face.texIndex[1];
+		i32 uv3Index = face.texIndex[2];
 
-		DqnV2 uv1 = mesh->texUV[textureAIndex].xy;
-		DqnV2 uv2 = mesh->texUV[textureBIndex].xy;
-		DqnV2 uv3 = mesh->texUV[textureCIndex].xy;
-		DQN_ASSERT(textureAIndex < (i32)mesh->numTexUV);
-		DQN_ASSERT(textureBIndex < (i32)mesh->numTexUV);
-		DQN_ASSERT(textureCIndex < (i32)mesh->numTexUV);
+		DQN_ASSERT(uv1Index < (i32)mesh->numTexUV);
+		DQN_ASSERT(uv2Index < (i32)mesh->numTexUV);
+		DQN_ASSERT(uv3Index < (i32)mesh->numTexUV);
+
+		DqnV2 uv1 = mesh->texUV[uv1Index].xy;
+		DqnV2 uv2 = mesh->texUV[uv2Index].xy;
+		DqnV2 uv3 = mesh->texUV[uv3Index].xy;
 
 		bool DEBUG_SIMPLE_MODE = false;
 		DqnV4 modelCol         = DqnV4_1f(1);
