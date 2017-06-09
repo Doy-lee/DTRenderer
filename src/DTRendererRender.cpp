@@ -11,6 +11,16 @@
 
 FILE_SCOPE const f32 COLOR_EPSILON = 0.9f;
 
+typedef struct RenderLightInternal
+{
+	enum DTRRenderShadingMode mode;
+	DqnV3 vector;
+
+	DqnV3 normals[4];
+	u32 numNormals;
+} RenderLightInternal;
+
+
 inline void Make3PointsClockwise(DqnV3 *p1, DqnV3 *p2, DqnV3 *p3)
 {
 	f32 area2Times = ((p2->x - p1->x) * (p2->y + p1->y)) +
@@ -372,7 +382,7 @@ FILE_SCOPE RectPoints TransformRectPoints(DqnV2 min, DqnV2 max, DTRRenderTransfo
 	result.pList[RectPointsIndex_Point] = max - origin;
 	result.pList[RectPointsIndex_YAxis] = DqnV2_2f(min.x, max.y) - origin;
 
-	TransformPoints(origin, result.pList, DQN_ARRAY_COUNT(result.pList), transform.scale, transform.rotation);
+	TransformPoints(origin, result.pList, DQN_ARRAY_COUNT(result.pList), transform.scale.xy, transform.rotation);
 
 	return result;
 }
@@ -591,8 +601,8 @@ FILE_SCOPE inline DqnV2 Get2DOriginFromTransformAnchor(const DqnV2 p1, const Dqn
 	DqnV2 p1p2 = p2 - p1;
 	DqnV2 p1p3 = p3 - p1;
 
-	DqnV2 p1p2Anchored = p1p2 * transform.anchor;
-	DqnV2 p1p3Anchored = p1p3 * transform.anchor;
+	DqnV2 p1p2Anchored = p1p2 * transform.anchor.xy;
+	DqnV2 p1p3Anchored = p1p3 * transform.anchor.xy;
 	DqnV2 origin       = p1 + p1p2Anchored + p1p3Anchored;
 
 	return origin;
@@ -1237,10 +1247,10 @@ DqnMat4 GLViewport(f32 x, f32 y, f32 width, f32 height)
 	return result;
 }
 
-void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DTRRenderLight lighting,
-                                DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3,
-                                DTRBitmap *const texture, DqnV4 color,
-                                const DTRRenderTransform transform)
+FILE_SCOPE void TexturedTriangleInternal(DTRRenderBuffer *const renderBuffer,
+                                         RenderLightInternal lighting, DqnV3 p1, DqnV3 p2, DqnV3 p3,
+                                         DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
+                                         DqnV4 color, const DTRRenderTransform transform = DTRRender_DefaultTriangleTransform())
 {
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes p1, p2, p3 inplace
@@ -1249,7 +1259,7 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DTRRenderLi
 
 	DqnV2 origin  = Get2DOriginFromTransformAnchor(p1.xy, p2.xy, p3.xy, transform);
 	DqnV2 pList[] = {p1.xy - origin, p2.xy - origin, p3.xy - origin};
-	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale, transform.rotation);
+	TransformPoints(origin, pList, DQN_ARRAY_COUNT(pList), transform.scale.xy, transform.rotation);
 
 	p1.xy = pList[0];
 	p2.xy = pList[1];
@@ -1272,14 +1282,14 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DTRRenderLi
 	}
 	else
 	{
-		lighting.lightVector = DqnV3_Normalise(lighting.lightVector);
+		lighting.vector = DqnV3_Normalise(lighting.vector);
 		if (lighting.mode == DTRRenderShadingMode_Flat)
 		{
 			DqnV3 p2SubP1 = p2 - p1;
 			DqnV3 p3SubP1 = p3 - p1;
 
 			DqnV3 normal  = DqnV3_Normalise(DqnV3_Cross(p2SubP1, p3SubP1));
-			f32 intensity = DqnV3_Dot(normal, lighting.lightVector);
+			f32 intensity = DqnV3_Dot(normal, lighting.vector);
 			intensity     = DQN_MAX(0, intensity);
 			color.rgb *= intensity;
 		}
@@ -1287,9 +1297,9 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DTRRenderLi
 		{
 			DQN_ASSERT(lighting.numNormals == 3);
 			DQN_ASSERT(lighting.mode == DTRRenderShadingMode_Gouraud);
-			lightIntensity1 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[0]), lighting.lightVector);
-			lightIntensity2 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[1]), lighting.lightVector);
-			lightIntensity3 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[2]), lighting.lightVector);
+			lightIntensity1 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[0]), lighting.vector);
+			lightIntensity2 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[1]), lighting.vector);
+			lightIntensity3 = DqnV3_Dot(DqnV3_Normalise(lighting.normals[2]), lighting.vector);
 		}
 	}
 
@@ -1321,21 +1331,35 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer, DTRRenderLi
 	}
 }
 
-void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, const DqnV3 pos,
-                    const f32 scale, const DqnV3 lightVector, const f32 dt)
+FILE_SCOPE RenderLightInternal NullRenderLightInternal()
+{
+	RenderLightInternal result = {};
+	return result;
+}
+
+void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer,
+                                DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3,
+                                DTRBitmap *const texture, DqnV4 color,
+                                const DTRRenderTransform transform)
+{
+	TexturedTriangleInternal(renderBuffer, NullRenderLightInternal(), p1, p2, p3, uv1, uv2, uv3, texture,
+	                         color, transform);
+}
+
+void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh,
+                    DTRRenderLight lighting, const DqnV3 pos,
+                    const DTRRenderTransform transform)
 {
 	if (!mesh) return;
 
 	DqnMat4 viewPModelViewProjection = {};
 	{
-		LOCAL_PERSIST f32 rotateDegrees = 0;
-		rotateDegrees += dt * 20.0f;
-
 		// Create model matrix
 		DqnMat4 translateMatrix = DqnMat4_Translate(pos.x, pos.y, pos.z);
-		DqnMat4 scaleMatrix     = DqnMat4_Scale(scale, scale, scale);
+		DqnMat4 scaleMatrix     = DqnMat4_ScaleV3(transform.scale);
 		DqnMat4 rotateMatrix =
-		    DqnMat4_Rotate(DQN_DEGREES_TO_RADIANS(rotateDegrees), 0.0f, 1.0f, 0.0f);
+		    DqnMat4_Rotate(DQN_DEGREES_TO_RADIANS(transform.rotation), transform.anchor.x,
+		                   transform.anchor.y, transform.anchor.z);
 		DqnMat4 modelMatrix = DqnMat4_Mul(translateMatrix, DqnMat4_Mul(rotateMatrix, scaleMatrix));
 
 		// Create camera matrix
@@ -1428,25 +1452,25 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 		DqnV2 uv2 = mesh->texUV[uv2Index].xy;
 		DqnV2 uv3 = mesh->texUV[uv3Index].xy;
 
-		bool DEBUG_SIMPLE_MODE = false;
-		DqnV4 modelCol         = DqnV4_1f(1);
+		DqnV4 color                          = lighting.color;
+		RenderLightInternal lightingInternal = {};
+		lightingInternal.mode                = lighting.mode;
+		lightingInternal.vector              = lighting.vector;
+		lightingInternal.normals[0]          = norm1;
+		lightingInternal.normals[1]          = norm2;
+		lightingInternal.normals[2]          = norm3;
+		lightingInternal.numNormals          = 3;
 
-		DTRRenderLight lighting = {};
-		lighting.mode           = DTRRenderShadingMode_Gouraud;
-		lighting.lightVector    = lightVector;
-		lighting.normals[0]     = norm1;
-		lighting.normals[1]     = norm2;
-		lighting.normals[2]     = norm3;
-		lighting.numNormals     = 3;
-
-		if (DTR_DEBUG && DEBUG_SIMPLE_MODE)
+		bool DEBUG_NO_TEX = false;
+		if (DTR_DEBUG && DEBUG_NO_TEX)
 		{
-			DTRRender_Triangle(renderBuffer, lighting, v1.xyz, v2.xyz, v3.xyz, modelCol);
+			TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz, uv1,
+			                         uv2, uv3, NULL, color);
 		}
 		else
 		{
-			DTRRender_TexturedTriangle(renderBuffer, lighting, v1.xyz, v2.xyz, v3.xyz, uv1, uv2,
-			                           uv3, &mesh->tex, modelCol);
+			TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz, uv1,
+			                         uv2, uv3, &mesh->tex, color);
 		}
 
 		bool DEBUG_WIREFRAME = false;
@@ -1463,13 +1487,13 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh, co
 	}
 }
 
-void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DTRRenderLight lighting,
-                        DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV4 color,
-                        const DTRRenderTransform transform)
+void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
+                        DqnV4 color, const DTRRenderTransform transform)
 {
-	const DqnV2 noUV = {};
-	DTRRender_TexturedTriangle(renderBuffer, lighting, p1, p2, p3, noUV, noUV, noUV, NULL, color,
-	                           transform);
+	const DqnV2 NO_UV       = {};
+	DTRBitmap *const NO_TEX = NULL;
+	TexturedTriangleInternal(renderBuffer, NullRenderLightInternal(), p1, p2, p3, NO_UV, NO_UV,
+	                         NO_UV, NO_TEX, color, transform);
 }
 
 void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2 pos,

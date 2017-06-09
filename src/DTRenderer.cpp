@@ -983,20 +983,17 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
 		rotatingXform.rotation           = rotation;
 
-		if (0)
+		if (1)
 		{
 			DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
 			                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 
-			DTRRenderLight lighting = {};
-			lighting.mode           = DTRRenderShadingMode_FullBright;
-
-			DTRRender_Triangle(&renderBuffer, lighting, t0[0], t0[1], t0[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, lighting, t1[0], t1[1], t1[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, lighting, t3[0], t3[1], t3[2], colorRed, rotatingXform);
-			DTRRender_Triangle(&renderBuffer, lighting, t2[0], t2[1], t2[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, lighting, t4[0], t4[1], t4[2], colorRed);
-			DTRRender_Triangle(&renderBuffer, lighting, t5[0], t5[1], t5[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t0[0], t0[1], t0[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t1[0], t1[1], t1[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t3[0], t3[1], t3[2], colorRed, rotatingXform);
+			DTRRender_Triangle(&renderBuffer, t2[0], t2[1], t2[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t4[0], t4[1], t4[2], colorRed);
+			DTRRender_Triangle(&renderBuffer, t5[0], t5[1], t5[2], colorRed);
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 		}
 
@@ -1018,7 +1015,21 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRMesh *const mesh   = &state->mesh;
 			DqnV3 modelP          = DqnV3_3f(0, 0, 0);
 
-			DTRRender_Mesh(&renderBuffer, mesh, modelP, MODEL_SCALE, LIGHT, input->deltaForFrame);
+			LOCAL_PERSIST f32 modelRotation = 0;
+			modelRotation += (input->deltaForFrame * 20.0f);
+			DqnV3 axis = DqnV3_3f(0, 1, 0);
+
+			DTRRenderTransform transform = DTRRender_DefaultTransform();
+			transform.scale              = DqnV3_1f(MODEL_SCALE);
+			transform.rotation           = modelRotation;
+			transform.anchor             = axis;
+
+			DTRRenderLight lighting      = {};
+			lighting.mode                = DTRRenderShadingMode_Gouraud;
+			lighting.vector              = LIGHT;
+			lighting.color               = DqnV4_4f(1, 1, 1, 1);
+
+			DTRRender_Mesh(&renderBuffer, mesh, lighting, modelP, transform);
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderModel);
 		}
 	}
@@ -1037,7 +1048,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	if (0)
 	{
 		DTRRenderTransform transform = DTRRender_DefaultTransform();
-		transform.scale              = DqnV2_1f(2.0f);
+		transform.scale              = DqnV3_1f(2.0f);
 
 		LOCAL_PERSIST DqnV2 bitmapP = DqnV2_2f(500, 250);
 		bitmapP.x += 2.0f * sinf((f32)input->timeNowInS * 0.5f);

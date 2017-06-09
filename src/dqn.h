@@ -629,6 +629,7 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_LookAt      (DqnV3 eye, DqnV3 center, DqnV3 up);
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Translate   (f32 x, f32 y, f32 z);
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Rotate      (f32 radians, f32 x, f32 y, f32 z);
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Scale       (f32 x, f32 y, f32 z);
+DQN_FILE_SCOPE DqnMat4 DqnMat4_ScaleV3     (DqnV3 scale);
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Mul         (DqnMat4 a, DqnMat4 b);
 DQN_FILE_SCOPE DqnV4   DqnMat4_MulV4       (DqnMat4 a, DqnV4 b);
 
@@ -2426,6 +2427,16 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_Scale(f32 x, f32 y, f32 z)
 	result.e[0][0] = x;
 	result.e[1][1] = y;
 	result.e[2][2] = z;
+	result.e[3][3] = 1;
+	return result;
+}
+
+DQN_FILE_SCOPE DqnMat4 DqnMat4_ScaleV3(DqnV3 scale)
+{
+	DqnMat4 result = {0};
+	result.e[0][0] = scale.x;
+	result.e[1][1] = scale.y;
+	result.e[2][2] = scale.z;
 	result.e[3][3] = 1;
 	return result;
 }
