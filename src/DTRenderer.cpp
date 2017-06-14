@@ -904,8 +904,9 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		// Init Assets
 		////////////////////////////////////////////////////////////////////////
 		DTRAsset_InitGlobalState();
+		const f32 FONT_SIZE = 14;
 		DTRAsset_LoadFontToBitmap(input->api, &memory->mainStack, tempStack, &state->font,
-		                          "Roboto-bold.ttf", DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), 12);
+		                          "Roboto-bold.ttf", DqnV2i_2i(256, 256), DqnV2i_2i(' ', '~'), FONT_SIZE);
 		DTRAsset_LoadBitmap(input->api, assetStack,
 		                    tempStack, &state->bitmap, "tree00.bmp");
 
@@ -959,7 +960,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	////////////////////////////////////////////////////////////////////////////
 	// Update and Render
 	////////////////////////////////////////////////////////////////////////////
-	DTRRender_Clear(&renderBuffer, DqnV3_3f(0.5f, 0.0f, 1.0f));
+	DTRRender_Clear(&renderBuffer, DqnV3_3f(0.0f, 0.0f, 0.0f));
 
 #if 1
 	DqnV4 colorRed    = DqnV4_4f(0.8f, 0, 0, 1);
@@ -980,14 +981,17 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		DqnV3 t4[3] = {DqnV3_3i(100, 150, 0), DqnV3_3i(200, 150, 0), DqnV3_3i(200, 250, 0)};
 		DqnV3 t5[3] = {DqnV3_3i(300, 150, 0), DqnV3_3i(201, 150, 0), DqnV3_3i(200, 250, 0)};
 
-		DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
-		rotatingXform.rotation           = rotation;
-
 		if (1)
 		{
+
+			DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
+			rotatingXform.rotation           = rotation * 0.25f;
+
 			DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
 			                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 
+			DTRRenderTransform scaleXform = DTRRender_DefaultTriangleTransform();
+			scaleXform.scale              = DqnV3_1f(5);
 			DTRRender_Triangle(&renderBuffer, t0[0], t0[1], t0[2], colorRed);
 			DTRRender_Triangle(&renderBuffer, t1[0], t1[1], t1[2], colorRed);
 			DTRRender_Triangle(&renderBuffer, t3[0], t3[1], t3[2], colorRed, rotatingXform);
@@ -997,7 +1001,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 		}
 
-		if (1)
+		if (0)
 		{
 			LOCAL_PERSIST bool runTinyRendererOnce = false;
 			if (1 && runTinyRendererOnce)
@@ -1016,7 +1020,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DqnV3 modelP          = DqnV3_3f(0, 0, 0);
 
 			LOCAL_PERSIST f32 modelRotation = 0;
-			modelRotation += (input->deltaForFrame * 20.0f);
+			modelRotation += (input->deltaForFrame * 80.0f);
 			DqnV3 axis = DqnV3_3f(0, 1, 0);
 
 			DTRRenderTransform transform = DTRRender_DefaultTransform();

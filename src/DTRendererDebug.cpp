@@ -216,7 +216,7 @@ void DTRDebug_Update(DTRState *const state,
 		debug->renderBuffer = renderBuffer;
 		debug->input        = input;
 		debug->font         = &state->font;
-		debug->displayColor = DqnV4_4f(1, 1, 1, 1);
+		debug->displayColor = DqnV4_4f(1, 1, 1, 0.85f);
 		if (debug->font->bitmap && debug->renderBuffer)
 		{
 			debug->displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);

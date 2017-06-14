@@ -1146,10 +1146,45 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 
 		for (i32 bufferX = min.x; bufferX < max.x; bufferX++)
 		{
-			if (signedArea1 >= 0 && signedArea2 >= 0 && signedArea3 >= 0)
+			// TODO(doyle): Use signedArea1/2/3 and subsample increments from the signedAreaDeltas
+			const u32 NUM_SAMPLES_ALONG_AXIS = 2;
+			const u32 SAMPLES_PER_PIXEL      = DQN_SQUARED(NUM_SAMPLES_ALONG_AXIS);
+			DQN_ASSERT((NUM_SAMPLES_ALONG_AXIS & 1) == 0);
+
+			const f32 SAMPLE_COVERAGE_INCREMENT = 1 / (f32)SAMPLES_PER_PIXEL;
+			const f32 SAMPLE_XY_INCREMENT       = 1 / (f32)NUM_SAMPLES_ALONG_AXIS;
+
+			f32 subsampleCoverage = 0;
+			for (i32 sampleY = 0; sampleY < NUM_SAMPLES_ALONG_AXIS; sampleY++)
+			{
+				for (i32 sampleX = 0; sampleX < NUM_SAMPLES_ALONG_AXIS; sampleX++)
+				{
+					f32 granularX = sampleX * SAMPLE_XY_INCREMENT;
+					f32 granularY = sampleY * SAMPLE_XY_INCREMENT;
+
+					DqnV2 subsample = DqnV2_2f((f32)bufferX + granularX, (f32)bufferY + granularY);
+
+					f32 subsampleSignedArea1 = Triangle2TimesSignedArea(p2.xy, p3.xy, subsample);
+					f32 subsampleSignedArea2 = Triangle2TimesSignedArea(p3.xy, p1.xy, subsample);
+					f32 subsampleSignedArea3 = Triangle2TimesSignedArea(p1.xy, p2.xy, subsample);
+
+					if (subsampleSignedArea1 >= 0 && subsampleSignedArea2 >= 0 &&
+					    subsampleSignedArea3 >= 0)
+					{
+						subsampleCoverage += SAMPLE_COVERAGE_INCREMENT;
+					}
+				}
+			}
+			DQN_ASSERT(subsampleCoverage >= 0.0f && subsampleCoverage <= 1.0f);
+
+			// TODO(doyle): Crashes when using meshes, since we are now sampling
+			// outside the actual specified mesh, (i.e. pixels just before it
+			// for SSAA) the barycentric coordinates sample outside the texture.
+			// Naiive workarounds will cause color artifacts or gaps in rendered
+			// meshes.
+			if (subsampleCoverage > 0)
 			{
 				DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_RasterisePixel);
-				f32 barycentricA = signedArea1 * invSignedAreaParallelogram;
 				f32 barycentricB = signedArea2 * invSignedAreaParallelogram;
 				f32 barycentricC = signedArea3 * invSignedAreaParallelogram;
 
@@ -1158,17 +1193,27 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 				f32 currZValue   = renderBuffer->zBuffer[zBufferIndex];
 				DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
 
-				if (pixelZValue > currZValue)
+				if (pixelZValue >= currZValue)
 				{
 					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
 					DqnV4 finalColor                    = color;
+					DQN_ASSERT(finalColor.x >= 0);
+
+					// NOTE: Multiply everything by the coverage alpha since
+					// colors need to be premultiplied alpha.
+					finalColor *= subsampleCoverage;
+					DQN_ASSERT(finalColor.x >= 0);
 
 					if (!ignoreLight)
 					{
-						DqnV3 light = (p1Light * barycentricA) + (p2Light * barycentricB) +
+						f32 barycentricA = signedArea1 * invSignedAreaParallelogram;
+						DqnV3 light      = (p1Light * barycentricA) + (p2Light * barycentricB) +
 						              (p3Light * barycentricC);
 						finalColor.rgb *= light;
+						DQN_ASSERT(finalColor.x >= 0);
 					}
+
+					DQN_ASSERT(finalColor.x >= 0);
 
 					if (texture)
 					{
@@ -1200,9 +1245,13 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 						color1 *= INV_255;
 						color1 = DTRRender_SRGB1ToLinearSpaceV4(color1);
 						finalColor *= color1;
+
+						DQN_ASSERT(finalColor.x >= 0);
 					}
 
 					SetPixel(renderBuffer, bufferX, bufferY, finalColor, ColorSpace_Linear);
+
+					int breakhere = 5;
 				}
 				DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 			}
@@ -1306,7 +1355,7 @@ FILE_SCOPE void TexturedTriangleInternal(DTRRenderBuffer *const renderBuffer,
 	////////////////////////////////////////////////////////////////////////////
 	// SIMD/Slow Path
 	////////////////////////////////////////////////////////////////////////////
-	if (globalDTRPlatformFlags.canUseSSE2)
+	if (globalDTRPlatformFlags.canUseSSE2 && 0)
 	{
 		SIMDTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, lightIntensity1, lightIntensity2,
 		             lightIntensity3, ignoreLight, texture, color, min, max);
