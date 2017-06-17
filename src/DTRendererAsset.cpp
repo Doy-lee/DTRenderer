@@ -196,15 +196,25 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return false; // TODO(doyle): Logging
 
-	bool result                    = false;
-	DqnTempMemStack tmpAssetRegion = DqnMemStack_BeginTempRegion(memStack);
-	u8 *rawBytes                   = (u8 *)DqnMemStack_Push(memStack, file.size);
-	size_t bytesRead               = api.FileRead(&file, rawBytes, file.size);
-	size_t fileSize                = file.size;
+	WavefModel dummy_ = {};
+	WavefModel *obj   = &dummy_;
 
 	DqnMemAPI memAPI   = {};
 	memAPI.callback    = DumbDynamicArrayMemAPICallback;
 	memAPI.userContext = memStack;
+
+	bool result = false;
+	DqnMemStackTempRegion tmpAssetRegion;
+	if (!DqnMemStackTempRegion_Begin(&tmpAssetRegion, memStack))
+	{
+		// TODO(doyle): Logging
+		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		goto cleanup;
+	}
+
+	u8 *rawBytes                         = (u8 *)DqnMemStack_Push(memStack, file.size);
+	size_t bytesRead                     = api.FileRead(&file, rawBytes, file.size);
+	size_t fileSize                      = file.size;
 
 	enum WavefVertexType {
 		WavefVertexType_Invalid,
@@ -230,9 +240,6 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 	// to a new memstack block such that all the data is compacted together in
 	// memory for locality. Then just throw away the intermediate
 	// representation.
-	WavefModel dummy_ = {};
-	WavefModel *obj   = &dummy_;
-
 	if (bytesRead != file.size)       goto cleanup;
 	if (!WavefModelInit(obj, memAPI)) goto cleanup;
 
@@ -586,7 +593,7 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 		DQN_ASSERT(DQN_INVALID_CODE_PATH);
 	}
 
-	DqnMemStack_EndTempRegion(tmpAssetRegion);
+	DqnMemStackTempRegion_End(tmpAssetRegion);
 	if (modelBlock)
 	{
 		result = true;
@@ -599,7 +606,7 @@ bool DTRAsset_LoadWavefrontObj(const PlatformAPI api, DqnMemStack *const memStac
 
 cleanup:
 	api.FileClose(&file);
-	if(!result) DqnMemStack_EndTempRegion(tmpAssetRegion);
+	if(!result) DqnMemStackTempRegion_End(tmpAssetRegion);
 
 	return result;
 }
@@ -623,13 +630,20 @@ bool DTRAsset_LoadFontToBitmap(const PlatformAPI api, DqnMemStack *const memStac
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return false; // TODO(doyle): Logging
 
-	bool result = false;
-	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(tmpMemStack);
-	u8 *rawBytes                 = (u8 *)DqnMemStack_Push(tmpMemStack, file.size);
-	size_t bytesRead             = api.FileRead(&file, rawBytes, file.size);
-
 	stbtt_fontinfo fontInfo            = {};
 	stbtt_pack_context fontPackContext = {};
+
+	bool result       = false;
+	auto tmpMemRegion = DqnMemStackTempRegionScoped(tmpMemStack);
+	if (!tmpMemRegion.isInit)
+	{
+		// TODO(doyle): Logging
+		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		goto cleanup;
+	}
+
+	u8 *rawBytes                 = (u8 *)DqnMemStack_Push(tmpMemStack, file.size);
+	size_t bytesRead             = api.FileRead(&file, rawBytes, file.size);
 
 	if (bytesRead != file.size || stbtt_InitFont(&fontInfo, rawBytes, 0) == 0)
 	{
@@ -692,7 +706,6 @@ bool DTRAsset_LoadFontToBitmap(const PlatformAPI api, DqnMemStack *const memStac
 	*font = loadedFont;
 
 cleanup:
-	DqnMemStack_EndTempRegion(tmpMemRegion);
 	api.FileClose(&file);
 
 	return result;
@@ -753,9 +766,16 @@ bool DTRAsset_LoadBitmap(const PlatformAPI api, DqnMemStack *const memStack,
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return result;
 
-	DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(tempStack);
-	u8 *const rawData            = (u8 *)DqnMemStack_Push     (tempStack, file.size);
-	size_t bytesRead             = api.FileRead               (&file, rawData, file.size);
+	auto tmpMemRegion = DqnMemStackTempRegionScoped(tempStack);
+	if (!tmpMemRegion.isInit)
+	{
+		// TODO(doyle): Logging
+		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		goto cleanup;
+	}
+
+	u8 *const rawData = (u8 *)DqnMemStack_Push(tempStack, file.size);
+	size_t bytesRead  = api.FileRead(&file, rawData, file.size);
 
 	if (bytesRead != file.size) goto cleanup;
 
@@ -830,7 +850,6 @@ bool DTRAsset_LoadBitmap(const PlatformAPI api, DqnMemStack *const memStack,
 
 cleanup:
 	globalSTBImageAllocator = NULL;
-	DqnMemStack_EndTempRegion(tmpMemRegion);
 	api.FileClose(&file);
 
 	return result;

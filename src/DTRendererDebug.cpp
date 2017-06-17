@@ -77,31 +77,31 @@ void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *cons
 			}
 		}
 
-		DqnTempMemStack tmpMemRegion = DqnMemStack_BeginTempRegion(tempStack);
-
-		size_t bufSize = DQN_MEGABYTE(16);
-		char *bufString = (char *)DqnMemStack_Push(tempStack, bufSize);
-		char *bufPtr    = bufString;
-		for (i32 i = 0; i < renderBuffer->width * renderBuffer->height; i++)
+		auto memRegion = DqnMemStackTempRegionScoped(tempStack);
+		if (memRegion.isInit)
 		{
-
-			f32 zValue = renderBuffer->zBuffer[i];
-			if (zValue == DQN_F32_MIN) continue;
-			i32 chWritten = Dqn_sprintf(bufPtr, "index %06d: %05.5f\n", i, zValue);
-			if ((bufPtr + chWritten) > (bufString + bufSize))
+			size_t bufSize  = DQN_MEGABYTE(16);
+			char *bufString = (char *)DqnMemStack_Push(tempStack, bufSize);
+			char *bufPtr    = bufString;
+			for (i32 i = 0; i < renderBuffer->width * renderBuffer->height; i++)
 			{
-				size_t bufPtrAddr    = (size_t)(bufPtr + chWritten);
-				size_t bufStringAddr = (size_t)(bufString + bufSize);
-				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+
+				f32 zValue = renderBuffer->zBuffer[i];
+				if (zValue == DQN_F32_MIN) continue;
+				i32 chWritten = Dqn_sprintf(bufPtr, "index %06d: %05.5f\n", i, zValue);
+				if ((bufPtr + chWritten) > (bufString + bufSize))
+				{
+					size_t bufPtrAddr    = (size_t)(bufPtr + chWritten);
+					size_t bufStringAddr = (size_t)(bufString + bufSize);
+					DQN_ASSERT(DQN_INVALID_CODE_PATH);
+				}
+				bufPtr += chWritten;
 			}
-			bufPtr += chWritten;
+
+			size_t writeSize    = (size_t)bufPtr - (size_t)bufString;
+			size_t bytesWritten = api->FileWrite(&file, (u8 *)bufString, writeSize);
+			api->FileClose(&file);
 		}
-
-		size_t writeSize    = (size_t)bufPtr - (size_t)bufString;
-		size_t bytesWritten = api->FileWrite(&file, (u8 *)bufString, writeSize);
-		api->FileClose(&file);
-
-		DqnMemStack_EndTempRegion(tmpMemRegion);
 	}
 }
 

@@ -441,6 +441,18 @@ i32 Win32GetModuleDirectory(char *const buf, const u32 bufLen)
 	return lastSlashIndex;
 }
 
+typedef struct ThreadJob
+{
+	int numberToPrint;
+} ThreadJob;
+
+typedef struct ThreadJobQueue {
+	ThreadJob *queue;
+	int        queueSize;
+} ThreadJobQueue;
+
+FILE_SCOPE ThreadJobQueue jobQueue[16];
+
 DWORD WINAPI Win32ThreadCallback(void *lpParameter)
 {
 	OutputDebugString("Threaded Hello World!\n");
@@ -571,12 +583,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	// Threading
 	{
-		const i32 USE_DEFAULT_STACK_SIZE = 0;
-		void *threadParam                = NULL;
-		DWORD threadId;
-
-		HANDLE threadHandle = CreateThread(NULL, USE_DEFAULT_STACK_SIZE, Win32ThreadCallback,
-		                                   threadParam, 0, &threadId);
+		DqnMemStackTempRegion memRegion;
+		if (!DqnMemStackTempRegion_Begin(&memRegion, &globalPlatformMemory.tempStack))
+		{
+			DQN_WIN32_ERROR_BOX("DqnMemStackTempRegion_Begin() failed", NULL);
+			DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		}
 
 		////////////////////////////////////////////////////////////////////////
 		// Query CPU Cores
@@ -637,8 +649,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 			DQN_WIN32_ERROR_BOX("DqnMemStack_Push() failed", NULL);
 		}
 
-		DqnMemStack_Pop(&globalPlatformMemory.tempStack, rawProcInfoArray,
-		                logicalProcInfoRequiredSize);
+		////////////////////////////////////////////////////////////////////////
+		// Threading
+		////////////////////////////////////////////////////////////////////////
+		const i32 USE_DEFAULT_STACK_SIZE = 0;
+		void *threadParam                = NULL;
+		DWORD threadId;
+
+		HANDLE threadHandle = CreateThread(NULL, USE_DEFAULT_STACK_SIZE, Win32ThreadCallback,
+		                                   threadParam, 0, &threadId);
+
+		DqnMemStackTempRegion_End(memRegion);
 	}
 
 	////////////////////////////////////////////////////////////////////////////
