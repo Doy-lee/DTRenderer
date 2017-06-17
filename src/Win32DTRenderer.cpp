@@ -441,9 +441,15 @@ i32 Win32GetModuleDirectory(char *const buf, const u32 bufLen)
 	return lastSlashIndex;
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-                    LPWSTR lpCmdLine, int nShowCmd)
+DWORD WINAPI Win32ThreadCallback(void *lpParameter)
 {
+	OutputDebugString("Threaded Hello World!\n");
+	return 0;
+}
+
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
+{
+
 	////////////////////////////////////////////////////////////////////////////
 	// Initialise Win32 Window
 	////////////////////////////////////////////////////////////////////////////
@@ -562,6 +568,78 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	platformInput.api               = platformAPI;
 	platformInput.flags.canUseSSE2  = IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE);
 	platformInput.flags.canUseRdtsc = IsProcessorFeaturePresent(PF_RDTSC_INSTRUCTION_AVAILABLE);
+
+	// Threading
+	{
+		const i32 USE_DEFAULT_STACK_SIZE = 0;
+		void *threadParam                = NULL;
+		DWORD threadId;
+
+		HANDLE threadHandle = CreateThread(NULL, USE_DEFAULT_STACK_SIZE, Win32ThreadCallback,
+		                                   threadParam, 0, &threadId);
+
+		////////////////////////////////////////////////////////////////////////
+		// Query CPU Cores
+		////////////////////////////////////////////////////////////////////////
+		i32 numCores        = 1;
+		i32 numLogicalCores = 0;
+
+		SYSTEM_INFO systemInfo;
+		GetNativeSystemInfo(&systemInfo);
+		DqnWin32_OutputDebugString("Number of Logical Processors: %d\n",
+		                           systemInfo.dwNumberOfProcessors);
+		numLogicalCores = systemInfo.dwNumberOfProcessors;
+
+		DWORD logicalProcInfoRequiredSize = 0;
+		u8 insufficientBuffer             = {};
+		GetLogicalProcessorInformationEx(
+		    RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)insufficientBuffer,
+		    &logicalProcInfoRequiredSize);
+
+		u8 *rawProcInfoArray =
+		    (u8 *)DqnMemStack_Push(&globalPlatformMemory.tempStack, logicalProcInfoRequiredSize);
+
+		if (rawProcInfoArray)
+		{
+			if (GetLogicalProcessorInformationEx(
+			        RelationProcessorCore,
+			        (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)rawProcInfoArray,
+			        &logicalProcInfoRequiredSize))
+			{
+				SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *logicalProcInfo =
+				    (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)rawProcInfoArray;
+				DWORD bytesRead = 0;
+
+				do
+				{
+					// NOTE: High efficiency value has greater performance and less efficiency.
+					PROCESSOR_RELATIONSHIP *procInfo = &logicalProcInfo->Processor;
+					u32 efficiency                   = procInfo->EfficiencyClass;
+					DqnWin32_OutputDebugString("Core %d: Efficiency: %d\n", numCores++, efficiency);
+
+					DQN_ASSERT(logicalProcInfo->Relationship == RelationProcessorCore);
+					DQN_ASSERT(procInfo->GroupCount == 1);
+
+					bytesRead += logicalProcInfo->Size;
+					logicalProcInfo =
+					    (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((u8 *)logicalProcInfo +
+					                                                logicalProcInfo->Size);
+
+				} while (bytesRead < logicalProcInfoRequiredSize);
+			}
+			else
+			{
+				DqnWin32_DisplayLastError("GetLogicalProcessorInformationEx() failed");
+			}
+		}
+		else
+		{
+			DQN_WIN32_ERROR_BOX("DqnMemStack_Push() failed", NULL);
+		}
+
+		DqnMemStack_Pop(&globalPlatformMemory.tempStack, rawProcInfoArray,
+		                logicalProcInfoRequiredSize);
+	}
 
 	////////////////////////////////////////////////////////////////////////////
 	// Update Loop

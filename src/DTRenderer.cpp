@@ -997,7 +997,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 		}
 
-		if (1)
+		if (0)
 		{
 			LOCAL_PERSIST bool runTinyRendererOnce = false;
 			if (1 && runTinyRendererOnce)

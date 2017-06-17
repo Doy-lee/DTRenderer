@@ -796,6 +796,8 @@ DQN_FILE_SCOPE void DqnWin32_GetClientDim    (const HWND window, LONG *width, LO
 DQN_FILE_SCOPE void DqnWin32_GetRectDim      (RECT rect, LONG *width, LONG *height);
 DQN_FILE_SCOPE void DqnWin32_DisplayLastError(const char *const errorPrefix);
 DQN_FILE_SCOPE void DqnWin32_DisplayErrorCode(const DWORD error, const char *const errorPrefix);
+DQN_FILE_SCOPE void DqnWin32_OutputDebugString(const char *const formatStr, ...);
+
 #endif /* DQN_WIN32_IMPLEMENTATION */
 
 
@@ -3269,6 +3271,21 @@ DQN_FILE_SCOPE void DqnWin32_DisplayErrorCode(const DWORD error, const char *con
 	char formattedError[2048] = {};
 	Dqn_sprintf(formattedError, "%s: %s", errorPrefix, errorMsg);
 	DQN_WIN32_ERROR_BOX(formattedError, NULL);
+}
+
+DQN_FILE_SCOPE void DqnWin32_OutputDebugString(const char *const formatStr, ...)
+{
+	LOCAL_PERSIST char str[1024] = {};
+
+	va_list argList;
+	va_start(argList, formatStr);
+	{
+		i32 numCopied = Dqn_vsprintf(str, formatStr, argList);
+		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(str));
+	}
+	va_end(argList);
+
+	OutputDebugString(str);
 }
 #endif // DQN_WIN32_PLATFROM
 
