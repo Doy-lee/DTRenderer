@@ -1686,9 +1686,10 @@ DQN_FILE_SCOPE void DqnMemStackTempRegion_End(DqnMemStackTempRegion region)
 	{
 		DQN_ASSERT(stack->block->used >= region.used);
 		stack->block->used = region.used;
-		DQN_ASSERT(stack->tempRegionCount >= 0);
 	}
+
 	stack->tempRegionCount--;
+	DQN_ASSERT(stack->tempRegionCount >= 0);
 }
 
 #ifdef DQN_CPP_MODE
@@ -3321,7 +3322,7 @@ DQN_FILE_SCOPE void DqnWin32_DisplayErrorCode(const DWORD error, const char *con
 
 DQN_FILE_SCOPE void DqnWin32_OutputDebugString(const char *const formatStr, ...)
 {
-	LOCAL_PERSIST char str[1024] = {0};
+	char str[1024] = {0};
 
 	va_list argList;
 	va_start(argList, formatStr);
