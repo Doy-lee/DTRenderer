@@ -88,10 +88,10 @@ typedef struct DTRDebugCycles
 
 typedef struct DTRDebug
 {
-	struct DTRFont         *font;
-	struct DTRRenderBuffer *renderBuffer;
-	struct PlatformInput   *input;
-	DqnMemStack             memStack;
+	struct DTRFont          *font;
+	struct DTRRenderContext *renderContext;
+	struct PlatformInput    *input;
+	DqnMemStack              memStack;
 
 	DqnV4 displayColor;
 	DqnV2 displayP;

@@ -121,9 +121,10 @@ inline DqnV4 DTRRender_PreMultiplyAlphaSRGB1WithLinearConversion(DqnV4 color)
 }
 
 // IMPORTANT(doyle): Color is expected to be premultiplied already
-FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x, const i32 y,
+FILE_SCOPE inline void SetPixel(DTRRenderContext context, const i32 x, const i32 y,
                                 DqnV4 color, const enum ColorSpace colorSpace = ColorSpace_SRGB)
 {
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 	if (!renderBuffer) return;
 	if (x < 0 || x > (renderBuffer->width - 1)) return;
 	if (y < 0 || y > (renderBuffer->height - 1)) return;
@@ -189,13 +190,16 @@ FILE_SCOPE inline void SetPixel(DTRRenderBuffer *const renderBuffer, const i32 x
 	DTRDebug_CounterIncrement(DTRDebugCounter_SetPixels);
 }
 
-void DTRRender_Text(DTRRenderBuffer *const renderBuffer,
+void DTRRender_Text(DTRRenderContext context,
                     const DTRFont font, DqnV2 pos, const char *const text,
                     DqnV4 color, i32 len)
 {
 	if (!text) return;
+
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 	if (!font.bitmap || !font.atlas || !renderBuffer) return;
 	DTR_DEBUG_EP_TIMED_FUNCTION();
+
 
 	if (len == -1) len = Dqn_strlen(text);
 
@@ -262,7 +266,7 @@ void DTRRender_Text(DTRRenderBuffer *const renderBuffer,
 
 				i32 actualX = (i32)(screenRect.min.x + x);
 				i32 actualY = (i32)(screenRect.min.y + y - fontHeightOffset);
-				SetPixel(renderBuffer, actualX, actualY, resultColor, ColorSpace_Linear);
+				SetPixel(context, actualX, actualY, resultColor, ColorSpace_Linear);
 			}
 		}
 	}
@@ -287,9 +291,10 @@ FILE_SCOPE void TransformPoints(const DqnV2 origin, DqnV2 *const pList,
 	}
 }
 
-void DTRRender_Line(DTRRenderBuffer *const renderBuffer, DqnV2i a,
+void DTRRender_Line(DTRRenderContext context, DqnV2i a,
                     DqnV2i b, DqnV4 color)
 {
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 	if (!renderBuffer) return;
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 
@@ -339,7 +344,7 @@ void DTRRender_Line(DTRRenderBuffer *const renderBuffer, DqnV2i a,
 	for (i32 iterateX = 0; iterateX < numIterations; iterateX++)
 	{
 		newX = a.x + iterateX;
-		SetPixel(renderBuffer, *plotX, *plotY, color, ColorSpace_Linear);
+		SetPixel(context, *plotX, *plotY, color, ColorSpace_Linear);
 
 		distAccumulator += distFromPixelOrigin;
    		if (distAccumulator > run)
@@ -407,10 +412,13 @@ FILE_SCOPE DqnRect GetBoundingBox(const DqnV2 *const pList, const i32 numP)
 	return result;
 }
 
-void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 max,
+void DTRRender_Rectangle(DTRRenderContext context, DqnV2 min, DqnV2 max,
                          DqnV4 color, const DTRRenderTransform transform)
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
+	if (!renderBuffer) return;
+
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes
 	////////////////////////////////////////////////////////////////////////////
@@ -461,7 +469,7 @@ void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 m
 					}
 				}
 
-				if (pIsInside) SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
+				if (pIsInside) SetPixel(context, bufferX, bufferY, color, ColorSpace_Linear);
 			}
 		}
 	}
@@ -473,7 +481,7 @@ void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 m
 			for (i32 x = 0; x < clippedSize.w; x++)
 			{
 				i32 bufferX = (i32)clippedRect.min.x + x;
-				SetPixel(renderBuffer, bufferX, bufferY, color, ColorSpace_Linear);
+				SetPixel(context, bufferX, bufferY, color, ColorSpace_Linear);
 			}
 		}
 	}
@@ -485,20 +493,20 @@ void DTRRender_Rectangle(DTRRenderBuffer *const renderBuffer, DqnV2 min, DqnV2 m
 	{
 		// Draw Bounding box
 		{
-			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, min.y), DqnV2i_2f(min.x, max.y), color);
-			DTRRender_Line(renderBuffer, DqnV2i_2f(min.x, max.y), DqnV2i_2f(max.x, max.y), color);
-			DTRRender_Line(renderBuffer, DqnV2i_2f(max.x, max.y), DqnV2i_2f(max.x, min.y), color);
-			DTRRender_Line(renderBuffer, DqnV2i_2f(max.x, min.y), DqnV2i_2f(min.x, min.y), color);
+			DTRRender_Line(context, DqnV2i_2f(min.x, min.y), DqnV2i_2f(min.x, max.y), color);
+			DTRRender_Line(context, DqnV2i_2f(min.x, max.y), DqnV2i_2f(max.x, max.y), color);
+			DTRRender_Line(context, DqnV2i_2f(max.x, max.y), DqnV2i_2f(max.x, min.y), color);
+			DTRRender_Line(context, DqnV2i_2f(max.x, min.y), DqnV2i_2f(min.x, min.y), color);
 		}
 
 		// Draw rotating outline
 		if (transform.rotation > 0)
 		{
 			DqnV4 green = DqnV4_4f(0, 1, 0, 1);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[0]), DqnV2i_V2(pList[1]), green);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[1]), DqnV2i_V2(pList[2]), green);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[2]), DqnV2i_V2(pList[3]), green);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(pList[3]), DqnV2i_V2(pList[0]), green);
+			DTRRender_Line(context, DqnV2i_V2(pList[0]), DqnV2i_V2(pList[1]), green);
+			DTRRender_Line(context, DqnV2i_V2(pList[1]), DqnV2i_V2(pList[2]), green);
+			DTRRender_Line(context, DqnV2i_V2(pList[2]), DqnV2i_V2(pList[3]), green);
+			DTRRender_Line(context, DqnV2i_V2(pList[3]), DqnV2i_V2(pList[0]), green);
 		}
 
 	}
@@ -609,10 +617,12 @@ FILE_SCOPE inline DqnV2 Get2DOriginFromTransformAnchor(const DqnV2 p1, const Dqn
 }
 
 // color: _mm_set_ps(a, b, g, r) ie. 0=r, 1=g, 2=b, 3=a
-FILE_SCOPE inline void SIMDSetPixel(DTRRenderBuffer *const renderBuffer, const i32 x, const i32 y,
+FILE_SCOPE inline void SIMDSetPixel(DTRRenderContext context, const i32 x, const i32 y,
                                      __m128 color,
                                      const enum ColorSpace colorSpace = ColorSpace_SRGB)
 {
+
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 	if (!renderBuffer) return;
 	if (x < 0 || x > (renderBuffer->width - 1)) return;
 	if (y < 0 || y > (renderBuffer->height - 1)) return;
@@ -631,6 +641,7 @@ FILE_SCOPE inline void SIMDSetPixel(DTRRenderBuffer *const renderBuffer, const i
 	if (needGammaFix) color = SIMDSRGB1ToLinearSpace(color);
 
 	// Format: u32 == (XX, RR, GG, BB)
+	context.api->LockAcquire(renderBuffer->blitLock);
 	u32 srcPixel = bitmapPtr[x + (y * pitchInU32)];
 	__m128 src = _mm_set_ps(0,
 	                        (f32)((srcPixel >> 0) & 0xFF),
@@ -658,6 +669,7 @@ FILE_SCOPE inline void SIMDSetPixel(DTRRenderBuffer *const renderBuffer, const i
 	             (u32)(destG) << 8 |
 	             (u32)(destB) << 0;
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
+	context.api->LockRelease(renderBuffer->blitLock);
 
 	DTRDebug_CounterIncrement(DTRDebugCounter_SetPixels);
 }
@@ -708,7 +720,7 @@ FILE_SCOPE __m128 SIMDSampleTextureForTriangle(const DTRBitmap *const texture, c
 // IMPORTANT: Debug Markers can _NOT_ be used in primitive rendering functions,
 // ie. any render function that is used in this call because it'll call into
 // itself infinitely.
-FILE_SCOPE void DebugRenderMarkers(DTRRenderBuffer *const renderBuffer, const DqnV2 *const pList,
+FILE_SCOPE void DebugRenderMarkers(DTRRenderContext context, const DqnV2 *const pList,
                                    const i32 pListSize, const DTRRenderTransform transform,
                                    bool drawBoundingBox, bool drawBasis, bool drawVertexMarkers)
 {
@@ -725,10 +737,10 @@ FILE_SCOPE void DebugRenderMarkers(DTRRenderBuffer *const renderBuffer, const Dq
 	{
 		DqnRect bounds = GetBoundingBox(pList, pListSize);
 
-		DTRRender_Line(renderBuffer, DqnV2i_2f(bounds.min.x, bounds.min.y), DqnV2i_2f(bounds.min.x, bounds.max.y), red);
-		DTRRender_Line(renderBuffer, DqnV2i_2f(bounds.min.x, bounds.max.y), DqnV2i_2f(bounds.max.x, bounds.max.y), red);
-		DTRRender_Line(renderBuffer, DqnV2i_2f(bounds.max.x, bounds.max.y), DqnV2i_2f(bounds.max.x, bounds.min.y), red);
-		DTRRender_Line(renderBuffer, DqnV2i_2f(bounds.max.x, bounds.min.y), DqnV2i_2f(bounds.min.x, bounds.min.y), red);
+		DTRRender_Line(context, DqnV2i_2f(bounds.min.x, bounds.min.y), DqnV2i_2f(bounds.min.x, bounds.max.y), red);
+		DTRRender_Line(context, DqnV2i_2f(bounds.min.x, bounds.max.y), DqnV2i_2f(bounds.max.x, bounds.max.y), red);
+		DTRRender_Line(context, DqnV2i_2f(bounds.max.x, bounds.max.y), DqnV2i_2f(bounds.max.x, bounds.min.y), red);
+		DTRRender_Line(context, DqnV2i_2f(bounds.max.x, bounds.min.y), DqnV2i_2f(bounds.min.x, bounds.min.y), red);
 	}
 
 	// Draw Coordinate Basis
@@ -743,9 +755,9 @@ FILE_SCOPE void DebugRenderMarkers(DTRRenderBuffer *const renderBuffer, const Dq
 			DqnV2 yAxis         = DqnV2_2f(-xAxis.y, xAxis.x) * transform.scale.y;
 			DqnV4 coordSysColor = DqnV4_4f(0, 1, 1, 1);
 			i32 axisLen         = 50;
-			DTRRender_Line(renderBuffer, DqnV2i_V2(origin),
+			DTRRender_Line(context, DqnV2i_V2(origin),
 			               DqnV2i_V2(origin) + DqnV2i_V2(xAxis * axisLen), coordSysColor);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(origin),
+			DTRRender_Line(context, DqnV2i_V2(origin),
 			               DqnV2i_V2(origin) + DqnV2i_V2(yAxis * axisLen), coordSysColor);
 		}
 	}
@@ -757,9 +769,38 @@ FILE_SCOPE void DebugRenderMarkers(DTRRenderBuffer *const renderBuffer, const Dq
 		for (i32 i = 0; i < pListSize; i++)
 		{
 			DqnV2 p = pList[i];
-			DTRRender_Rectangle(renderBuffer, p - DqnV2_1f(5), p + DqnV2_1f(5), colorList[i]);
+			DTRRender_Rectangle(context, p - DqnV2_1f(5), p + DqnV2_1f(5), colorList[i]);
 		}
 	}
+}
+
+FILE_SCOPE inline f32 GetCurrZDepth(DTRRenderContext context, i32 posX, i32 posY)
+{
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
+	DQN_ASSERT(renderBuffer);
+	const u32 zBufferPitch        = renderBuffer->width;
+
+	i32 zBufferIndex = posX + (posY * zBufferPitch);
+	DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
+
+	context.api->LockAcquire(renderBuffer->zDepthLock);
+	f32 currZDepth = renderBuffer->zBuffer[zBufferIndex];
+	context.api->LockRelease(renderBuffer->zDepthLock);
+	return currZDepth;
+}
+
+FILE_SCOPE inline void SetCurrZDepth(DTRRenderContext context, i32 posX, i32 posY, f32 newZDepth)
+{
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
+	DQN_ASSERT(renderBuffer);
+	const u32 zBufferPitch        = renderBuffer->width;
+
+	i32 zBufferIndex = posX + (posY * zBufferPitch);
+	DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
+
+	context.api->LockAcquire(renderBuffer->zDepthLock);
+	renderBuffer->zBuffer[zBufferIndex] = newZDepth;
+	context.api->LockRelease(renderBuffer->zDepthLock);
 }
 
 #define DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(type)                                             \
@@ -780,7 +821,7 @@ FILE_SCOPE void DebugRenderMarkers(DTRRenderBuffer *const renderBuffer, const Dq
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMD##type);                                 \
 	} while (0)
 
-FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderBuffer *const renderBuffer,
+FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderContext context,
                                            const DTRBitmap *const texture, const i32 posX,
                                            const i32 posY, const i32 maxX, const DqnV2 uv1,
                                            const DqnV2 uv2SubUv1, const DqnV2 uv3SubUv1,
@@ -790,7 +831,8 @@ FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderBuffer *const renderBuffer,
 {
 	const __m128 ZERO_4X      = _mm_set_ps1(0.0f);
 	const u32 IS_GREATER_MASK = 0xF;
-	const u32 zBufferPitch    = renderBuffer->width;
+
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 
 	// TODO(doyle): Copy lighting work over. But not important since using this
 	// function causes performance problems.
@@ -806,13 +848,12 @@ FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderBuffer *const renderBuffer,
 			__m128 barycentric  = _mm_mul_ps(signedArea, invSignedAreaParallelogram_4x);
 			__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
-			i32 zBufferIndex = posX + (posY * zBufferPitch);
-			f32 pixelZValue =
+			f32 pixelZDepth =
 			    ((f32 *)&barycentricZ)[0] + ((f32 *)&barycentricZ)[1] + ((f32 *)&barycentricZ)[2];
-			f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
-			if (pixelZValue > currZValue)
+			f32 currZDepth = GetCurrZDepth(context, posX, posY);
+			if (pixelZDepth > currZDepth)
 			{
-				renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+				SetCurrZDepth(context, posX, posY, pixelZDepth);
 
 				__m128 finalColor = simdColor;
 				if (texture)
@@ -821,25 +862,27 @@ FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderBuffer *const renderBuffer,
 					                                                      uv3SubUv1, barycentric);
 					finalColor = _mm_mul_ps(texSampledColor, simdColor);
 				}
-				SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
+				SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 			}
 			DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 		}
 	}
 }
 
-FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1, const DqnV3 p2,
-                             const DqnV3 p3, const DqnV2 uv1, const DqnV2 uv2, const DqnV2 uv3,
-                             const f32 lightIntensity1, const f32 lightIntensity2,
-                             const f32 lightIntensity3, const bool ignoreLight,
-                             DTRBitmap *const texture, DqnV4 color, const DqnV2i min,
-                             const DqnV2i max)
+FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
+                             const DqnV3 p1, const DqnV3 p2, const DqnV3 p3, const DqnV2 uv1,
+                             const DqnV2 uv2, const DqnV2 uv3, const f32 lightIntensity1,
+                             const f32 lightIntensity2, const f32 lightIntensity3,
+                             const bool ignoreLight, DTRBitmap *const texture, DqnV4 color,
+                             const DqnV2i min, const DqnV2i max)
 
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 	DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle);
 
 	DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble);
+
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 	////////////////////////////////////////////////////////////////////////////
 	// Convert color
 	////////////////////////////////////////////////////////////////////////////
@@ -956,20 +999,33 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 					__m128 barycentric  = _mm_mul_ps(checkArea, invSignedAreaParallelogram_4x);
 					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
-					i32 zBufferIndex = posX + (posY * zBufferPitch);
-					f32 pixelZValue  = ((f32 *)&barycentricZ)[0] +
+					f32 pixelZDepth  = ((f32 *)&barycentricZ)[0] +
 					                   ((f32 *)&barycentricZ)[1] +
 					                   ((f32 *)&barycentricZ)[2];
-					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
-					if (pixelZValue > currZValue)
+
+#if 0
+					// f32 currZDepth = GetCurrZDepth(context, posX, posY);
+#else
+					DQN_ASSERT(renderBuffer);
+					i32 zBufferIndex = posX + (posY * zBufferPitch);
+
+					context.api->LockAcquire(renderBuffer->zDepthLock);
+					f32 currZDepth = renderBuffer->zBuffer[zBufferIndex];
+					context.api->LockRelease(renderBuffer->zDepthLock);
+#endif
+					if (pixelZDepth > currZDepth)
 					{
-						// renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-						__m128 finalColor                   = simdColor;
+
+						context.api->LockAcquire(renderBuffer->zDepthLock);
+						renderBuffer->zBuffer[zBufferIndex] = pixelZDepth;
+						context.api->LockRelease(renderBuffer->zDepthLock);
+
+						__m128 finalColor = simdColor;
 						if (!ignoreLight)
 						{
-							__m128 barycentricA_4x   = _mm_set_ps1(((f32 *)&barycentric)[0]);
-							__m128 barycentricB_4x   = _mm_set_ps1(((f32 *)&barycentric)[1]);
-							__m128 barycentricC_4x   = _mm_set_ps1(((f32 *)&barycentric)[2]);
+							__m128 barycentricA_4x = _mm_set_ps1(((f32 *)&barycentric)[0]);
+							__m128 barycentricB_4x = _mm_set_ps1(((f32 *)&barycentric)[1]);
+							__m128 barycentricC_4x = _mm_set_ps1(((f32 *)&barycentric)[2]);
 
 							__m128 barycentricLight1 = _mm_mul_ps(p1Light, barycentricA_4x);
 							__m128 barycentricLight2 = _mm_mul_ps(p2Light, barycentricB_4x);
@@ -988,7 +1044,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
 							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
 						}
-						// SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
+						SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 					}
 					DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 				}
@@ -1007,16 +1063,22 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 					__m128 barycentric  = _mm_mul_ps(checkArea, invSignedAreaParallelogram_4x);
 					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
-					i32 zBufferIndex = posX + (posY * zBufferPitch);
-					f32 pixelZValue  = ((f32 *)&barycentricZ)[0] +
+					f32 pixelZDepth  = ((f32 *)&barycentricZ)[0] +
 					                    ((f32 *)&barycentricZ)[1] +
 					                    ((f32 *)&barycentricZ)[2];
-					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
-					if (pixelZValue > currZValue)
-					{
-						// renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
-						__m128 finalColor                   = simdColor;
+					i32 zBufferIndex = posX + (posY * zBufferPitch);
 
+					context.api->LockAcquire(renderBuffer->zDepthLock);
+					f32 currZDepth = renderBuffer->zBuffer[zBufferIndex];
+					context.api->LockRelease(renderBuffer->zDepthLock);
+
+					if (pixelZDepth > currZDepth)
+					{
+						context.api->LockAcquire(renderBuffer->zDepthLock);
+						renderBuffer->zBuffer[zBufferIndex] = pixelZDepth;
+						context.api->LockRelease(renderBuffer->zDepthLock);
+
+						__m128 finalColor = simdColor;
 						if (!ignoreLight)
 						{
 							__m128 barycentricA_4x   = _mm_set_ps1(((f32 *)&barycentric)[0]);
@@ -1040,7 +1102,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
 							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
 						}
-						// SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
+						SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 					}
 				}
 				signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
@@ -1063,7 +1125,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle);
 }
 
-FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1, const DqnV3 p2,
+FILE_SCOPE void SlowTriangle(DTRRenderContext context, const DqnV3 p1, const DqnV3 p2,
                              const DqnV3 p3, const DqnV2 uv1, const DqnV2 uv2, const DqnV2 uv3,
                              const f32 lightIntensity1, const f32 lightIntensity2,
                              const f32 lightIntensity3, const bool ignoreLight,
@@ -1071,7 +1133,6 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
                              const DqnV2i max)
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
-
 #define DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(type)                                             \
 	do                                                                                             \
 	{                                                                                              \
@@ -1091,8 +1152,9 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 	} while (0)
 
 	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle);
-
 	DEBUG_SLOW_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble);
+
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 	////////////////////////////////////////////////////////////////////////////
 	// Convert Color
 	////////////////////////////////////////////////////////////////////////////
@@ -1153,14 +1215,12 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 				f32 barycentricB = signedArea2 * invSignedAreaParallelogram;
 				f32 barycentricC = signedArea3 * invSignedAreaParallelogram;
 
-				i32 zBufferIndex = bufferX + (bufferY * zBufferPitch);
-				f32 pixelZValue  = p1.z + (barycentricB * (p2SubP1.z)) + (barycentricC * (p3SubP1.z));
-				f32 currZValue   = renderBuffer->zBuffer[zBufferIndex];
-				DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
+				f32 pixelZDepth  = p1.z + (barycentricB * (p2SubP1.z)) + (barycentricC * (p3SubP1.z));
+				f32 currZDepth   = GetCurrZDepth(context, bufferX, bufferY);
 
-				if (pixelZValue > currZValue)
+				if (pixelZDepth > currZDepth)
 				{
-					renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+					SetCurrZDepth(context, bufferX, bufferY, pixelZDepth);
 					DqnV4 finalColor                    = color;
 
 					if (!ignoreLight)
@@ -1202,7 +1262,7 @@ FILE_SCOPE void SlowTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 						finalColor *= color1;
 					}
 
-					SetPixel(renderBuffer, bufferX, bufferY, finalColor, ColorSpace_Linear);
+					SetPixel(context, bufferX, bufferY, finalColor, ColorSpace_Linear);
 				}
 				DEBUG_SLOW_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 			}
@@ -1247,11 +1307,14 @@ DqnMat4 GLViewport(f32 x, f32 y, f32 width, f32 height)
 	return result;
 }
 
-FILE_SCOPE void TexturedTriangleInternal(DTRRenderBuffer *const renderBuffer,
-                                         RenderLightInternal lighting, DqnV3 p1, DqnV3 p2, DqnV3 p3,
-                                         DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
-                                         DqnV4 color, const DTRRenderTransform transform = DTRRender_DefaultTriangleTransform())
+FILE_SCOPE void
+TexturedTriangleInternal(DTRRenderContext context, RenderLightInternal lighting, DqnV3 p1, DqnV3 p2,
+                         DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3, DTRBitmap *const texture,
+                         DqnV4 color,
+                         const DTRRenderTransform transform = DTRRender_DefaultTriangleTransform())
 {
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
+
 	////////////////////////////////////////////////////////////////////////////
 	// Transform vertexes p1, p2, p3 inplace
 	////////////////////////////////////////////////////////////////////////////
@@ -1308,12 +1371,12 @@ FILE_SCOPE void TexturedTriangleInternal(DTRRenderBuffer *const renderBuffer,
 	////////////////////////////////////////////////////////////////////////////
 	if (globalDTRPlatformFlags.canUseSSE2)
 	{
-		SIMDTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, lightIntensity1, lightIntensity2,
+		SIMDTriangle(context, p1, p2, p3, uv1, uv2, uv3, lightIntensity1, lightIntensity2,
 		             lightIntensity3, ignoreLight, texture, color, min, max);
 	}
 	else
 	{
-		SlowTriangle(renderBuffer, p1, p2, p3, uv1, uv2, uv3, lightIntensity1, lightIntensity2,
+		SlowTriangle(context, p1, p2, p3, uv1, uv2, uv3, lightIntensity1, lightIntensity2,
 		             lightIntensity3, ignoreLight, texture, color, min, max);
 	}
 
@@ -1326,7 +1389,7 @@ FILE_SCOPE void TexturedTriangleInternal(DTRRenderBuffer *const renderBuffer,
 		bool drawBasis       = false;
 		bool drawVertexMarkers = false;
 
-		DebugRenderMarkers(renderBuffer, pList, DQN_ARRAY_COUNT(pList), transform, drawBoundingBox,
+		DebugRenderMarkers(context, pList, DQN_ARRAY_COUNT(pList), transform, drawBoundingBox,
 		                   drawBasis, drawVertexMarkers);
 	}
 }
@@ -1337,20 +1400,20 @@ FILE_SCOPE RenderLightInternal NullRenderLightInternal()
 	return result;
 }
 
-void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer,
+void DTRRender_TexturedTriangle(DTRRenderContext context,
                                 DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV2 uv1, DqnV2 uv2, DqnV2 uv3,
                                 DTRBitmap *const texture, DqnV4 color,
                                 const DTRRenderTransform transform)
 {
-	TexturedTriangleInternal(renderBuffer, NullRenderLightInternal(), p1, p2, p3, uv1, uv2, uv3, texture,
+	TexturedTriangleInternal(context, NullRenderLightInternal(), p1, p2, p3, uv1, uv2, uv3, texture,
 	                         color, transform);
 }
 
 typedef struct RenderMeshJob
 {
-	DTRRenderBuffer     *renderBuffer;
-	DTRBitmap           *tex;
-	RenderLightInternal  lighting;
+	DTRRenderContext context;
+	DTRBitmap *tex;
+	RenderLightInternal lighting;
 
 	DqnV3 v1;
 	DqnV3 v2;
@@ -1371,15 +1434,18 @@ void MultiThreadedRenderMesh(struct PlatformJobQueue *const queue, void *const u
 
 	RenderMeshJob *job = (RenderMeshJob *)userData;
 #if 1
-	TexturedTriangleInternal(job->renderBuffer, job->lighting, job->v1, job->v2, job->v3, job->uv1,
+	TexturedTriangleInternal(job->context, job->lighting, job->v1, job->v2, job->v3, job->uv1,
 	                         job->uv2, job->uv3, job->tex, job->color);
 #endif
 }
 
-void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DqnMemStack *const tempStack,
-                    PlatformAPI *const api, PlatformJobQueue *const jobQueue, DTRMesh *const mesh,
+void DTRRender_Mesh(DTRRenderContext context, PlatformJobQueue *const jobQueue, DTRMesh *const mesh,
                     DTRRenderLight lighting, const DqnV3 pos, const DTRRenderTransform transform)
 {
+	DqnMemStack *tempStack        = context.tempStack;
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
+	PlatformAPI *api              = context.api;
+
 	if (!mesh || !renderBuffer || !tempStack || !api || !jobQueue) return;
 
 	DqnMat4 viewPModelViewProjection = {};
@@ -1411,6 +1477,7 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DqnMemStack *const temp
 		viewPModelViewProjection    = DqnMat4_Mul(viewport, modelViewProjection);
 	}
 
+	bool RUN_MULTITHREADED = false;
 	for (u32 i = 0; i < mesh->numFaces; i++)
 	{
 		DTRMeshFace face = mesh->faces[i];
@@ -1492,22 +1559,21 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DqnMemStack *const temp
 		lightingInternal.numNormals          = 3;
 
 		bool DEBUG_NO_TEX      = false;
-		bool RUN_MULTITHREADED = true;
 
 		if (RUN_MULTITHREADED)
 		{
 			RenderMeshJob *jobData = (RenderMeshJob *)DqnMemStack_Push(tempStack, sizeof(*jobData));
 			if (jobData)
 			{
-				jobData->v1           = v1.xyz;
-				jobData->v2           = v2.xyz;
-				jobData->v3           = v3.xyz;
-				jobData->uv1          = uv1;
-				jobData->uv2          = uv2;
-				jobData->uv3          = uv3;
-				jobData->color        = color;
-				jobData->renderBuffer = renderBuffer;
-				jobData->lighting     = lightingInternal;
+				jobData->v1       = v1.xyz;
+				jobData->v2       = v2.xyz;
+				jobData->v3       = v3.xyz;
+				jobData->uv1      = uv1;
+				jobData->uv2      = uv2;
+				jobData->uv3      = uv3;
+				jobData->color    = color;
+				jobData->lighting = lightingInternal;
+				jobData->context  = context;
 
 				if (DTR_DEBUG && DEBUG_NO_TEX)
 				{
@@ -1537,12 +1603,12 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DqnMemStack *const temp
 		{
 			if (DTR_DEBUG && DEBUG_NO_TEX)
 			{
-				TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz,
+				TexturedTriangleInternal(context, lightingInternal, v1.xyz, v2.xyz, v3.xyz,
 				                         uv1, uv2, uv3, NULL, color);
 			}
 			else
 			{
-				TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz,
+				TexturedTriangleInternal(context, lightingInternal, v1.xyz, v2.xyz, v3.xyz,
 				                         uv1, uv2, uv3, &mesh->tex, color);
 			}
 		}
@@ -1550,28 +1616,33 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DqnMemStack *const temp
 		if (DTR_DEBUG && DEBUG_WIREFRAME)
 		{
 			DqnV4 wireColor = DqnV4_4f(1.0f, 1.0f, 1.0f, 0.01f);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(v1.xy), DqnV2i_V2(v2.xy), wireColor);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(v2.xy), DqnV2i_V2(v3.xy), wireColor);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(v3.xy), DqnV2i_V2(v1.xy), wireColor);
+			DTRRender_Line(context, DqnV2i_V2(v1.xy), DqnV2i_V2(v2.xy), wireColor);
+			DTRRender_Line(context, DqnV2i_V2(v2.xy), DqnV2i_V2(v3.xy), wireColor);
+			DTRRender_Line(context, DqnV2i_V2(v3.xy), DqnV2i_V2(v1.xy), wireColor);
 		}
 	}
 
-	while (api->QueueTryExecuteNextJob(jobQueue))
-		;
+	if (RUN_MULTITHREADED)
+	{
+		while (api->QueueTryExecuteNextJob(jobQueue))
+			;
+	}
 }
 
-void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
-                        DqnV4 color, const DTRRenderTransform transform)
+void DTRRender_Triangle(DTRRenderContext context, DqnV3 p1, DqnV3 p2, DqnV3 p3, DqnV4 color,
+                        const DTRRenderTransform transform)
 {
 	const DqnV2 NO_UV       = {};
 	DTRBitmap *const NO_TEX = NULL;
-	TexturedTriangleInternal(renderBuffer, NullRenderLightInternal(), p1, p2, p3, NO_UV, NO_UV,
+	TexturedTriangleInternal(context, NullRenderLightInternal(), p1, p2, p3, NO_UV, NO_UV,
 	                         NO_UV, NO_TEX, color, transform);
 }
 
-void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitmap, DqnV2 pos,
+void DTRRender_Bitmap(DTRRenderContext context, DTRBitmap *const bitmap, DqnV2 pos,
                       const DTRRenderTransform transform, DqnV4 color)
 {
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
+
 	if (!bitmap || !bitmap->memory || !renderBuffer) return;
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 
@@ -1745,7 +1816,7 @@ void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitm
 					blend.g *= color.g;
 					blend.b *= color.b;
 
-					SetPixel(renderBuffer, bufferX, bufferY, blend, ColorSpace_Linear);
+					SetPixel(context, bufferX, bufferY, blend, ColorSpace_Linear);
 				}
 			}
 		}
@@ -1759,14 +1830,14 @@ void DTRRender_Bitmap(DTRRenderBuffer *const renderBuffer, DTRBitmap *const bitm
 		bool drawBasis         = true;
 		bool drawVertexMarkers = true;
 
-		DebugRenderMarkers(renderBuffer, pList, RECT_PLIST_SIZE, transform, drawBoundingBox,
+		DebugRenderMarkers(context, pList, RECT_PLIST_SIZE, transform, drawBoundingBox,
 		                   drawBasis, drawVertexMarkers);
 	}
 }
 
-void DTRRender_Clear(DTRRenderBuffer *const renderBuffer,
-                     DqnV3 color)
+void DTRRender_Clear(DTRRenderContext context, DqnV3 color)
 {
+	DTRRenderBuffer *renderBuffer = context.renderBuffer;
 	if (!renderBuffer) return;
 
 	DQN_ASSERT(color.r >= 0.0f && color.r <= 1.0f);

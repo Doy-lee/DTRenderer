@@ -53,6 +53,16 @@ typedef bool PlatformAPI_QueueAddJob           (PlatformJobQueue *const queue, c
 typedef bool PlatformAPI_QueueTryExecuteNextJob(PlatformJobQueue *const queue);
 
 ////////////////////////////////////////////////////////////////////////////////
+// Platform Locks
+////////////////////////////////////////////////////////////////////////////////
+typedef struct PlatformLock PlatformLock;
+
+typedef PlatformLock *PlatformAPI_LockInit   (DqnMemStack *const stack);
+typedef void          PlatformAPI_LockAcquire(PlatformLock *const lock);
+typedef void          PlatformAPI_LockRelease(PlatformLock *const lock);
+typedef void          PlatformAPI_LockDelete (PlatformLock *const lock);
+
+////////////////////////////////////////////////////////////////////////////////
 // Platform API for Game to Use
 ////////////////////////////////////////////////////////////////////////////////
 typedef struct PlatformAPI
@@ -65,6 +75,11 @@ typedef struct PlatformAPI
 
 	PlatformAPI_QueueAddJob            *QueueAddJob;
 	PlatformAPI_QueueTryExecuteNextJob *QueueTryExecuteNextJob;
+
+	PlatformAPI_LockInit    *LockInit;
+	PlatformAPI_LockAcquire *LockAcquire;
+	PlatformAPI_LockRelease *LockRelease;
+	PlatformAPI_LockDelete  *LockDelete;
 } PlatformAPI;
 
 ////////////////////////////////////////////////////////////////////////////////

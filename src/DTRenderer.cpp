@@ -11,7 +11,7 @@
 PlatformFlags globalDTRPlatformFlags;
 
 // #include <algorithm>
-void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const input,
+void CompAssignment(DTRRenderContext renderContext, PlatformInput *const input,
                     PlatformMemory *const memory)
 {
 #if 1
@@ -835,11 +835,11 @@ void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const in
 #if 1
 		char pText[32] = {};
 		Dqn_sprintf(pText, "(%1.0f, %1.0f)", origP.x, origP.y);
-		DTRRender_Text(renderBuffer, state->font,
+		DTRRender_Text(renderContext, state->font,
 		               DqnV2_2f(p.x + radius.x + 5, p.y - (state->font.sizeInPt * 0.40f)), pText,
 		               textColor);
 #endif
-		DTRRender_Rectangle(renderBuffer, p - radius, p + radius, pColor);
+		DTRRender_Rectangle(renderContext, p - radius, p + radius, pColor);
 	}
 
 	DqnV2 halfRadius = radius * 0.5f;
@@ -851,10 +851,10 @@ void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const in
 
 		char pText[32] = {};
 		Dqn_sprintf(pText, "(%1.0f, %1.0f)", origP.x, origP.y);
-		DTRRender_Text(renderBuffer, state->font,
+		DTRRender_Text(renderContext, state->font,
 		               DqnV2_2f(p.x + radius.x + 5, p.y - (state->font.sizeInPt * 0.40f)), pText,
 		               textColor);
-		DTRRender_Rectangle(renderBuffer, p - radius, p + radius, pColor);
+		DTRRender_Rectangle(renderContext, p - radius, p + radius, pColor);
 
 		if (i + 1 <= skyPIndex && i > 0)
 		{
@@ -863,7 +863,7 @@ void CompAssignment(DTRRenderBuffer *const renderBuffer, PlatformInput *const in
 
 			DqnV2 pMid     = p + halfRadius;
 			DqnV2 prevPMid = prevP + halfRadius;
-			DTRRender_Line(renderBuffer, DqnV2i_V2(prevPMid), DqnV2i_V2(pMid),
+			DTRRender_Line(renderContext, DqnV2i_V2(prevPMid), DqnV2i_V2(pMid),
 			               DqnV4_4f(255, 0, 0, 255));
 		}
 	}
@@ -895,10 +895,25 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		state = (DTRState *)memory->context;
 
 		////////////////////////////////////////////////////////////////////////
-		// Init Memory Stacks
+		// Init
 		////////////////////////////////////////////////////////////////////////
 		DqnMemStack *const assetStack = &memory->assetStack;
 		DqnMemStack *const tempStack  = &memory->tempStack;
+		state->zDepthLock             = input->api.LockInit(&memory->mainStack);
+		if (state->zDepthLock)
+		{
+			state->blitLock = input->api.LockInit(&memory->mainStack);
+			if (!state->blitLock)
+			{
+				// TODO(doyle): Not enough memory die gracefully
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+		}
+		else
+		{
+			// TODO(doyle): Not enough memory die gracefully
+			DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		}
 
 		////////////////////////////////////////////////////////////////////////
 		// Init Assets
@@ -952,6 +967,8 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		renderBuffer.height          = platformRenderBuffer->height;
 		renderBuffer.bytesPerPixel   = platformRenderBuffer->bytesPerPixel;
 		renderBuffer.memory          = (u8 *)platformRenderBuffer->memory;
+		renderBuffer.zDepthLock      = state->zDepthLock;
+		renderBuffer.blitLock        = state->blitLock;
 
 		u32 zBufferSize      = platformRenderBuffer->width * platformRenderBuffer->height;
 		renderBuffer.zBuffer = (f32 *)DqnMemStack_Push(&memory->tempStack,
@@ -959,10 +976,15 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 
 		for (u32 i = 0; i < zBufferSize; i++)
 			renderBuffer.zBuffer[i] = DQN_F32_MIN;
+
+		DTRRenderContext renderContext = {};
+		renderContext.renderBuffer     = &renderBuffer;
+		renderContext.tempStack        = &memory->tempStack;
+		renderContext.api              = &input->api;
 		////////////////////////////////////////////////////////////////////////////
 		// Update and Render
 		////////////////////////////////////////////////////////////////////////////
-		DTRRender_Clear(&renderBuffer, DqnV3_3f(0.5f, 0.0f, 1.0f));
+		DTRRender_Clear(renderContext, DqnV3_3f(0.5f, 0.0f, 1.0f));
 
 #if 1
 		DqnV4 colorRed    = DqnV4_4f(0.8f, 0, 0, 1);
@@ -991,12 +1013,12 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 				DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
 				                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 
-				DTRRender_Triangle(&renderBuffer, t0[0], t0[1], t0[2], colorRed);
-				DTRRender_Triangle(&renderBuffer, t1[0], t1[1], t1[2], colorRed);
-				DTRRender_Triangle(&renderBuffer, t3[0], t3[1], t3[2], colorRed, rotatingXform);
-				DTRRender_Triangle(&renderBuffer, t2[0], t2[1], t2[2], colorRed);
-				DTRRender_Triangle(&renderBuffer, t4[0], t4[1], t4[2], colorRed);
-				DTRRender_Triangle(&renderBuffer, t5[0], t5[1], t5[2], colorRed);
+				DTRRender_Triangle(renderContext, t0[0], t0[1], t0[2], colorRed);
+				DTRRender_Triangle(renderContext, t1[0], t1[1], t1[2], colorRed);
+				DTRRender_Triangle(renderContext, t3[0], t3[1], t3[2], colorRed, rotatingXform);
+				DTRRender_Triangle(renderContext, t2[0], t2[1], t2[2], colorRed);
+				DTRRender_Triangle(renderContext, t4[0], t4[1], t4[2], colorRed);
+				DTRRender_Triangle(renderContext, t5[0], t5[1], t5[2], colorRed);
 				DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 			}
 
@@ -1033,8 +1055,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 				lighting.vector         = LIGHT;
 				lighting.color          = DqnV4_4f(1, 1, 1, 1);
 
-				DTRRender_Mesh(&renderBuffer, &memory->tempStack, &input->api, input->jobQueue,
-				               mesh, lighting, modelP, transform);
+				DTRRender_Mesh(renderContext, input->jobQueue, mesh, lighting, modelP, transform);
 				DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderModel);
 			}
 		}
@@ -1045,7 +1066,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRRenderTransform transform = DTRRender_DefaultTransform();
 			transform.rotation           = rotation + 45;
 
-			DTRRender_Rectangle(&renderBuffer, DqnV2_1f(300.0f), DqnV2_1f(300 + 100.0f),
+			DTRRender_Rectangle(renderContext, DqnV2_1f(300.0f), DqnV2_1f(300 + 100.0f),
 			                    DqnV4_4f(0, 1.0f, 1.0f, 1.0f), transform);
 		}
 
@@ -1061,14 +1082,14 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			f32 cAngle  = (f32)input->timeNowInS;
 			DqnV4 color = DqnV4_4f(0.5f + 0.5f * sinf(cAngle), 0.5f + 0.5f * sinf(2.9f * cAngle),
 			                       0.5f + 0.5f * cosf(10.0f * cAngle), 1.0f);
-			DTRRender_Bitmap(&renderBuffer, &state->bitmap, bitmapP, transform, color);
+			DTRRender_Bitmap(renderContext, &state->bitmap, bitmapP, transform, color);
 		}
 
 #else
 		// CompAssignment(renderBuffer, input, memory);
 #endif
 		DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update);
-		DTRDebug_Update(state, &renderBuffer, input, memory);
+		DTRDebug_Update(state, renderContext, input, memory);
 	}
 
 	////////////////////////////////////////////////////////////////////////////

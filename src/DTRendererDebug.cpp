@@ -118,7 +118,7 @@ void DTRDebug_PushText(const char *const formatStr, ...)
 	if (DTR_DEBUG)
 	{
 		DTRDebug *const debug = &globalDebug;
-		if (!debug->renderBuffer) return;
+		if (!debug->renderContext->renderBuffer) return;
 
 		char str[1024] = {};
 
@@ -130,7 +130,7 @@ void DTRDebug_PushText(const char *const formatStr, ...)
 		}
 		va_end(argList);
 
-		DTRRender_Text(debug->renderBuffer, *debug->font, debug->displayP, str,
+		DTRRender_Text(*debug->renderContext, *debug->font, debug->displayP, str,
 		               debug->displayColor);
 		debug->displayP.y += globalDebug.displayYOffset;
 	}
@@ -199,25 +199,25 @@ FILE_SCOPE void PushMemStackText(const char *const name, const DqnMemStack *cons
 		Dqn_sprintf(str, "%s: %d block(s): %_$lld/%_$lld: wasted: %_$lld", name, numBlocks,
 		            totalUsed, totalSize, totalWastedKb);
 
-		DTRRender_Text(globalDebug.renderBuffer, *globalDebug.font,
+		DTRRender_Text(*globalDebug.renderContext, *globalDebug.font,
 		               globalDebug.displayP, str, globalDebug.displayColor);
 		globalDebug.displayP.y += globalDebug.displayYOffset;
 	}
 }
 
 void DTRDebug_Update(DTRState *const state,
-                     DTRRenderBuffer *const renderBuffer,
+                     DTRRenderContext renderContext,
                      PlatformInput *const input, PlatformMemory *const memory)
 {
 	if (DTR_DEBUG)
 	{
 		DTRDebug *const debug = &globalDebug;
 
-		debug->renderBuffer = renderBuffer;
-		debug->input        = input;
-		debug->font         = &state->font;
-		debug->displayColor = DqnV4_4f(1, 1, 1, 1);
-		if (debug->font->bitmap && debug->renderBuffer)
+		debug->renderContext = &renderContext;
+		debug->input         = input;
+		debug->font          = &state->font;
+		debug->displayColor  = DqnV4_4f(1, 1, 1, 1);
+		if (debug->font->bitmap && debug->renderContext)
 		{
 			debug->displayYOffset = -(i32)(state->font.sizeInPt + 0.5f);
 			DQN_ASSERT(globalDebug.displayYOffset < 0);
@@ -270,7 +270,7 @@ void DTRDebug_Update(DTRState *const state,
 		// End Debug Update
 		////////////////////////////////////////////////////////////////////////
 		debug->displayP =
-			DqnV2_2i(0, debug->renderBuffer->height + globalDebug.displayYOffset);
+		    DqnV2_2i(0, debug->renderContext->renderBuffer->height + globalDebug.displayYOffset);
 
 		for (i32 i = 0; i < DQN_ARRAY_COUNT(debug->counter); i++)
 			debug->counter[i] = 0;

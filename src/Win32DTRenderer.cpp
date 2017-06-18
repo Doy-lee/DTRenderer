@@ -8,16 +8,58 @@
 #define UNICODE
 #define _UNICODE
 
-const char *const DLL_NAME     = "dtrenderer.dll";
-const char *const DLL_TMP_NAME = "dtrenderer_temp.dll";
+////////////////////////////////////////////////////////////////////////////////
+// Platform Mutex/Lock
+////////////////////////////////////////////////////////////////////////////////
+typedef struct PlatformLock
+{
+	CRITICAL_SECTION critSection;
+} PlatformLock;
+
+PlatformLock *Platform_LockInit(DqnMemStack *const stack)
+{
+	const u32 DEFAULT_SPIN_COUNT = 16000;
+	PlatformLock *lock           = (PlatformLock *)DqnMemStack_Push(stack, sizeof(*lock));
+	if (lock)
+	{
+		if (InitializeCriticalSectionEx(&lock->critSection, DEFAULT_SPIN_COUNT, 0))
+		{
+			return lock;
+		}
+		else
+		{
+			DqnMemStack_Pop(stack, lock, sizeof(*lock));
+		}
+	}
+
+	return NULL;
+}
+
+void Platform_LockAcquire(PlatformLock *const lock)
+{
+	if (lock) EnterCriticalSection(&lock->critSection);
+}
+
+void Platform_LockRelease(PlatformLock *const lock)
+{
+	if (lock) LeaveCriticalSection(&lock->critSection);
+}
+
+void Platform_LockDelete(PlatformLock *const lock)
+{
+	if (lock)
+	{
+		DeleteCriticalSection(&lock->critSection);
+	}
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Platform Multi Threading
 ////////////////////////////////////////////////////////////////////////////////
 struct PlatformJobQueue
 {
-	PlatformJob volatile *jobList;
-	LONG                  size;
+	PlatformJob *volatile jobList;
+	LONG         size;
 
 	// NOTE: Modified by main+worker threads
 	LONG   volatile jobToExecuteIndex;
@@ -41,6 +83,13 @@ bool Platform_QueueAddJob(PlatformJobQueue *const queue, const PlatformJob job)
 	ReleaseSemaphore(queue->win32Semaphore, 1, NULL);
 
 	return true;
+}
+
+FILE_SCOPE void DebugWin32JobPrintNumber(PlatformJobQueue *const queue, void *const userData)
+{
+	i32 numberToPrint = *((i32 *)userData);
+	DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", GetCurrentThreadId(),
+	                           numberToPrint);
 }
 
 bool Platform_QueueTryExecuteNextJob(PlatformJobQueue *const queue)
@@ -167,6 +216,10 @@ void Platform_FileClose(PlatformFile *const file)
 #include <Windows.h>
 #include <Windowsx.h> // For GET_X|Y_LPARAM(), mouse input
 #include <Psapi.h>    // For win32 GetProcessMemoryInfo()
+
+const char *const DLL_NAME     = "dtrenderer.dll";
+const char *const DLL_TMP_NAME = "dtrenderer_temp.dll";
+
 typedef struct Win32RenderBitmap
 {
 	BITMAPINFO  info;
@@ -510,13 +563,6 @@ i32 Win32GetModuleDirectory(char *const buf, const u32 bufLen)
 	return lastSlashIndex;
 }
 
-FILE_SCOPE void DebugWin32JobPrintNumber(PlatformJobQueue *const queue, void *const userData)
-{
-	i32 numberToPrint = *((i32 *)userData);
-	DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", GetCurrentThreadId(),
-	                           numberToPrint);
-}
-
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
 {
 
@@ -627,15 +673,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	           DqnMemStack_Init(&globalPlatformMemory.assetStack, DQN_MEGABYTE(4), true, 4)
 			  );
 
-	PlatformAPI platformAPI            = {};
-	platformAPI.FileOpen               = Platform_FileOpen;
-	platformAPI.FileRead               = Platform_FileRead;
-	platformAPI.FileWrite              = Platform_FileWrite;
-	platformAPI.FileClose              = Platform_FileClose;
-	platformAPI.Print                  = Platform_Print;
+	PlatformAPI platformAPI = {};
+	platformAPI.FileOpen    = Platform_FileOpen;
+	platformAPI.FileRead    = Platform_FileRead;
+	platformAPI.FileWrite   = Platform_FileWrite;
+	platformAPI.FileClose   = Platform_FileClose;
+	platformAPI.Print       = Platform_Print;
 
 	platformAPI.QueueAddJob            = Platform_QueueAddJob;
 	platformAPI.QueueTryExecuteNextJob = Platform_QueueTryExecuteNextJob;
+
+	platformAPI.LockInit    = Platform_LockInit;
+	platformAPI.LockAcquire = Platform_LockAcquire;
+	platformAPI.LockRelease = Platform_LockRelease;
+	platformAPI.LockDelete  = Platform_LockDelete;
 
 	PlatformJobQueue jobQueue = {};
 
@@ -646,6 +697,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	platformInput.flags.canUseRdtsc = IsProcessorFeaturePresent(PF_RDTSC_INSTRUCTION_AVAILABLE);
 
 	// Threading
+	PlatformJob jobQueueMemory[512] = {};
 	{
 		DqnMemStackTempRegion memRegion;
 		if (!DqnMemStackTempRegion_Begin(&memRegion, &globalPlatformMemory.tempStack))
@@ -717,56 +769,53 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		////////////////////////////////////////////////////////////////////////
 		// Threading
 		////////////////////////////////////////////////////////////////////////
-		const i32 QUEUE_SIZE = 512;
-		jobQueue.jobList     = (PlatformJob *)DqnMemStack_Push(&globalPlatformMemory.mainStack,
-		                                                   sizeof(*jobQueue.jobList) * QUEUE_SIZE);
+		jobQueue.jobList = jobQueueMemory;
+		jobQueue.size    = DQN_ARRAY_COUNT(jobQueueMemory);
 
 		// NOTE: InterlockedIncrement requires things to be on 32bit boundaries.
 		DQN_ASSERT(((size_t)&jobQueue.jobToExecuteIndex) % 4 == 0);
 
-		if (jobQueue.jobList)
+		// NOTE: (numCores - 1), 1 core is already exclusively for main thread
+		i32 availableThreads = (numCores - 1) * numLogicalCores;
+
+		// TODO(doyle): Logic for single core/thread processors
+		DQN_ASSERT(availableThreads > 0);
+
+		jobQueue.win32Semaphore = CreateSemaphore(NULL, 0, availableThreads, NULL);
+		if (jobQueue.win32Semaphore)
 		{
-			// NOTE: (numCores - 1), 1 core is already exclusively for main thread
-			i32 availableThreads = (numCores - 1) * numLogicalCores;
-
-			// TODO(doyle): Logic for single core/thread processors
-			DQN_ASSERT(availableThreads > 0);
-
-			jobQueue.win32Semaphore = CreateSemaphore(NULL, 0, availableThreads, NULL);
-			if (jobQueue.win32Semaphore)
+			// Create threads
+			for (i32 i = 0; i < availableThreads; i++)
 			{
-				// Create threads
-				for (i32 i = 0; i < availableThreads; i++)
-				{
-					const i32 USE_DEFAULT_STACK_SIZE = 0;
-					void *threadParam                = &jobQueue;
-					HANDLE handle = CreateThread(NULL, USE_DEFAULT_STACK_SIZE, Win32ThreadCallback,
-					                             threadParam, 0, NULL);
-					CloseHandle(handle);
-				}
-
-				// Create jobs
-				jobQueue.size = QUEUE_SIZE;
-				for (i32 i = 0; i < 20; i++)
-				{
-					PlatformJob job = {};
-					job.callback    = DebugWin32JobPrintNumber;
-					job.userData    = DqnMemStack_Push(&globalPlatformMemory.tempStack, sizeof(i32));
-					if (job.userData)
-					{
-						*((i32 *)job.userData) = i;
-						Platform_QueueAddJob(&jobQueue, job);
-					}
-				}
-
-				while (Platform_QueueTryExecuteNextJob(&jobQueue))
-					;
+				const i32 USE_DEFAULT_STACK_SIZE = 0;
+				void *threadParam                = &jobQueue;
+				HANDLE handle = CreateThread(NULL, USE_DEFAULT_STACK_SIZE, Win32ThreadCallback,
+				                             threadParam, 0, NULL);
+				CloseHandle(handle);
 			}
-			else
+
+#if 0
+			// DEBUG Create jobs
+			for (i32 i = 0; i < 20; i++)
 			{
-				// TODO(doyle): Semaphore failed.
-				DqnWin32_DisplayLastError("CreateSemaphore() failed");
+				PlatformJob job = {};
+				job.callback    = DebugWin32JobPrintNumber;
+				job.userData    = DqnMemStack_Push(&globalPlatformMemory.tempStack, sizeof(i32));
+				if (job.userData)
+				{
+					*((i32 *)job.userData) = i;
+					Platform_QueueAddJob(&jobQueue, job);
+				}
 			}
+
+			while (Platform_QueueTryExecuteNextJob(&jobQueue))
+				;
+#endif
+		}
+		else
+		{
+			// TODO(doyle): Semaphore failed.
+			DqnWin32_DisplayLastError("CreateSemaphore() failed");
 		}
 	}
 
