@@ -4,6 +4,9 @@
 #include "dqn.h"
 #include <intrin.h>
 
+////////////////////////////////////////////////////////////////////////////////
+// Platform File I/O
+////////////////////////////////////////////////////////////////////////////////
 enum PlatformFilePermissionFlag
 {
 	PlatformFilePermissionFlag_Read  = (1 << 0),
@@ -24,20 +27,49 @@ typedef struct PlatformFile
 	u32     permissionFlags;
 } PlatformFile;
 
+// File I/O API
 typedef bool   PlatformAPI_FileOpen (const char *const path, PlatformFile *const file, const u32 permissionFlags, const enum PlatformFileAction actionFlags);
-typedef size_t PlatformAPI_FileRead (PlatformFile *const file, u8 *const buf, const size_t bytesToRead); // Return bytes read
+typedef size_t PlatformAPI_FileRead (PlatformFile *const file, u8 *const buf, const size_t bytesToRead);     // Return bytes read
 typedef size_t PlatformAPI_FileWrite(PlatformFile *const file, u8 *const buf, const size_t numBytesToWrite); // Return bytes read
 typedef void   PlatformAPI_FileClose(PlatformFile *const file);
 typedef void   PlatformAPI_Print    (const char *const string);
+
+////////////////////////////////////////////////////////////////////////////////
+// Platform Multithreading
+////////////////////////////////////////////////////////////////////////////////
+// PlatformJobQueue must be implemented in platform code. It simply needs to
+// fullfill the API and be able to accept PlatformJob structs and execute them.
+typedef struct PlatformJobQueue PlatformJobQueue;
+
+typedef void   PlatformJob_Callback(PlatformJobQueue *const queue, void *const userData);
+typedef struct PlatformJob
+{
+	PlatformJob_Callback *callback;
+	void                 *userData;
+} PlatformJob;
+
+// Multithreading API
+typedef bool PlatformAPI_QueueAddJob           (PlatformJobQueue *const queue, const PlatformJob job);
+typedef bool PlatformAPI_QueueTryExecuteNextJob(PlatformJobQueue *const queue);
+
+////////////////////////////////////////////////////////////////////////////////
+// Platform API for Game to Use
+////////////////////////////////////////////////////////////////////////////////
 typedef struct PlatformAPI
 {
-	PlatformAPI_FileOpen  *FileOpen;
-	PlatformAPI_FileRead  *FileRead;
-	PlatformAPI_FileWrite *FileWrite;
-	PlatformAPI_FileClose *FileClose;
-	PlatformAPI_Print     *Print;
+	PlatformAPI_FileOpen    *FileOpen;
+	PlatformAPI_FileRead    *FileRead;
+	PlatformAPI_FileWrite   *FileWrite;
+	PlatformAPI_FileClose   *FileClose;
+	PlatformAPI_Print       *Print;
+
+	PlatformAPI_QueueAddJob            *QueueAddJob;
+	PlatformAPI_QueueTryExecuteNextJob *QueueTryExecuteNextJob;
 } PlatformAPI;
 
+////////////////////////////////////////////////////////////////////////////////
+// Platform Input
+////////////////////////////////////////////////////////////////////////////////
 enum Key
 {
 	key_up,
@@ -96,8 +128,9 @@ typedef struct PlatformInput
 	f64           timeNowInS;
 	PlatformFlags flags;
 
-	PlatformAPI   api;
-	PlatformMouse mouse;
+	PlatformAPI       api;
+	PlatformMouse     mouse;
+	PlatformJobQueue *jobQueue;
 	union {
 		KeyState key[key_count];
 		struct
@@ -131,6 +164,9 @@ typedef struct PlatformInput
 	};
 } PlatformInput;
 
+////////////////////////////////////////////////////////////////////////////////
+// Platform Memory
+////////////////////////////////////////////////////////////////////////////////
 typedef struct PlatformMemory
 {
 	union {
@@ -146,6 +182,9 @@ typedef struct PlatformMemory
 	void *context;
 } PlatformMemory;
 
+////////////////////////////////////////////////////////////////////////////////
+// Platform Frame Buffer
+////////////////////////////////////////////////////////////////////////////////
 typedef struct PlatformRenderBuffer
 {
 	i32   width;

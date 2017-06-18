@@ -957,7 +957,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		renderBuffer.zBuffer = (f32 *)DqnMemStack_Push(&memory->tempStack,
 		                                               zBufferSize * sizeof(*renderBuffer.zBuffer));
 
-		for (u32 i                  = 0; i < zBufferSize; i++)
+		for (u32 i = 0; i < zBufferSize; i++)
 			renderBuffer.zBuffer[i] = DQN_F32_MIN;
 		////////////////////////////////////////////////////////////////////////////
 		// Update and Render
@@ -986,7 +986,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRRenderTransform rotatingXform = DTRRender_DefaultTriangleTransform();
 			rotatingXform.rotation           = rotation;
 
-			if (1)
+			if (0)
 			{
 				DTRDebug_BeginCycleCount("DTR_Update_RenderPrimitiveTriangles",
 				                         DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
@@ -1000,7 +1000,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 				DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderPrimitiveTriangles);
 			}
 
-			if (0)
+			if (1)
 			{
 				LOCAL_PERSIST bool runTinyRendererOnce = false;
 				if (1 && runTinyRendererOnce)
@@ -1033,7 +1033,8 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 				lighting.vector         = LIGHT;
 				lighting.color          = DqnV4_4f(1, 1, 1, 1);
 
-				DTRRender_Mesh(&renderBuffer, mesh, lighting, modelP, transform);
+				DTRRender_Mesh(&renderBuffer, &memory->tempStack, &input->api, input->jobQueue,
+				               mesh, lighting, modelP, transform);
 				DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update_RenderModel);
 			}
 		}

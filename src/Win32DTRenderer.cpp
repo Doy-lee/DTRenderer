@@ -12,11 +12,80 @@ const char *const DLL_NAME     = "dtrenderer.dll";
 const char *const DLL_TMP_NAME = "dtrenderer_temp.dll";
 
 ////////////////////////////////////////////////////////////////////////////////
-// Platform API Implementation
+// Platform Multi Threading
+////////////////////////////////////////////////////////////////////////////////
+struct PlatformJobQueue
+{
+	PlatformJob volatile *jobList;
+	LONG                  size;
+
+	// NOTE: Modified by main+worker threads
+	LONG   volatile jobToExecuteIndex;
+	HANDLE volatile win32Semaphore;
+
+	// NOTE: Modified by main thread ONLY
+	LONG volatile jobInsertIndex;
+};
+
+bool Platform_QueueAddJob(PlatformJobQueue *const queue, const PlatformJob job)
+{
+	LONG newJobInsertIndex = (queue->jobInsertIndex + 1) % queue->size;
+	if (newJobInsertIndex == queue->jobToExecuteIndex) return false;
+
+	queue->jobList[queue->jobInsertIndex] = job;
+
+	_WriteBarrier();
+	_mm_sfence();
+
+	queue->jobInsertIndex = newJobInsertIndex;
+	ReleaseSemaphore(queue->win32Semaphore, 1, NULL);
+
+	return true;
+}
+
+bool Platform_QueueTryExecuteNextJob(PlatformJobQueue *const queue)
+{
+	LONG originalJobToExecute = queue->jobToExecuteIndex;
+	if (originalJobToExecute != queue->jobInsertIndex)
+	{
+		LONG newJobIndexForNextThread = (originalJobToExecute + 1) % queue->size;
+		LONG index = InterlockedCompareExchange(&queue->jobToExecuteIndex, newJobIndexForNextThread,
+		                                        originalJobToExecute);
+
+		// NOTE: If we weren't successful at the interlock, another thread has
+		// taken the work and we can't know if there's more work or not. So
+		// irrespective of that result, return true to let the thread check
+		// again for more work.
+		if (index == originalJobToExecute)
+		{
+			PlatformJob job = queue->jobList[index];
+			job.callback(queue, job.userData);
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+DWORD WINAPI Win32ThreadCallback(void *lpParameter)
+{
+	PlatformJobQueue *queue = (PlatformJobQueue *)lpParameter;
+	for (;;)
+	{
+		if (!Platform_QueueTryExecuteNextJob(queue))
+		{
+			WaitForSingleObjectEx(queue->win32Semaphore, INFINITE, false);
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Platform I/O
 ////////////////////////////////////////////////////////////////////////////////
 FILE_SCOPE inline PlatformFile DqnFileToPlatformFileInternal(const DqnFile file)
 {
-	PlatformFile result = {};
+	PlatformFile result    = {};
 	result.handle          = file.handle;
 	result.size            = file.size;
 	result.permissionFlags = file.permissionFlags;
@@ -441,65 +510,11 @@ i32 Win32GetModuleDirectory(char *const buf, const u32 bufLen)
 	return lastSlashIndex;
 }
 
-typedef struct Win32Thread
+FILE_SCOPE void DebugWin32JobPrintNumber(PlatformJobQueue *const queue, void *const userData)
 {
-	HANDLE handle;
-	i32    logicalIndex;
-	DWORD  id;
-} Win32Thread;
-
-typedef struct Win32ThreadContext
-{
-	Win32Thread *threadList;
-	i32 size;
-} Win32ThreadContext;
-
-typedef struct ThreadJob
-{
-	i32 numberToPrint;
-} ThreadJob;
-
-typedef struct Win32ThreadJobQueue {
-	ThreadJob *jobList;
-
-	LONG volatile jobInsertIndex;
-	LONG volatile currJobIndex;
-	LONG          size;
-} Win32ThreadJobQueue;
-
-FILE_SCOPE Win32ThreadJobQueue globalJobQueue;
-FILE_SCOPE Win32ThreadContext  globalThreadContext;
-FILE_SCOPE HANDLE              globalSemaphore;
-
-void PushThreadJob(Win32ThreadJobQueue *queue, ThreadJob job)
-{
-	DQN_ASSERT(queue->jobInsertIndex < queue->size);
-	queue->jobList[queue->jobInsertIndex] = job;
-
-	queue->jobInsertIndex++;
-	ReleaseSemaphore(globalSemaphore, 1, NULL);
-}
-
-DWORD WINAPI Win32ThreadCallback(void *lpParameter)
-{
-	Win32Thread *thread = (Win32Thread *)lpParameter;
-	DQN_ASSERT(thread);
-
-	for (;;)
-	{
-		if (globalJobQueue.currJobIndex < globalJobQueue.jobInsertIndex)
-		{
-			LONG workIndex = InterlockedIncrement(&globalJobQueue.currJobIndex) - 1;
-			ThreadJob job  = globalJobQueue.jobList[workIndex];
-
-			DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", thread->logicalIndex,
-			                           job.numberToPrint);
-		}
-		else
-		{
-			WaitForSingleObjectEx(globalSemaphore, INFINITE, false);
-		}
-	}
+	i32 numberToPrint = *((i32 *)userData);
+	DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", GetCurrentThreadId(),
+	                           numberToPrint);
 }
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
@@ -612,15 +627,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	           DqnMemStack_Init(&globalPlatformMemory.assetStack, DQN_MEGABYTE(4), true, 4)
 			  );
 
-	PlatformAPI platformAPI = {};
-	platformAPI.FileOpen    = Platform_FileOpen;
-	platformAPI.FileRead    = Platform_FileRead;
-	platformAPI.FileWrite   = Platform_FileWrite;
-	platformAPI.FileClose   = Platform_FileClose;
-	platformAPI.Print       = Platform_Print;
+	PlatformAPI platformAPI            = {};
+	platformAPI.FileOpen               = Platform_FileOpen;
+	platformAPI.FileRead               = Platform_FileRead;
+	platformAPI.FileWrite              = Platform_FileWrite;
+	platformAPI.FileClose              = Platform_FileClose;
+	platformAPI.Print                  = Platform_Print;
+
+	platformAPI.QueueAddJob            = Platform_QueueAddJob;
+	platformAPI.QueueTryExecuteNextJob = Platform_QueueTryExecuteNextJob;
+
+	PlatformJobQueue jobQueue = {};
 
 	PlatformInput platformInput     = {};
 	platformInput.api               = platformAPI;
+	platformInput.jobQueue          = &jobQueue;
 	platformInput.flags.canUseSSE2  = IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE);
 	platformInput.flags.canUseRdtsc = IsProcessorFeaturePresent(PF_RDTSC_INSTRUCTION_AVAILABLE);
 
@@ -696,55 +717,50 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		////////////////////////////////////////////////////////////////////////
 		// Threading
 		////////////////////////////////////////////////////////////////////////
-		const i32 QUEUE_SIZE = 20;
-		globalJobQueue.jobList = (ThreadJob *)DqnMemStack_Push(&globalPlatformMemory.tempStack,
-		                                                       sizeof(ThreadJob) * QUEUE_SIZE);
+		const i32 QUEUE_SIZE = 512;
+		jobQueue.jobList     = (PlatformJob *)DqnMemStack_Push(&globalPlatformMemory.mainStack,
+		                                                   sizeof(*jobQueue.jobList) * QUEUE_SIZE);
 
-		if (globalJobQueue.jobList)
+		// NOTE: InterlockedIncrement requires things to be on 32bit boundaries.
+		DQN_ASSERT(((size_t)&jobQueue.jobToExecuteIndex) % 4 == 0);
+
+		if (jobQueue.jobList)
 		{
 			// NOTE: (numCores - 1), 1 core is already exclusively for main thread
 			i32 availableThreads = (numCores - 1) * numLogicalCores;
+
 			// TODO(doyle): Logic for single core/thread processors
 			DQN_ASSERT(availableThreads > 0);
 
-			globalSemaphore = CreateSemaphore(NULL, 0, availableThreads, NULL);
-			if (globalSemaphore)
+			jobQueue.win32Semaphore = CreateSemaphore(NULL, 0, availableThreads, NULL);
+			if (jobQueue.win32Semaphore)
 			{
-				// Create jobs
-				globalJobQueue.size = QUEUE_SIZE;
-				for (i32 i = 0; i < 10; i++)
+				// Create threads
+				for (i32 i = 0; i < availableThreads; i++)
 				{
-					ThreadJob job     = {};
-					job.numberToPrint = i;
-					PushThreadJob(&globalJobQueue, job);
+					const i32 USE_DEFAULT_STACK_SIZE = 0;
+					void *threadParam                = &jobQueue;
+					HANDLE handle = CreateThread(NULL, USE_DEFAULT_STACK_SIZE, Win32ThreadCallback,
+					                             threadParam, 0, NULL);
+					CloseHandle(handle);
 				}
 
-				// Create threads
-				globalThreadContext.threadList = (Win32Thread *)DqnMemStack_Push(
-				    &globalPlatformMemory.tempStack, sizeof(Win32Thread) * availableThreads);
-				if (globalThreadContext.threadList)
+				// Create jobs
+				jobQueue.size = QUEUE_SIZE;
+				for (i32 i = 0; i < 20; i++)
 				{
-					globalThreadContext.size = availableThreads;
-					for (i32 i = 0; i < globalThreadContext.size; i++)
+					PlatformJob job = {};
+					job.callback    = DebugWin32JobPrintNumber;
+					job.userData    = DqnMemStack_Push(&globalPlatformMemory.tempStack, sizeof(i32));
+					if (job.userData)
 					{
-						const i32 USE_DEFAULT_STACK_SIZE = 0;
-						Win32Thread *thread              = &globalThreadContext.threadList[i];
-						thread->logicalIndex             = i;
-						thread->handle =
-						    CreateThread(NULL, USE_DEFAULT_STACK_SIZE, Win32ThreadCallback,
-						                 (void *)thread, 0, &thread->id);
-
-						if (!thread->handle)
-						{
-							DqnWin32_DisplayLastError("CreateThread() failed");
-						}
+						*((i32 *)job.userData) = i;
+						Platform_QueueAddJob(&jobQueue, job);
 					}
 				}
-				else
-				{
-					// TODO(doyle): Failed allocation
-				}
 
+				while (Platform_QueueTryExecuteNextJob(&jobQueue))
+					;
 			}
 			else
 			{

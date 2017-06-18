@@ -963,7 +963,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
 					if (pixelZValue > currZValue)
 					{
-						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+						// renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
 						__m128 finalColor                   = simdColor;
 						if (!ignoreLight)
 						{
@@ -988,7 +988,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
 							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
 						}
-						SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
+						// SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
 					DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 				}
@@ -1014,7 +1014,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 					f32 currZValue = renderBuffer->zBuffer[zBufferIndex];
 					if (pixelZValue > currZValue)
 					{
-						renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
+						// renderBuffer->zBuffer[zBufferIndex] = pixelZValue;
 						__m128 finalColor                   = simdColor;
 
 						if (!ignoreLight)
@@ -1040,7 +1040,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderBuffer *const renderBuffer, const DqnV3 p1
 							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
 							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
 						}
-						SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
+						// SIMDSetPixel(renderBuffer, posX, posY, finalColor, ColorSpace_Linear);
 					}
 				}
 				signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
@@ -1346,11 +1346,41 @@ void DTRRender_TexturedTriangle(DTRRenderBuffer *const renderBuffer,
 	                         color, transform);
 }
 
-void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh,
-                    DTRRenderLight lighting, const DqnV3 pos,
-                    const DTRRenderTransform transform)
+typedef struct RenderMeshJob
 {
-	if (!mesh) return;
+	DTRRenderBuffer     *renderBuffer;
+	DTRBitmap           *tex;
+	RenderLightInternal  lighting;
+
+	DqnV3 v1;
+	DqnV3 v2;
+	DqnV3 v3;
+	DqnV2 uv1;
+	DqnV2 uv2;
+	DqnV2 uv3;
+	DqnV4 color;
+} RenderMeshJob;
+
+void MultiThreadedRenderMesh(struct PlatformJobQueue *const queue, void *const userData)
+{
+	if (!queue || !userData)
+	{
+		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		return;
+	}
+
+	RenderMeshJob *job = (RenderMeshJob *)userData;
+#if 1
+	TexturedTriangleInternal(job->renderBuffer, job->lighting, job->v1, job->v2, job->v3, job->uv1,
+	                         job->uv2, job->uv3, job->tex, job->color);
+#endif
+}
+
+void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DqnMemStack *const tempStack,
+                    PlatformAPI *const api, PlatformJobQueue *const jobQueue, DTRMesh *const mesh,
+                    DTRRenderLight lighting, const DqnV3 pos, const DTRRenderTransform transform)
+{
+	if (!mesh || !renderBuffer || !tempStack || !api || !jobQueue) return;
 
 	DqnMat4 viewPModelViewProjection = {};
 	{
@@ -1461,30 +1491,73 @@ void DTRRender_Mesh(DTRRenderBuffer *const renderBuffer, DTRMesh *const mesh,
 		lightingInternal.normals[2]          = norm3;
 		lightingInternal.numNormals          = 3;
 
-		bool DEBUG_NO_TEX = false;
-		if (DTR_DEBUG && DEBUG_NO_TEX)
+		bool DEBUG_NO_TEX      = false;
+		bool RUN_MULTITHREADED = true;
+
+		if (RUN_MULTITHREADED)
 		{
-			TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz, uv1,
-			                         uv2, uv3, NULL, color);
+			RenderMeshJob *jobData = (RenderMeshJob *)DqnMemStack_Push(tempStack, sizeof(*jobData));
+			if (jobData)
+			{
+				jobData->v1           = v1.xyz;
+				jobData->v2           = v2.xyz;
+				jobData->v3           = v3.xyz;
+				jobData->uv1          = uv1;
+				jobData->uv2          = uv2;
+				jobData->uv3          = uv3;
+				jobData->color        = color;
+				jobData->renderBuffer = renderBuffer;
+				jobData->lighting     = lightingInternal;
+
+				if (DTR_DEBUG && DEBUG_NO_TEX)
+				{
+					jobData->tex = NULL;
+				}
+				else
+				{
+					jobData->tex = &mesh->tex;
+				}
+
+				PlatformJob renderJob = {};
+				renderJob.callback    = MultiThreadedRenderMesh;
+				renderJob.userData    = jobData;
+				while (!api->QueueAddJob(jobQueue, renderJob))
+				{
+					api->QueueTryExecuteNextJob(jobQueue);
+				}
+			}
+			else
+			{
+				// TODO(doyle): Allocation error
+				DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			}
+
 		}
 		else
 		{
-			TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz, uv1,
-			                         uv2, uv3, &mesh->tex, color);
+			if (DTR_DEBUG && DEBUG_NO_TEX)
+			{
+				TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz,
+				                         uv1, uv2, uv3, NULL, color);
+			}
+			else
+			{
+				TexturedTriangleInternal(renderBuffer, lightingInternal, v1.xyz, v2.xyz, v3.xyz,
+				                         uv1, uv2, uv3, &mesh->tex, color);
+			}
 		}
-
 		bool DEBUG_WIREFRAME = false;
 		if (DTR_DEBUG && DEBUG_WIREFRAME)
 		{
 			DqnV4 wireColor = DqnV4_4f(1.0f, 1.0f, 1.0f, 0.01f);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(v1.xy), DqnV2i_V2(v2.xy),
-			               wireColor);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(v2.xy), DqnV2i_V2(v3.xy),
-			               wireColor);
-			DTRRender_Line(renderBuffer, DqnV2i_V2(v3.xy), DqnV2i_V2(v1.xy),
-			               wireColor);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(v1.xy), DqnV2i_V2(v2.xy), wireColor);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(v2.xy), DqnV2i_V2(v3.xy), wireColor);
+			DTRRender_Line(renderBuffer, DqnV2i_V2(v3.xy), DqnV2i_V2(v1.xy), wireColor);
 		}
 	}
+
+	while (api->QueueTryExecuteNextJob(jobQueue))
+		;
 }
 
 void DTRRender_Triangle(DTRRenderBuffer *const renderBuffer, DqnV3 p1, DqnV3 p2, DqnV3 p3,
