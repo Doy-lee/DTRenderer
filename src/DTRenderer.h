@@ -14,8 +14,7 @@ typedef struct DTRState
 	DTRBitmap bitmap;
 	DTRMesh   mesh;
 
-	struct PlatformLock *zDepthLock;
-	struct PlatformLock *blitLock;
+	struct PlatformLock *renderLock;
 } DTRState;
 
 extern PlatformFlags globalDTRPlatformFlags;

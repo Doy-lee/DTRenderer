@@ -16,12 +16,9 @@ typedef struct DTRRenderBuffer
 	i32 width;
 	i32 height;
 	i32 bytesPerPixel;
-
-	PlatformLock *volatile zDepthLock;
-	PlatformLock *volatile blitLock;
-
-	u8  *memory;   // Format: XX RR GG BB, and has (width * height * bytesPerPixels) elements
-	f32 *zBuffer;  // zBuffer has (width * height) elements
+	PlatformLock *renderLock;
+	volatile u8  *memory;     // Format: XX RR GG BB, and has (width * height * bytesPerPixels) elements
+	volatile f32 *zBuffer;    // zBuffer has (width * height) elements
 
 } DTRRenderBuffer;
 

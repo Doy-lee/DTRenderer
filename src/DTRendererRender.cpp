@@ -630,22 +630,20 @@ FILE_SCOPE inline void SIMDSetPixel(DTRRenderContext context, const i32 x, const
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 	DebugSIMDAssertColorInRange(color, 0.0f, 1.0f);
 
-	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
-	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
-
 	// If some alpha is involved, we need to apply gamma correction, but if the
 	// new pixel is totally opaque or invisible then we're just flat out
 	// overwriting/keeping the state of the pixel so we can save cycles by skipping.
 	f32 alpha = ((f32 *)&color)[3];
-	bool needGammaFix = (alpha > 0.0f || alpha < (1.0f + COLOR_EPSILON)) && (colorSpace == ColorSpace_SRGB);
+	bool needGammaFix =
+	    (alpha > 0.0f || alpha < (1.0f + COLOR_EPSILON)) && (colorSpace == ColorSpace_SRGB);
 	if (needGammaFix) color = SIMDSRGB1ToLinearSpace(color);
 
 	// Format: u32 == (XX, RR, GG, BB)
-	context.api->LockAcquire(renderBuffer->blitLock);
+	u32 *const bitmapPtr = (u32 *)renderBuffer->memory;
+	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
+
 	u32 srcPixel = bitmapPtr[x + (y * pitchInU32)];
-	__m128 src = _mm_set_ps(0,
-	                        (f32)((srcPixel >> 0) & 0xFF),
-	                        (f32)((srcPixel >> 8) & 0xFF),
+	__m128 src   = _mm_set_ps(0, (f32)((srcPixel >> 0) & 0xFF), (f32)((srcPixel >> 8) & 0xFF),
 	                        (f32)((srcPixel >> 16) & 0xFF));
 	src = SIMDSRGB255ToLinearSpace1(src);
 
@@ -665,13 +663,8 @@ FILE_SCOPE inline void SIMDSetPixel(DTRRenderContext context, const i32 x, const
 	f32 destB = ((f32 *)&dest)[2];
 
 	u32 pixel = // ((u32)(destA) << 24 |
-	             (u32)(destR) << 16 |
-	             (u32)(destG) << 8 |
-	             (u32)(destB) << 0;
+	    (u32)(destR) << 16 | (u32)(destG) << 8 | (u32)(destB) << 0;
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
-	context.api->LockRelease(renderBuffer->blitLock);
-
-	DTRDebug_CounterIncrement(DTRDebugCounter_SetPixels);
 }
 
 // colorModulate: _mm_set_ps(a, b, g, r)     ie. 0=r, 1=g, 2=b, 3=a
@@ -783,9 +776,9 @@ FILE_SCOPE inline f32 GetCurrZDepth(DTRRenderContext context, i32 posX, i32 posY
 	i32 zBufferIndex = posX + (posY * zBufferPitch);
 	DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
 
-	context.api->LockAcquire(renderBuffer->zDepthLock);
+	context.api->LockAcquire(renderBuffer->renderLock);
 	f32 currZDepth = renderBuffer->zBuffer[zBufferIndex];
-	context.api->LockRelease(renderBuffer->zDepthLock);
+	context.api->LockRelease(renderBuffer->renderLock);
 	return currZDepth;
 }
 
@@ -798,9 +791,9 @@ FILE_SCOPE inline void SetCurrZDepth(DTRRenderContext context, i32 posX, i32 pos
 	i32 zBufferIndex = posX + (posY * zBufferPitch);
 	DQN_ASSERT(zBufferIndex < (renderBuffer->width * renderBuffer->height));
 
-	context.api->LockAcquire(renderBuffer->zDepthLock);
+	context.api->LockAcquire(renderBuffer->renderLock);
 	renderBuffer->zBuffer[zBufferIndex] = newZDepth;
-	context.api->LockRelease(renderBuffer->zDepthLock);
+	context.api->LockRelease(renderBuffer->renderLock);
 }
 
 #define DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(type)                                             \
@@ -882,7 +875,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 
 	DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_Preamble);
 
-	DTRRenderBuffer *renderBuffer = context.renderBuffer;
+	DTRRenderBuffer *const renderBuffer = context.renderBuffer;
 	////////////////////////////////////////////////////////////////////////////
 	// Convert color
 	////////////////////////////////////////////////////////////////////////////
@@ -911,12 +904,12 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 	const u32 NUM_Y_PIXELS_TO_SIMD = 1;
 
 	// SignedArea: _mm_set_ps(unused, p3, p2, p1) ie 0=p1, 1=p1, 2=p3, 3=unused
-	__m128 signedAreaPixel1;
-	__m128 signedAreaPixel2;
+	__m128 signedAreaPixel1 = _mm_set_ps1(0);
+	__m128 signedAreaPixel2 = _mm_set_ps1(0);
 
-	__m128 signedAreaPixelDeltaX;
-	__m128 signedAreaPixelDeltaY;
-	__m128 invSignedAreaParallelogram_4x;
+	__m128 signedAreaPixelDeltaX         = _mm_set_ps1(0);
+	__m128 signedAreaPixelDeltaY         = _mm_set_ps1(0);
+	__m128 invSignedAreaParallelogram_4x = _mm_set_ps1(0);
 
 	__m128 triangleZ = _mm_set_ps(0, p3.z, p2.z, p1.z);
 	{
@@ -1003,22 +996,11 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 					                   ((f32 *)&barycentricZ)[1] +
 					                   ((f32 *)&barycentricZ)[2];
 
-#if 0
-					// f32 currZDepth = GetCurrZDepth(context, posX, posY);
-#else
-					DQN_ASSERT(renderBuffer);
 					i32 zBufferIndex = posX + (posY * zBufferPitch);
-
-					context.api->LockAcquire(renderBuffer->zDepthLock);
-					f32 currZDepth = renderBuffer->zBuffer[zBufferIndex];
-					context.api->LockRelease(renderBuffer->zDepthLock);
-#endif
-					if (pixelZDepth > currZDepth)
+					context.api->LockAcquire(renderBuffer->renderLock);
+					if (pixelZDepth > renderBuffer->zBuffer[zBufferIndex])
 					{
-
-						context.api->LockAcquire(renderBuffer->zDepthLock);
 						renderBuffer->zBuffer[zBufferIndex] = pixelZDepth;
-						context.api->LockRelease(renderBuffer->zDepthLock);
 
 						__m128 finalColor = simdColor;
 						if (!ignoreLight)
@@ -1046,6 +1028,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 						}
 						SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 					}
+					context.api->LockRelease(renderBuffer->renderLock);
 					DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 				}
 				signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
@@ -1067,16 +1050,10 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 					                    ((f32 *)&barycentricZ)[1] +
 					                    ((f32 *)&barycentricZ)[2];
 					i32 zBufferIndex = posX + (posY * zBufferPitch);
-
-					context.api->LockAcquire(renderBuffer->zDepthLock);
-					f32 currZDepth = renderBuffer->zBuffer[zBufferIndex];
-					context.api->LockRelease(renderBuffer->zDepthLock);
-
-					if (pixelZDepth > currZDepth)
+					context.api->LockAcquire(renderBuffer->renderLock);
+					if (pixelZDepth > renderBuffer->zBuffer[zBufferIndex])
 					{
-						context.api->LockAcquire(renderBuffer->zDepthLock);
 						renderBuffer->zBuffer[zBufferIndex] = pixelZDepth;
-						context.api->LockRelease(renderBuffer->zDepthLock);
 
 						__m128 finalColor = simdColor;
 						if (!ignoreLight)
@@ -1104,6 +1081,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 						}
 						SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 					}
+					context.api->LockRelease(renderBuffer->renderLock);
 				}
 				signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
 			}
@@ -1424,7 +1402,7 @@ typedef struct RenderMeshJob
 	DqnV4 color;
 } RenderMeshJob;
 
-void MultiThreadedRenderMesh(struct PlatformJobQueue *const queue, void *const userData)
+void MultiThreadedRenderMesh(PlatformJobQueue *const queue, void *const userData)
 {
 	if (!queue || !userData)
 	{
@@ -1433,18 +1411,16 @@ void MultiThreadedRenderMesh(struct PlatformJobQueue *const queue, void *const u
 	}
 
 	RenderMeshJob *job = (RenderMeshJob *)userData;
-#if 1
 	TexturedTriangleInternal(job->context, job->lighting, job->v1, job->v2, job->v3, job->uv1,
 	                         job->uv2, job->uv3, job->tex, job->color);
-#endif
 }
 
 void DTRRender_Mesh(DTRRenderContext context, PlatformJobQueue *const jobQueue, DTRMesh *const mesh,
                     DTRRenderLight lighting, const DqnV3 pos, const DTRRenderTransform transform)
 {
-	DqnMemStack *tempStack        = context.tempStack;
-	DTRRenderBuffer *renderBuffer = context.renderBuffer;
-	PlatformAPI *api              = context.api;
+	DqnMemStack *const tempStack        = context.tempStack;
+	DTRRenderBuffer *const renderBuffer = context.renderBuffer;
+	PlatformAPI *const api              = context.api;
 
 	if (!mesh || !renderBuffer || !tempStack || !api || !jobQueue) return;
 
@@ -1477,7 +1453,7 @@ void DTRRender_Mesh(DTRRenderContext context, PlatformJobQueue *const jobQueue, 
 		viewPModelViewProjection    = DqnMat4_Mul(viewport, modelViewProjection);
 	}
 
-	bool RUN_MULTITHREADED = false;
+	bool RUN_MULTITHREADED = true;
 	for (u32 i = 0; i < mesh->numFaces; i++)
 	{
 		DTRMeshFace face = mesh->faces[i];
@@ -1549,7 +1525,8 @@ void DTRRender_Mesh(DTRRenderContext context, PlatformJobQueue *const jobQueue, 
 		DqnV2 uv2 = mesh->texUV[uv2Index].xy;
 		DqnV2 uv3 = mesh->texUV[uv3Index].xy;
 
-		DqnV4 color                          = lighting.color;
+		DqnV4 color = lighting.color;
+
 		RenderLightInternal lightingInternal = {};
 		lightingInternal.mode                = lighting.mode;
 		lightingInternal.vector              = lighting.vector;
@@ -1558,8 +1535,7 @@ void DTRRender_Mesh(DTRRenderContext context, PlatformJobQueue *const jobQueue, 
 		lightingInternal.normals[2]          = norm3;
 		lightingInternal.numNormals          = 3;
 
-		bool DEBUG_NO_TEX      = false;
-
+		bool DEBUG_NO_TEX = false;
 		if (RUN_MULTITHREADED)
 		{
 			RenderMeshJob *jobData = (RenderMeshJob *)DqnMemStack_Push(tempStack, sizeof(*jobData));
@@ -1612,6 +1588,7 @@ void DTRRender_Mesh(DTRRenderContext context, PlatformJobQueue *const jobQueue, 
 				                         uv1, uv2, uv3, &mesh->tex, color);
 			}
 		}
+
 		bool DEBUG_WIREFRAME = false;
 		if (DTR_DEBUG && DEBUG_WIREFRAME)
 		{
@@ -1622,9 +1599,11 @@ void DTRRender_Mesh(DTRRenderContext context, PlatformJobQueue *const jobQueue, 
 		}
 	}
 
+	// NOTE(doyle): Complete remaining jobs and wait until all jobs finished
+	// before leaving function.
 	if (RUN_MULTITHREADED)
 	{
-		while (api->QueueTryExecuteNextJob(jobQueue))
+		while (api->QueueTryExecuteNextJob(jobQueue) || !api->QueueAllJobsComplete(jobQueue))
 			;
 	}
 }
@@ -1858,3 +1837,4 @@ void DTRRender_Clear(DTRRenderContext context, DqnV3 color)
 		}
 	}
 }
+

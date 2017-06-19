@@ -51,6 +51,7 @@ typedef struct PlatformJob
 // Multithreading API
 typedef bool PlatformAPI_QueueAddJob           (PlatformJobQueue *const queue, const PlatformJob job);
 typedef bool PlatformAPI_QueueTryExecuteNextJob(PlatformJobQueue *const queue);
+typedef bool PlatformAPI_QueueAllJobsComplete  (PlatformJobQueue *const queue);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Platform Locks
@@ -75,6 +76,7 @@ typedef struct PlatformAPI
 
 	PlatformAPI_QueueAddJob            *QueueAddJob;
 	PlatformAPI_QueueTryExecuteNextJob *QueueTryExecuteNextJob;
+	PlatformAPI_QueueAllJobsComplete   *QueueAllJobsComplete;
 
 	PlatformAPI_LockInit    *LockInit;
 	PlatformAPI_LockAcquire *LockAcquire;

@@ -64,9 +64,11 @@ struct PlatformJobQueue
 	// NOTE: Modified by main+worker threads
 	LONG   volatile jobToExecuteIndex;
 	HANDLE volatile win32Semaphore;
+	LONG   volatile numJobsToComplete;
 
 	// NOTE: Modified by main thread ONLY
 	LONG volatile jobInsertIndex;
+
 };
 
 bool Platform_QueueAddJob(PlatformJobQueue *const queue, const PlatformJob job)
@@ -76,20 +78,10 @@ bool Platform_QueueAddJob(PlatformJobQueue *const queue, const PlatformJob job)
 
 	queue->jobList[queue->jobInsertIndex] = job;
 
-	_WriteBarrier();
-	_mm_sfence();
-
-	queue->jobInsertIndex = newJobInsertIndex;
+	InterlockedIncrement(&queue->numJobsToComplete);
 	ReleaseSemaphore(queue->win32Semaphore, 1, NULL);
-
+	queue->jobInsertIndex = newJobInsertIndex;
 	return true;
-}
-
-FILE_SCOPE void DebugWin32JobPrintNumber(PlatformJobQueue *const queue, void *const userData)
-{
-	i32 numberToPrint = *((i32 *)userData);
-	DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", GetCurrentThreadId(),
-	                           numberToPrint);
 }
 
 bool Platform_QueueTryExecuteNextJob(PlatformJobQueue *const queue)
@@ -109,6 +101,7 @@ bool Platform_QueueTryExecuteNextJob(PlatformJobQueue *const queue)
 		{
 			PlatformJob job = queue->jobList[index];
 			job.callback(queue, job.userData);
+			InterlockedDecrement(&queue->numJobsToComplete);
 		}
 
 		return true;
@@ -116,6 +109,37 @@ bool Platform_QueueTryExecuteNextJob(PlatformJobQueue *const queue)
 
 	return false;
 }
+
+bool Platform_QueueAllJobsComplete(PlatformJobQueue *const queue)
+{
+	bool result = (queue->numJobsToComplete == 0);
+	return result;
+}
+
+FILE_SCOPE u32  volatile globalDebugCounter;
+FILE_SCOPE bool volatile globalDebugCounterMemoize[2048];
+FILE_SCOPE PlatformLock *globalDebugLock;
+FILE_SCOPE void DebugWin32IncrementCounter(PlatformJobQueue *const queue, void *const userData)
+{
+	Platform_LockAcquire(globalDebugLock);
+	DQN_ASSERT(!globalDebugCounterMemoize[globalDebugCounter]);
+	globalDebugCounterMemoize[globalDebugCounter] = true;
+	globalDebugCounter++;
+	u32 number = globalDebugCounter;
+	Platform_LockRelease(globalDebugLock);
+
+	DqnWin32_OutputDebugString("Thread %d: Incrementing Number: %d\n", GetCurrentThreadId(),
+	                           number);
+}
+
+FILE_SCOPE void DebugWin32JobPrintNumber(PlatformJobQueue *const queue, void *const userData)
+{
+	i32 numberToPrint = *((i32 *)userData);
+	DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", GetCurrentThreadId(),
+	                           numberToPrint);
+}
+
+
 
 DWORD WINAPI Win32ThreadCallback(void *lpParameter)
 {
@@ -682,6 +706,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	platformAPI.QueueAddJob            = Platform_QueueAddJob;
 	platformAPI.QueueTryExecuteNextJob = Platform_QueueTryExecuteNextJob;
+	platformAPI.QueueAllJobsComplete   = Platform_QueueAllJobsComplete;
 
 	platformAPI.LockInit    = Platform_LockInit;
 	platformAPI.LockAcquire = Platform_LockAcquire;
@@ -795,7 +820,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 			}
 
 #if 0
-			// DEBUG Create jobs
+			// DEBUG Create print jobs
 			for (i32 i = 0; i < 20; i++)
 			{
 				PlatformJob job = {};
@@ -810,6 +835,29 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 			while (Platform_QueueTryExecuteNextJob(&jobQueue))
 				;
+#endif
+
+#if 1
+			globalDebugLock = Platform_LockInit(&globalPlatformMemory.mainStack);
+			DQN_ASSERT(globalDebugLock);
+			for (i32 i = 0; i < DQN_ARRAY_COUNT(globalDebugCounterMemoize); i++)
+			{
+				PlatformJob job = {};
+				job.callback    = DebugWin32IncrementCounter;
+				while (!Platform_QueueAddJob(&jobQueue, job))
+				{
+					Platform_QueueTryExecuteNextJob(&jobQueue);
+				}
+			}
+
+			while (Platform_QueueTryExecuteNextJob(&jobQueue))
+				;
+
+			for (i32 i = 0; i < DQN_ARRAY_COUNT(globalDebugCounterMemoize); i++)
+				DQN_ASSERT(globalDebugCounterMemoize[i]);
+
+			DqnWin32_OutputDebugString("\nFinal incremented value: %d\n", globalDebugCounter);
+			DQN_ASSERT(globalDebugCounter == DQN_ARRAY_COUNT(globalDebugCounterMemoize));
 #endif
 		}
 		else
