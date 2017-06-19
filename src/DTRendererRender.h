@@ -82,6 +82,8 @@ typedef struct DTRRenderContext
 	DqnMemStack      *tempStack;
 	PlatformAPI      *api;
 	PlatformJobQueue *jobQueue;
+
+	bool multithread;
 } DTRRenderContext;
 
 // NOTE: All colors should be in the range of [0->1] where DqnV4 is a struct with 4 floats, rgba

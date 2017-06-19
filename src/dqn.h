@@ -52,7 +52,6 @@ typedef float  f32;
 
 #define DQN_INVALID_CODE_PATH 0
 #define DQN_ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
-#define DQN_ASSERT(expr) if (!(expr)) { (*((i32 *)0)) = 0; }
 
 #define DQN_PI 3.14159265359f
 #define DQN_SQUARED(x) ((x) * (x))
@@ -63,6 +62,18 @@ typedef float  f32;
 #define DQN_MAX(a, b) ((a) < (b) ? (b) : (a))
 #define DQN_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define DQN_SWAP(type, a, b) do { type tmp = a; a = b; b = tmp; } while(0)
+
+////////////////////////////////////////////////////////////////////////////////
+// Dqn Error
+////////////////////////////////////////////////////////////////////////////////
+#define DQN_ASSERT_HARD(expr) if (!(expr)) { *((int *)0) = 0; }
+
+#define DQN_ASSERT(expr)          DqnAssertInternal(expr, __FILE__, __LINE__, #expr, NULL)
+#define DQN_ASSERT_MSG(expr, msg) DqnAssertInternal(expr, __FILE__, __LINE__, #expr, msg)
+DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file, const i32 lineNum,
+                                      const char *const expr, const char *const msg);
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // DqnMem - Memory
 ////////////////////////////////////////////////////////////////////////////////
@@ -446,6 +457,29 @@ bool DqnArray_RemoveStable(DqnArray<T> *array, u64 index)
 #endif // DQN_CPP_MODE
 
 ////////////////////////////////////////////////////////////////////////////////
+// DqnJobQueue - Multithreaded Job Queue
+////////////////////////////////////////////////////////////////////////////////
+typedef void   DqnJob_Callback(struct DqnJobQueue *const queue, void *const userData);
+typedef struct DqnJob
+{
+	DqnJob_Callback *callback;
+	void            *userData;
+} DqnJob;
+
+typedef struct DqnJobQueue
+{
+	DqnJob *volatile jobList;
+	u32     size;
+
+	// NOTE: Modified by main+worker threads
+	u32   volatile jobToExecuteIndex;
+	void *win32Semaphore;
+	u32   volatile numJobsToComplete;
+
+	// NOTE: Modified by main thread ONLY
+	u32 volatile jobInsertIndex;
+} DqnJobQueue;
+////////////////////////////////////////////////////////////////////////////////
 // Math
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE f32 DqnMath_Lerp  (f32 a, f32 t, f32 b);
@@ -817,14 +851,20 @@ DQN_FILE_SCOPE i32  DqnRnd_PCGRange(DqnRandPCGState *pcg, i32 min, i32 max);
 DQN_FILE_SCOPE bool DqnWin32_UTF8ToWChar (const char *const in, wchar_t *const out, const i32 outLen);
 DQN_FILE_SCOPE bool DqnWin32_WCharToUTF8 (const wchar_t *const in, char *const out, const i32 outLen);
 
-DQN_FILE_SCOPE void DqnWin32_GetClientDim    (const HWND window, LONG *width, LONG *height);
-DQN_FILE_SCOPE void DqnWin32_GetRectDim      (RECT rect, LONG *width, LONG *height);
-DQN_FILE_SCOPE void DqnWin32_DisplayLastError(const char *const errorPrefix);
-DQN_FILE_SCOPE void DqnWin32_DisplayErrorCode(const DWORD error, const char *const errorPrefix);
+DQN_FILE_SCOPE void DqnWin32_GetClientDim     (const HWND window, LONG *width, LONG *height);
+DQN_FILE_SCOPE void DqnWin32_GetRectDim       (RECT rect, LONG *width, LONG *height);
+DQN_FILE_SCOPE void DqnWin32_DisplayLastError (const char *const errorPrefix);
+DQN_FILE_SCOPE void DqnWin32_DisplayErrorCode (const DWORD error, const char *const errorPrefix);
 DQN_FILE_SCOPE void DqnWin32_OutputDebugString(const char *const formatStr, ...);
 
-#endif /* DQN_WIN32_IMPLEMENTATION */
+// buf: Filled with the path to the executable file.
+// Returns the offset to the last backslash, -1 if bufLen was not large enough or buf is null.
+DQN_FILE_SCOPE i32  DqnWin32_GetEXEDirectory(char *const buf, const u32 bufLen);
 
+// numCores: numThreadsPerCore: Can be NULL, the function will just skip it.
+// Uses calloc and free for querying numCores.
+DQN_FILE_SCOPE void DqnWin32_GetNumThreadsAndCores(i32 *const numCores, i32 *const numThreadsPerCore);
+#endif /* DQN_WIN32_IMPLEMENTATION */
 
 #ifndef DQN_INI_H
 #define DQN_INI_H
@@ -1360,6 +1400,34 @@ STBSP__PUBLICDEF void STB_SPRINTF_DECORATE(set_separators)(char comma, char peri
 // NOTE: DQN_INI_IMPLEMENTATION modified to be included when DQN_IMPLEMENTATION defined
 // #define DQN_INI_IMPLEMENTATION
 #define DQN_INI_STRLEN(s) Dqn_strlen(s)
+
+////////////////////////////////////////////////////////////////////////////////
+// Dqn Error
+////////////////////////////////////////////////////////////////////////////////
+#if (defined(_WIN32) || defined(_WIN64)) && defined(DQN_WIN32_IMPLEMENTATION)
+#else
+#include <stdio.h>
+#endif
+
+DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file, const i32 lineNum,
+                                      const char *const expr, const char *const msg)
+{
+	if (!result)
+	{
+		const char *const formatStrNoMsg   = "DqnAssert() failed: %s|%d| (%s)\n";
+		const char *const formatStrWithMsg = "DqnAssert() failed: %s|%d| (%s): %s\n";
+		const char *const formatStr        = (msg) ? formatStrWithMsg : formatStrNoMsg;
+#if (defined(_WIN32) || defined(_WIN64)) && defined(DQN_WIN32_IMPLEMENTATION)
+		DqnWin32_OutputDebugString(formatStr, file, lineNum, expr, msg);
+#else
+		printf(formatStr, file, lineNum, expr, msg);
+#endif
+
+		(*((i32 *)0)) = 0;
+	}
+	return result;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DqnMemory - Default Memory Routines
 ////////////////////////////////////////////////////////////////////////////////
@@ -3328,11 +3396,90 @@ DQN_FILE_SCOPE void DqnWin32_OutputDebugString(const char *const formatStr, ...)
 	va_start(argList, formatStr);
 	{
 		i32 numCopied = Dqn_vsprintf(str, formatStr, argList);
-		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(str));
+		DQN_ASSERT_HARD(numCopied < DQN_ARRAY_COUNT(str));
 	}
 	va_end(argList);
 
 	OutputDebugString(str);
+}
+
+DQN_FILE_SCOPE i32 DqnWin32_GetEXEDirectory(char *const buf, const u32 bufLen)
+{
+	if (!buf || bufLen == 0) return 0;
+	u32 copiedLen = GetModuleFileName(NULL, buf, bufLen);
+	if (copiedLen == bufLen) return -1;
+
+	// NOTE: Should always work if GetModuleFileName works and we're running an
+	// executable.
+	i32 lastSlashIndex = 0;
+	for (i32 i = copiedLen; i > 0; i--)
+	{
+		if (buf[i] == '\\')
+		{
+			lastSlashIndex = i;
+			break;
+		}
+	}
+
+	return lastSlashIndex;
+}
+
+DQN_FILE_SCOPE void DqnWin32_GetNumThreadsAndCores(i32 *const numCores, i32 *const numThreadsPerCore)
+{
+	if (numThreadsPerCore)
+	{
+		SYSTEM_INFO systemInfo;
+		GetNativeSystemInfo(&systemInfo);
+		*numThreadsPerCore = systemInfo.dwNumberOfProcessors;
+	}
+
+	if (numCores)
+	{
+		*numCores = 0;
+		DWORD requiredSize    = 0;
+		u8 insufficientBuffer = {0};
+		GetLogicalProcessorInformationEx(
+		    RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)insufficientBuffer,
+		    &requiredSize);
+
+		u8 *rawProcInfoArray = (u8 *)DqnMem_Calloc(requiredSize);
+		if (!rawProcInfoArray)
+		{
+			DQN_WIN32_ERROR_BOX("DqnMem_Calloc() failed", NULL);
+			DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			return;
+		}
+
+		if (GetLogicalProcessorInformationEx(
+		        RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)rawProcInfoArray,
+		        &requiredSize))
+		{
+			SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *logicalProcInfo =
+			    (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)rawProcInfoArray;
+			DWORD bytesRead = 0;
+
+			do
+			{
+				// NOTE: High efficiency value has greater performance and less efficiency.
+				PROCESSOR_RELATIONSHIP *procInfo = &logicalProcInfo->Processor;
+				u32 efficiency                   = procInfo->EfficiencyClass;
+				(*numCores)++;
+				DQN_ASSERT(logicalProcInfo->Relationship == RelationProcessorCore);
+				DQN_ASSERT(procInfo->GroupCount == 1);
+
+				bytesRead += logicalProcInfo->Size;
+				logicalProcInfo =
+				    (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((u8 *)logicalProcInfo +
+				                                                logicalProcInfo->Size);
+			} while (bytesRead < requiredSize);
+		}
+		else
+		{
+			DqnWin32_DisplayLastError("GetLogicalProcessorInformationEx() failed");
+		}
+
+		DqnMem_Free(rawProcInfoArray);
+	}
 }
 #endif // DQN_WIN32_PLATFROM
 

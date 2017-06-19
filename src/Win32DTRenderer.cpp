@@ -570,55 +570,25 @@ FILE_SCOPE void Win32ProcessMessages(HWND window, PlatformInput *input)
 	}
 }
 
-// Return the index of the last slash
-i32 Win32GetModuleDirectory(char *const buf, const u32 bufLen)
-{
-	if (!buf || bufLen == 0) return 0;
-	u32 copiedLen = GetModuleFileName(NULL, buf, bufLen);
-	if (copiedLen == bufLen)
-	{
-		DQN_WIN32_ERROR_BOX(
-		    "GetModuleFileName() buffer maxed: Len of copied text is len "
-		    "of supplied buffer.",
-		    NULL);
-		DQN_ASSERT(DQN_INVALID_CODE_PATH);
-	}
-
-	// NOTE: Should always work if GetModuleFileName works and we're running an
-	// executable.
-	i32 lastSlashIndex = 0;
-	for (i32 i = copiedLen; i > 0; i--)
-	{
-		if (buf[i] == '\\')
-		{
-			lastSlashIndex = i;
-			break;
-		}
-	}
-
-	return lastSlashIndex;
-}
-
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
 {
 
 	////////////////////////////////////////////////////////////////////////////
 	// Initialise Win32 Window
 	////////////////////////////////////////////////////////////////////////////
-	WNDCLASSEXW wc =
-	{
-		sizeof(WNDCLASSEX),
-		CS_HREDRAW | CS_VREDRAW | CS_OWNDC,
-		Win32MainProcCallback,
-		0, // int cbClsExtra
-		0, // int cbWndExtra
-		hInstance,
-		LoadIcon(NULL, IDI_APPLICATION),
-		LoadCursor(NULL, IDC_ARROW),
-		GetSysColorBrush(COLOR_3DFACE),
-		L"", // LPCTSTR lpszMenuName
-		L"DRendererClass",
-		NULL, // HICON hIconSm
+	WNDCLASSEXW wc = {
+	    sizeof(WNDCLASSEX),
+	    CS_HREDRAW | CS_VREDRAW | CS_OWNDC,
+	    Win32MainProcCallback,
+	    0, // int cbClsExtra
+	    0, // int cbWndExtra
+	    hInstance,
+	    LoadIcon(NULL, IDI_APPLICATION),
+	    LoadCursor(NULL, IDC_ARROW),
+	    GetSysColorBrush(COLOR_3DFACE),
+	    L"", // LPCTSTR lpszMenuName
+	    L"DRendererClass",
+	    NULL, // HICON hIconSm
 	};
 
 	if (!RegisterClassExW(&wc))
@@ -665,7 +635,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		globalRenderBitmap.width          = header.biWidth;
 		globalRenderBitmap.height         = header.biHeight;
 		globalRenderBitmap.bytesPerPixel  = header.biBitCount / 8;
-		DQN_ASSERT(globalRenderBitmap.bytesPerPixel >= 1);
+		if (!DQN_ASSERT(globalRenderBitmap.bytesPerPixel >= 1)) return -1;
 
 		HDC deviceContext         = GetDC(mainWindow);
 		globalRenderBitmap.handle = CreateDIBSection(
@@ -688,17 +658,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	char dllTmpPath[MAX_PATH] = {};
 	{
 		char exeDir[MAX_PATH] = {};
-		i32 lastSlashIndex =
-		    Win32GetModuleDirectory(exeDir, DQN_ARRAY_COUNT(exeDir));
-		DQN_ASSERT(lastSlashIndex + 1 < DQN_ARRAY_COUNT(exeDir));
+		i32 lastSlashIndex    = DqnWin32_GetEXEDirectory(exeDir, DQN_ARRAY_COUNT(exeDir));
+		if (lastSlashIndex != -1)
+		{
+			DQN_ASSERT(lastSlashIndex + 1 < DQN_ARRAY_COUNT(exeDir));
 
-		exeDir[lastSlashIndex + 1] = 0;
-		u32 numCopied = Dqn_sprintf(dllPath, "%s%s", exeDir, DLL_NAME);
-		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllPath));
+			exeDir[lastSlashIndex + 1] = 0;
+			u32 numCopied              = Dqn_sprintf(dllPath, "%s%s", exeDir, DLL_NAME);
+			DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllPath));
 
-		numCopied =
-		    Dqn_sprintf(dllTmpPath, "%s%s", exeDir, DLL_TMP_NAME);
-		DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllTmpPath));
+			numCopied = Dqn_sprintf(dllTmpPath, "%s%s", exeDir, DLL_TMP_NAME);
+			DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllTmpPath));
+		}
+		else
+		{
+			DQN_ASSERT(DQN_INVALID_CODE_PATH);
+		}
 	}
 
 	////////////////////////////////////////////////////////////////////////////
@@ -748,62 +723,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		////////////////////////////////////////////////////////////////////////
 		// Query CPU Cores
 		////////////////////////////////////////////////////////////////////////
-		i32 numCores        = 0;
-		i32 numLogicalCores = 0;
-
-		SYSTEM_INFO systemInfo;
-		GetNativeSystemInfo(&systemInfo);
-		DqnWin32_OutputDebugString("Number of Logical Processors: %d\n",
-		                           systemInfo.dwNumberOfProcessors);
-		numLogicalCores = systemInfo.dwNumberOfProcessors;
-
-		DWORD logicalProcInfoRequiredSize = 0;
-		u8 insufficientBuffer             = {};
-		GetLogicalProcessorInformationEx(
-		    RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)insufficientBuffer,
-		    &logicalProcInfoRequiredSize);
-
-		u8 *rawProcInfoArray =
-		    (u8 *)DqnMemStack_Push(&globalPlatformMemory.tempStack, logicalProcInfoRequiredSize);
-
-		if (rawProcInfoArray)
-		{
-			if (GetLogicalProcessorInformationEx(
-			        RelationProcessorCore,
-			        (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)rawProcInfoArray,
-			        &logicalProcInfoRequiredSize))
-			{
-				SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *logicalProcInfo =
-				    (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)rawProcInfoArray;
-				DWORD bytesRead = 0;
-
-				do
-				{
-					// NOTE: High efficiency value has greater performance and less efficiency.
-					PROCESSOR_RELATIONSHIP *procInfo = &logicalProcInfo->Processor;
-					u32 efficiency                   = procInfo->EfficiencyClass;
-					DqnWin32_OutputDebugString("Core %d: Efficiency: %d\n", numCores++, efficiency);
-
-					DQN_ASSERT(logicalProcInfo->Relationship == RelationProcessorCore);
-					DQN_ASSERT(procInfo->GroupCount == 1);
-
-					bytesRead += logicalProcInfo->Size;
-					logicalProcInfo =
-					    (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((u8 *)logicalProcInfo +
-					                                                logicalProcInfo->Size);
-
-				} while (bytesRead < logicalProcInfoRequiredSize);
-			}
-			else
-			{
-				DqnWin32_DisplayLastError("GetLogicalProcessorInformationEx() failed");
-			}
-		}
-		else
-		{
-			DQN_WIN32_ERROR_BOX("DqnMemStack_Push() failed", NULL);
-		}
-		DqnMemStackTempRegion_End(memRegion);
+		i32 numCores, numThreadsPerCore;
+		DqnWin32_GetNumThreadsAndCores(&numCores, &numThreadsPerCore);
 
 		////////////////////////////////////////////////////////////////////////
 		// Threading
@@ -815,11 +736,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		DQN_ASSERT(((size_t)&jobQueue.jobToExecuteIndex) % 4 == 0);
 
 		// NOTE: (numCores - 1), 1 core is already exclusively for main thread
-		i32 availableThreads = (numCores - 1) * numLogicalCores;
-
+		i32 availableThreads = (numCores - 1) * numThreadsPerCore;
 		// TODO(doyle): Logic for single core/thread processors
 		DQN_ASSERT(availableThreads > 0);
-
+		
 		jobQueue.win32Semaphore = CreateSemaphore(NULL, 0, availableThreads, NULL);
 		if (jobQueue.win32Semaphore)
 		{

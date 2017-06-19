@@ -78,6 +78,7 @@ set TimeStamp=%date:~10,4%%date:~7,2%%date:~4,2%_%CleanTime:~0,2%%CleanTime:~3,2
 
 del *.pdb >NUL 2>NUL
 cl %CompileFlags% %Win32Flags% ..\src\Win32DTRenderer.cpp /link %LinkLibraries% %LinkFlags%
+REM cl /P ..\src\Win32DTRenderer.cpp
 REM cl %CompileFlags% %DLLFlags%   ..\src\UnityBuild\UnityBuild.cpp /LD /link ..\src\external\easy\easy_profiler.lib /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
 cl %CompileFlags% %DLLFlags%  ..\src\UnityBuild\UnityBuild.cpp /LD /link /PDB:%ProjectName%_%TimeStamp%.pdb /export:DTR_Update %LinkFlags%
 

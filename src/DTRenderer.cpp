@@ -976,6 +976,7 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			}
 
 			DTRRenderContext renderContext = {};
+			renderContext.multithread      = true;
 			renderContext.renderBuffer     = &renderBuffer;
 			renderContext.tempStack        = &memory->tempStack;
 			renderContext.api              = &input->api;
