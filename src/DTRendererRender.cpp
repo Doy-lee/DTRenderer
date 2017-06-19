@@ -643,8 +643,9 @@ FILE_SCOPE inline void SIMDSetPixel(DTRRenderContext context, const i32 x, const
 	const u32 pitchInU32 = (renderBuffer->width * renderBuffer->bytesPerPixel) / 4;
 
 	u32 srcPixel = bitmapPtr[x + (y * pitchInU32)];
-	__m128 src   = _mm_set_ps(0, (f32)((srcPixel >> 0) & 0xFF), (f32)((srcPixel >> 8) & 0xFF),
-	                        (f32)((srcPixel >> 16) & 0xFF));
+	__m128 src   = _mm_set_ps(0, (f32)((srcPixel >> 0) & 0xFF),
+	                             (f32)((srcPixel >> 8) & 0xFF),
+	                             (f32)((srcPixel >> 16) & 0xFF));
 	src = SIMDSRGB255ToLinearSpace1(src);
 
 	f32 invA       = 1 - alpha;
@@ -663,7 +664,9 @@ FILE_SCOPE inline void SIMDSetPixel(DTRRenderContext context, const i32 x, const
 	f32 destB = ((f32 *)&dest)[2];
 
 	u32 pixel = // ((u32)(destA) << 24 |
-	    (u32)(destR) << 16 | (u32)(destG) << 8 | (u32)(destB) << 0;
+	            (u32)(destR) << 16 |
+	            (u32)(destG) << 8  |
+	            (u32)(destB) << 0;
 	bitmapPtr[x + (y * pitchInU32)] = pixel;
 }
 
@@ -814,21 +817,18 @@ FILE_SCOPE inline void SetCurrZDepth(DTRRenderContext context, i32 posX, i32 pos
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_SIMD##type);                                 \
 	} while (0)
 
-FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderContext context,
-                                           const DTRBitmap *const texture, const i32 posX,
-                                           const i32 posY, const i32 maxX, const DqnV2 uv1,
-                                           const DqnV2 uv2SubUv1, const DqnV2 uv3SubUv1,
-                                           const __m128 simdColor, const __m128 triangleZ,
-                                           const __m128 signedArea,
-                                           const __m128 invSignedAreaParallelogram_4x)
+FILE_SCOPE void
+SIMDRasteriseTrianglePixel(DTRRenderContext context, const DTRBitmap *const texture, const i32 posX,
+                           const i32 posY, const i32 maxX, const DqnV2 uv1, const DqnV2 uv2SubUv1,
+                           const DqnV2 uv3SubUv1, const __m128 simdColor, const __m128 triangleZ,
+                           const __m128 signedArea, const __m128 invSignedAreaParallelogram_4x,
+                           const f32 preserveAlpha, const bool ignoreLight, const __m128 p1Light,
+                           const __m128 p2Light, const __m128 p3Light)
 {
-	const __m128 ZERO_4X      = _mm_set_ps1(0.0f);
-	const u32 IS_GREATER_MASK = 0xF;
-
-	DTRRenderBuffer *renderBuffer = context.renderBuffer;
-
-	// TODO(doyle): Copy lighting work over. But not important since using this
-	// function causes performance problems.
+	DTRRenderBuffer *const renderBuffer = context.renderBuffer;
+	const __m128 ZERO_4X                = _mm_set_ps1(0.0f);
+	const u32 IS_GREATER_MASK           = 0xF;
+	const u32 zBufferPitch              = renderBuffer->width;
 
 	// Rasterise buffer(X, Y) pixel
 	{
@@ -838,36 +838,56 @@ FILE_SCOPE void SIMDRasteriseTrianglePixel(DTRRenderContext context,
 		if ((isGreaterResult & IS_GREATER_MASK) == IS_GREATER_MASK && posX < maxX)
 		{
 			DEBUG_SIMD_AUTO_CHOOSE_BEGIN_CYCLE_COUNT(Triangle_RasterisePixel);
-			__m128 barycentric  = _mm_mul_ps(signedArea, invSignedAreaParallelogram_4x);
-			__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
-
-			f32 pixelZDepth =
-			    ((f32 *)&barycentricZ)[0] + ((f32 *)&barycentricZ)[1] + ((f32 *)&barycentricZ)[2];
-			f32 currZDepth = GetCurrZDepth(context, posX, posY);
-			if (pixelZDepth > currZDepth)
 			{
-				SetCurrZDepth(context, posX, posY, pixelZDepth);
+				__m128 barycentric  = _mm_mul_ps(signedArea, invSignedAreaParallelogram_4x);
+				__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
 
-				__m128 finalColor = simdColor;
-				if (texture)
+				f32 pixelZDepth = ((f32 *)&barycentricZ)[0] + ((f32 *)&barycentricZ)[1] +
+				                  ((f32 *)&barycentricZ)[2];
+
+				i32 zBufferIndex  = posX + (posY * zBufferPitch);
+				if (pixelZDepth > renderBuffer->zBuffer[zBufferIndex])
 				{
-					__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1,
-					                                                      uv3SubUv1, barycentric);
-					finalColor = _mm_mul_ps(texSampledColor, simdColor);
+					renderBuffer->zBuffer[zBufferIndex] = pixelZDepth;
+					__m128 finalColor                   = simdColor;
+					if (!ignoreLight)
+					{
+						__m128 barycentricA_4x = _mm_set_ps1(((f32 *)&barycentric)[0]);
+						__m128 barycentricB_4x = _mm_set_ps1(((f32 *)&barycentric)[1]);
+						__m128 barycentricC_4x = _mm_set_ps1(((f32 *)&barycentric)[2]);
+
+						__m128 barycentricLight1 = _mm_mul_ps(p1Light, barycentricA_4x);
+						__m128 barycentricLight2 = _mm_mul_ps(p2Light, barycentricB_4x);
+						__m128 barycentricLight3 = _mm_mul_ps(p3Light, barycentricC_4x);
+
+						__m128 light = _mm_add_ps(barycentricLight3,
+						                          _mm_add_ps(barycentricLight1, barycentricLight2));
+
+						finalColor              = _mm_mul_ps(finalColor, light);
+						((f32 *)&finalColor)[3] = preserveAlpha;
+					}
+
+					if (texture)
+					{
+						__m128 texSampledColor = SIMDSampleTextureForTriangle(
+						    texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
+						finalColor = _mm_mul_ps(texSampledColor, finalColor);
+					}
+
+					SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 				}
-				SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 			}
 			DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 		}
 	}
 }
 
-FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
-                             const DqnV3 p1, const DqnV3 p2, const DqnV3 p3, const DqnV2 uv1,
-                             const DqnV2 uv2, const DqnV2 uv3, const f32 lightIntensity1,
-                             const f32 lightIntensity2, const f32 lightIntensity3,
-                             const bool ignoreLight, DTRBitmap *const texture, DqnV4 color,
-                             const DqnV2i min, const DqnV2i max)
+FILE_SCOPE void SIMDTriangle(DTRRenderContext context, const DqnV3 p1, const DqnV3 p2,
+                             const DqnV3 p3, const DqnV2 uv1, const DqnV2 uv2, const DqnV2 uv3,
+                             const f32 lightIntensity1, const f32 lightIntensity2,
+                             const f32 lightIntensity3, const bool ignoreLight,
+                             DTRBitmap *const texture, DqnV4 color, const DqnV2i min,
+                             const DqnV2i max)
 
 {
 	DTR_DEBUG_EP_TIMED_FUNCTION();
@@ -900,12 +920,12 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 	////////////////////////////////////////////////////////////////////////////
 	// Setup SIMD data
 	////////////////////////////////////////////////////////////////////////////
-	const u32 NUM_X_PIXELS_TO_SIMD = 2;
+	const u32 NUM_X_PIXELS_TO_SIMD = 1;
 	const u32 NUM_Y_PIXELS_TO_SIMD = 1;
 
 	// SignedArea: _mm_set_ps(unused, p3, p2, p1) ie 0=p1, 1=p1, 2=p3, 3=unused
 	__m128 signedAreaPixel1 = _mm_set_ps1(0);
-	__m128 signedAreaPixel2 = _mm_set_ps1(0);
+	// __m128 signedAreaPixel2 = _mm_set_ps1(0);
 
 	__m128 signedAreaPixelDeltaX         = _mm_set_ps1(0);
 	__m128 signedAreaPixelDeltaY         = _mm_set_ps1(0);
@@ -942,7 +962,7 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 		signedAreaPixelDeltaY = _mm_set_ps(0, signedArea3DeltaY, signedArea2DeltaY, signedArea1DeltaY);
 
 		signedAreaPixel1 = _mm_set_ps(0, signedArea3Start, signedArea2Start, signedArea1Start);
-		signedAreaPixel2 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaX);
+		// signedAreaPixel2 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaX);
 
 		// NOTE: Increase step size to the number of pixels rasterised with SIMD
 		{
@@ -958,10 +978,10 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 	const DqnV2 uv2SubUv1 = uv2 - uv1;
 	const DqnV2 uv3SubUv1 = uv3 - uv1;
 
-#define UNROLL_LOOP 1
+#define INLINE_RASTERISE 1
 	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Preamble);
 
-#if UNROLL_LOOP
+#if INLINE_RASTERISE
 	const u32 IS_GREATER_MASK = 0xF;
 	const u32 zBufferPitch    = renderBuffer->width;
 #endif
@@ -973,11 +993,11 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 	for (i32 bufferY = min.y; bufferY < max.y; bufferY += NUM_Y_PIXELS_TO_SIMD)
 	{
 		__m128 signedArea1 = signedAreaPixel1;
-		__m128 signedArea2 = signedAreaPixel2;
+		// __m128 signedArea2 = signedAreaPixel2;
 
 		for (i32 bufferX = min.x; bufferX < max.x; bufferX += NUM_X_PIXELS_TO_SIMD)
 		{
-#if UNROLL_LOOP
+#if INLINE_RASTERISE
 			// Rasterise buffer(X, Y) pixel
 			{
 				__m128 checkArea    = signedArea1;
@@ -997,108 +1017,64 @@ FILE_SCOPE void SIMDTriangle(DTRRenderContext context,
 					                   ((f32 *)&barycentricZ)[2];
 
 					i32 zBufferIndex = posX + (posY * zBufferPitch);
-					context.api->LockAcquire(renderBuffer->renderLock);
+					__m128 finalColor = simdColor;
+					if (!ignoreLight)
+					{
+						__m128 barycentricA_4x = _mm_set_ps1(((f32 *)&barycentric)[0]);
+						__m128 barycentricB_4x = _mm_set_ps1(((f32 *)&barycentric)[1]);
+						__m128 barycentricC_4x = _mm_set_ps1(((f32 *)&barycentric)[2]);
+
+						__m128 barycentricLight1 = _mm_mul_ps(p1Light, barycentricA_4x);
+						__m128 barycentricLight2 = _mm_mul_ps(p2Light, barycentricB_4x);
+						__m128 barycentricLight3 = _mm_mul_ps(p3Light, barycentricC_4x);
+
+						__m128 light = _mm_add_ps(barycentricLight3,
+						                          _mm_add_ps(barycentricLight1, barycentricLight2));
+
+						finalColor              = _mm_mul_ps(finalColor, light);
+						((f32 *)&finalColor)[3] = preserveAlpha;
+					}
+
+					if (texture)
+					{
+						__m128 texSampledColor = SIMDSampleTextureForTriangle(
+						    texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
+						finalColor = _mm_mul_ps(texSampledColor, finalColor);
+					}
+
+#if 1
+					bool currLockValue;
+					do
+					{
+						currLockValue = (bool)context.api->AtomicCompareSwap(
+						    (u32 *)&renderBuffer->pixelLockTable[zBufferIndex], (u32)true, (u32)false);
+					} while (currLockValue != false);
+#endif
+
 					if (pixelZDepth > renderBuffer->zBuffer[zBufferIndex])
 					{
 						renderBuffer->zBuffer[zBufferIndex] = pixelZDepth;
-
-						__m128 finalColor = simdColor;
-						if (!ignoreLight)
-						{
-							__m128 barycentricA_4x = _mm_set_ps1(((f32 *)&barycentric)[0]);
-							__m128 barycentricB_4x = _mm_set_ps1(((f32 *)&barycentric)[1]);
-							__m128 barycentricC_4x = _mm_set_ps1(((f32 *)&barycentric)[2]);
-
-							__m128 barycentricLight1 = _mm_mul_ps(p1Light, barycentricA_4x);
-							__m128 barycentricLight2 = _mm_mul_ps(p2Light, barycentricB_4x);
-							__m128 barycentricLight3 = _mm_mul_ps(p3Light, barycentricC_4x);
-
-							__m128 light =
-							    _mm_add_ps(barycentricLight3,
-							               _mm_add_ps(barycentricLight1, barycentricLight2));
-
-							finalColor = _mm_mul_ps(finalColor, light);
-							((f32 *)&finalColor)[3] = preserveAlpha;
-						}
-
-						if (texture)
-						{
-							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
-							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
-						}
 						SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
 					}
-					context.api->LockRelease(renderBuffer->renderLock);
+					renderBuffer->pixelLockTable[zBufferIndex] = false;
 					DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_RasterisePixel);
 				}
 				signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
 			}
 
-			// Rasterise buffer(X + 1, Y) pixel
-			{
-				__m128 checkArea    = signedArea2;
-				__m128 isGreater    = _mm_cmpge_ps(checkArea, ZERO_4X);
-				i32 isGreaterResult = _mm_movemask_ps(isGreater);
-				i32 posX            = bufferX + 1;
-				i32 posY            = bufferY;
-				if ((isGreaterResult & IS_GREATER_MASK) == IS_GREATER_MASK && posX < max.x)
-				{
-					__m128 barycentric  = _mm_mul_ps(checkArea, invSignedAreaParallelogram_4x);
-					__m128 barycentricZ = _mm_mul_ps(triangleZ, barycentric);
-
-					f32 pixelZDepth  = ((f32 *)&barycentricZ)[0] +
-					                    ((f32 *)&barycentricZ)[1] +
-					                    ((f32 *)&barycentricZ)[2];
-					i32 zBufferIndex = posX + (posY * zBufferPitch);
-					context.api->LockAcquire(renderBuffer->renderLock);
-					if (pixelZDepth > renderBuffer->zBuffer[zBufferIndex])
-					{
-						renderBuffer->zBuffer[zBufferIndex] = pixelZDepth;
-
-						__m128 finalColor = simdColor;
-						if (!ignoreLight)
-						{
-							__m128 barycentricA_4x   = _mm_set_ps1(((f32 *)&barycentric)[0]);
-							__m128 barycentricB_4x   = _mm_set_ps1(((f32 *)&barycentric)[1]);
-							__m128 barycentricC_4x   = _mm_set_ps1(((f32 *)&barycentric)[2]);
-
-							__m128 barycentricLight1 = _mm_mul_ps(p1Light, barycentricA_4x);
-							__m128 barycentricLight2 = _mm_mul_ps(p2Light, barycentricB_4x);
-							__m128 barycentricLight3 = _mm_mul_ps(p3Light, barycentricC_4x);
-
-							__m128 light =
-							    _mm_add_ps(barycentricLight3,
-							               _mm_add_ps(barycentricLight1, barycentricLight2));
-
-							finalColor = _mm_mul_ps(finalColor, light);
-							((f32 *)&finalColor)[3] = preserveAlpha;
-						}
-
-						if (texture)
-						{
-							__m128 texSampledColor = SIMDSampleTextureForTriangle(texture, uv1, uv2SubUv1, uv3SubUv1, barycentric);
-							finalColor             = _mm_mul_ps(texSampledColor, finalColor);
-						}
-						SIMDSetPixel(context, posX, posY, finalColor, ColorSpace_Linear);
-					}
-					context.api->LockRelease(renderBuffer->renderLock);
-				}
-				signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
-			}
 #else
-			SIMDRasteriseTrianglePixel(renderBuffer, texture, bufferX, bufferY, max.x, uv1, uv2SubUv1,
+			SIMDRasteriseTrianglePixel(context, texture, bufferX, bufferY, max.x, uv1, uv2SubUv1,
 			                           uv3SubUv1, simdColor, triangleZ, signedArea1,
-			                           invSignedAreaParallelogram_4x);
-			SIMDRasteriseTrianglePixel(renderBuffer, texture, bufferX + 1, bufferY, max.x, uv1, uv2SubUv1,
-			                           uv3SubUv1, simdColor, triangleZ, signedArea2,
-			                           invSignedAreaParallelogram_4x);
+			                           invSignedAreaParallelogram_4x, preserveAlpha, ignoreLight,
+			                           p1Light, p2Light, p3Light);
 			signedArea1 = _mm_add_ps(signedArea1, signedAreaPixelDeltaX);
-			signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
+			// signedArea2 = _mm_add_ps(signedArea2, signedAreaPixelDeltaX);
 #endif
 		}
 		signedAreaPixel1 = _mm_add_ps(signedAreaPixel1, signedAreaPixelDeltaY);
-		signedAreaPixel2 = _mm_add_ps(signedAreaPixel2, signedAreaPixelDeltaY);
+		// signedAreaPixel2 = _mm_add_ps(signedAreaPixel2, signedAreaPixelDeltaY);
 	}
+
 	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle_Rasterise);
 	DEBUG_SIMD_AUTO_CHOOSE_END_CYCLE_COUNT(Triangle);
 }

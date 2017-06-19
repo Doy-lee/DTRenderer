@@ -9,6 +9,18 @@
 #define _UNICODE
 
 ////////////////////////////////////////////////////////////////////////////////
+// Platform Atomics
+////////////////////////////////////////////////////////////////////////////////
+u32 Platform_AtomicCompareSwap(u32 *volatile dest, u32 swapVal, u32 compareVal)
+{
+	// TODO(doyle): Compile time assert
+	DQN_ASSERT(sizeof(LONG) == sizeof(u32));
+	u32 result =
+	    (u32)InterlockedCompareExchange((LONG volatile *)dest, (LONG)swapVal, (LONG)compareVal);
+	return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Platform Mutex/Lock
 ////////////////////////////////////////////////////////////////////////////////
 typedef struct PlatformLock
@@ -708,6 +720,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	platformAPI.QueueTryExecuteNextJob = Platform_QueueTryExecuteNextJob;
 	platformAPI.QueueAllJobsComplete   = Platform_QueueAllJobsComplete;
 
+	platformAPI.AtomicCompareSwap = Platform_AtomicCompareSwap;
+
 	platformAPI.LockInit    = Platform_LockInit;
 	platformAPI.LockAcquire = Platform_LockAcquire;
 	platformAPI.LockRelease = Platform_LockRelease;
@@ -903,8 +917,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 			if (dllCode.DTR_Update)
 			{
-				dllCode.DTR_Update(&platformBuffer, &platformInput,
-				                   &globalPlatformMemory);
+				dllCode.DTR_Update(&platformBuffer, &platformInput, &globalPlatformMemory);
 			}
 		}
 

@@ -53,6 +53,8 @@ typedef bool PlatformAPI_QueueAddJob           (PlatformJobQueue *const queue, c
 typedef bool PlatformAPI_QueueTryExecuteNextJob(PlatformJobQueue *const queue);
 typedef bool PlatformAPI_QueueAllJobsComplete  (PlatformJobQueue *const queue);
 
+typedef u32  PlatformAPI_AtomicCompareSwap(u32 *volatile dest, u32 swapVal, u32 compareVal);
+
 ////////////////////////////////////////////////////////////////////////////////
 // Platform Locks
 ////////////////////////////////////////////////////////////////////////////////
@@ -77,6 +79,7 @@ typedef struct PlatformAPI
 	PlatformAPI_QueueAddJob            *QueueAddJob;
 	PlatformAPI_QueueTryExecuteNextJob *QueueTryExecuteNextJob;
 	PlatformAPI_QueueAllJobsComplete   *QueueAllJobsComplete;
+	PlatformAPI_AtomicCompareSwap      *AtomicCompareSwap;
 
 	PlatformAPI_LockInit    *LockInit;
 	PlatformAPI_LockAcquire *LockAcquire;

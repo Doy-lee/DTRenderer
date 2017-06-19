@@ -20,6 +20,8 @@ typedef struct DTRRenderBuffer
 	volatile u8  *memory;     // Format: XX RR GG BB, and has (width * height * bytesPerPixels) elements
 	volatile f32 *zBuffer;    // zBuffer has (width * height) elements
 
+	volatile bool *pixelLockTable; // has (width * height) elements
+
 } DTRRenderBuffer;
 
 // Using transforms for 2D ignores the 'z' element.
@@ -76,9 +78,10 @@ typedef struct DTRRenderLight
 
 typedef struct DTRRenderContext
 {
-	DTRRenderBuffer *renderBuffer;
-	DqnMemStack     *tempStack;
-	PlatformAPI     *api;
+	DTRRenderBuffer  *renderBuffer;
+	DqnMemStack      *tempStack;
+	PlatformAPI      *api;
+	PlatformJobQueue *jobQueue;
 } DTRRenderContext;
 
 // NOTE: All colors should be in the range of [0->1] where DqnV4 is a struct with 4 floats, rgba

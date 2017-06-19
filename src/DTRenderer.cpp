@@ -966,13 +966,20 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			renderBuffer.zBuffer = (f32 *)DqnMemStack_Push(
 			    &memory->tempStack, zBufferSize * sizeof(*renderBuffer.zBuffer));
 
-			for (u32 i                  = 0; i < zBufferSize; i++)
-				renderBuffer.zBuffer[i] = DQN_F32_MIN;
+			renderBuffer.pixelLockTable = (bool *)DqnMemStack_Push(
+			    &memory->tempStack, zBufferSize * sizeof(*renderBuffer.pixelLockTable));
+
+			for (u32 i = 0; i < zBufferSize; i++)
+			{
+				renderBuffer.zBuffer[i]        = DQN_F32_MIN;
+				renderBuffer.pixelLockTable[i] = false;
+			}
 
 			DTRRenderContext renderContext = {};
 			renderContext.renderBuffer     = &renderBuffer;
 			renderContext.tempStack        = &memory->tempStack;
 			renderContext.api              = &input->api;
+			renderContext.jobQueue         = input->jobQueue;
 			////////////////////////////////////////////////////////////////////////////
 			// Update and Render
 			////////////////////////////////////////////////////////////////////////////
@@ -1086,6 +1093,10 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 			DTRDebug_EndCycleCount(DTRDebugCycleCount_DTR_Update);
 			DTRDebug_Update(state, renderContext, input, memory);
 		}
+
+		while (input->api.QueueTryExecuteNextJob(input->jobQueue) ||
+		       !input->api.QueueAllJobsComplete(input->jobQueue))
+			;
 	}
 
 	////////////////////////////////////////////////////////////////////////////
