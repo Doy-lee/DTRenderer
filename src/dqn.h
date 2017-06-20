@@ -23,6 +23,12 @@
 	#define DQN_CPP_MODE
 #endif
 
+#if (defined(_WIN32) || defined(_WIN64)) && defined(DQN_WIN32_IMPLEMENTATION)
+	#define DQN_WIN32_PLATFORM
+	#define WIN32_LEAN_AND_MEAN
+	#include <Windows.h>
+#endif
+
 #include <stdint.h> // For standard types
 #include <float.h>
 #define LOCAL_PERSIST static
@@ -843,6 +849,23 @@ DQN_FILE_SCOPE f32  DqnRnd_PCGNextf(DqnRandPCGState *pcg);
 DQN_FILE_SCOPE i32  DqnRnd_PCGRange(DqnRandPCGState *pcg, i32 min, i32 max);
 
 ////////////////////////////////////////////////////////////////////////////////
+// DqnLock
+////////////////////////////////////////////////////////////////////////////////
+typedef struct DqnLock
+{
+#ifdef DQN_WIN32_PLATFORM
+	CRITICAL_SECTION win32Handle;
+#else
+	void *handle;
+#endif
+} DqnLock;
+
+DQN_FILE_SCOPE bool DqnLock_Init   (DqnLock *const lock, const u32 spinCount = 16000);
+DQN_FILE_SCOPE void DqnLock_Acquire(DqnLock *const lock);
+DQN_FILE_SCOPE void DqnLock_Release(DqnLock *const lock);
+DQN_FILE_SCOPE void DqnLock_Delete (DqnLock *const lock);
+
+////////////////////////////////////////////////////////////////////////////////
 // DqnAtomics
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE u32 DqnAtomic_CompareSwap32(u32 volatile *dest, u32 swapVal, u32 compareVal);
@@ -853,7 +876,6 @@ DQN_FILE_SCOPE u32 DqnAtomic_Sub32        (u32 volatile *src);
 // DqnJobQueue - Multithreaded Job Queue
 ////////////////////////////////////////////////////////////////////////////////
 // TODO(doyle): Only WIN32!!
-
 // DqnJobQueue is a platform abstracted "lockless" multithreaded work queue. It
 // will create threads and assign threads to complete the job via the job
 // 'callback' using the 'userData' supplied.
@@ -891,17 +913,10 @@ DQN_FILE_SCOPE bool DqnJobQueue_TryExecuteNextJob(DqnJobQueue *const queue);
 DQN_FILE_SCOPE bool DqnJobQueue_AllJobsComplete  (DqnJobQueue *const queue);
 #endif  /* DQN_H */
 
-#if (defined(_WIN32) || defined(_WIN64)) && defined(DQN_WIN32_IMPLEMENTATION)
-	#define DQN_WIN32_PLATFORM
-#endif
-
 #ifdef DQN_WIN32_PLATFORM
 ////////////////////////////////////////////////////////////////////////////////
 // Win32 Specific
 ////////////////////////////////////////////////////////////////////////////////
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-
 #define DQN_WIN32_ERROR_BOX(text, title) MessageBoxA(NULL, text, title, MB_OK);
 // Out is a pointer to the buffer to receive the characters.
 // outLen is the length/capacity of the out buffer
@@ -3752,7 +3767,7 @@ FILE_SCOPE u64 DqnRnd_Murmur3Avalanche64Internal(u64 h)
 
 FILE_SCOPE u32 DqnRnd_MakeSeedInternal()
 {
-#ifdef DQN_WIN32_IMPLEMENTATION
+#ifdef DQN_WIN32_PLATFORM
 	__int64 numClockCycles = __rdtsc();
 	return (u32)numClockCycles;
 #elif __ANDROID__
@@ -3804,6 +3819,51 @@ DQN_FILE_SCOPE i32 DqnRnd_PCGRange(DqnRandPCGState *pcg, i32 min, i32 max)
 	if (range <= 0) return min;
 	i32 const value = (i32)(DqnRnd_PCGNextf(pcg) * range);
 	return min + value;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// DqnLock
+////////////////////////////////////////////////////////////////////////////////
+bool DqnLock_Init(DqnLock *const lock, const u32 spinCount)
+{
+	if (!lock) return false;
+
+#ifdef DQN_WIN32_PLATFORM
+	if (InitializeCriticalSectionEx(&lock->win32Handle, spinCount, 0))
+		return true;
+#endif
+
+	return false;
+}
+
+void DqnLock_Acquire(DqnLock *const lock)
+{
+	if (!lock) return;
+#ifdef DQN_WIN32_PLATFORM
+	EnterCriticalSection(&lock->win32Handle);
+#else
+	DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);
+#endif
+}
+
+void DqnLock_Release(DqnLock *const lock)
+{
+	if (!lock) return;
+#ifdef DQN_WIN32_PLATFORM
+	LeaveCriticalSection(&lock->win32Handle);
+#else
+	DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);
+#endif
+}
+
+void DqnLock_Delete(DqnLock *const lock)
+{
+	if (!lock) return;
+#ifdef DQN_WIN32_PLATFORM
+	DeleteCriticalSection(&lock->win32Handle);
+#else
+	DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3872,21 +3932,20 @@ FILE_SCOPE u32 DqnJobQueueInternal_ThreadCreate(const size_t stackSize, void *th
 {
 	u32 numThreadsCreated = 0;
 
-#ifdef DQN_WIN32_IMPLEMENTATION
+#ifdef DQN_WIN32_PLATFORM
 	DQN_ASSERT_HARD(stackSize == 0 || !threadCallback);
-
-	u32 threadsCreated = 0;
 	for (u32 i = 0; i < numThreads; i++)
 	{
 		HANDLE handle = CreateThread(NULL, stackSize, (LPTHREAD_START_ROUTINE)threadCallback,
 		                             threadParam, 0, NULL);
 		CloseHandle(handle);
-		threadsCreated++;
+		numThreadsCreated++;
 	}
 
 #else
 	DQN_ASSERT(DQN_INVALID_CODE_PATH);
 #endif
+
 	DQN_ASSERT(numThreadsCreated == numThreads);
 	return numThreadsCreated;
 }
@@ -3895,7 +3954,7 @@ FILE_SCOPE u32 DqnJobQueueInternal_ThreadCreate(const size_t stackSize, void *th
 FILE_SCOPE u32 DqnJobQueueInternal_ThreadCallback(void *threadParam)
 {
 	DqnJobQueue *queue = (DqnJobQueue *)threadParam;
-#ifdef DQN_WIN32_IMPLEMENTATION
+#ifdef DQN_WIN32_PLATFORM
 	for (;;)
 	{
 		if (!DqnJobQueue_TryExecuteNextJob(queue))
@@ -3930,6 +3989,7 @@ DQN_FILE_SCOPE DqnJobQueue *DqnJobQueue_InitWithMem(const void *const mem, size_
 	// Sub-allocate Queue
 	DqnJobQueue *queue = (DqnJobQueue *)memPtr;
 	*queue             = emptyQueue;
+	queue->size        = queueSize;
 
 	// Sub-allocate jobList
 	memPtr += reqStructSize;
@@ -3964,7 +4024,7 @@ DQN_FILE_SCOPE bool DqnJobQueue_AddJob(DqnJobQueue *const queue, const DqnJob jo
 
 	DqnAtomic_Add32(&queue->numJobsToComplete);
 
-#ifdef DQN_WIN32_IMPLEMENTATION
+#ifdef DQN_WIN32_PLATFORM
 	ReleaseSemaphore(queue->semaphore, 1, NULL);
 #else
 	DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);

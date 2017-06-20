@@ -1,8 +1,9 @@
+#define DQN_WIN32_IMPLEMENTATION
+
 #include "DTRenderer.h"
 #include "DTRendererPlatform.h"
 
 #define DQN_IMPLEMENTATION
-#define DQN_WIN32_IMPLEMENTATION
 #include "dqn.h"
 
 #define UNICODE
@@ -16,7 +17,7 @@ void Platform_DieGracefully() { globalRunning = false; }
 ////////////////////////////////////////////////////////////////////////////////
 // Platform Atomics
 ////////////////////////////////////////////////////////////////////////////////
-u32 Platform_AtomicCompareSwap(u32 *volatile dest, u32 swapVal, u32 compareVal)
+u32 Platform_AtomicCompareSwap(u32 volatile *dest, u32 swapVal, u32 compareVal)
 {
 	// TODO(doyle): Compile time assert
 	DQN_ASSERT(sizeof(LONG) == sizeof(u32));
@@ -155,8 +156,6 @@ FILE_SCOPE void DebugWin32JobPrintNumber(PlatformJobQueue *const queue, void *co
 	DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", GetCurrentThreadId(),
 	                           numberToPrint);
 }
-
-
 
 DWORD WINAPI Win32ThreadCallback(void *lpParameter)
 {
