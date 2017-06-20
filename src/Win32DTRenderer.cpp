@@ -1,13 +1,16 @@
-#define DQN_WIN32_IMPLEMENTATION
-
 #include "DTRenderer.h"
 #include "DTRendererPlatform.h"
 
+#define DQN_WIN32_IMPLEMENTATION
 #define DQN_IMPLEMENTATION
 #include "dqn.h"
 
 #define UNICODE
 #define _UNICODE
+
+#include <Windows.h>
+#include <Windowsx.h> // For GET_X|Y_LPARAM(), mouse input
+#include <Psapi.h>    // For win32 GetProcessMemoryInfo()
 
 FILE_SCOPE PlatformMemory globalPlatformMemory;
 FILE_SCOPE bool           globalRunning;
@@ -31,45 +34,30 @@ u32 Platform_AtomicCompareSwap(u32 volatile *dest, u32 swapVal, u32 compareVal)
 ////////////////////////////////////////////////////////////////////////////////
 typedef struct PlatformLock
 {
-	CRITICAL_SECTION critSection;
+	DqnLock dqnLock;
 } PlatformLock;
 
 PlatformLock *Platform_LockInit(DqnMemStack *const stack)
 {
-	const u32 DEFAULT_SPIN_COUNT = 16000;
-	PlatformLock *lock           = (PlatformLock *)DqnMemStack_Push(stack, sizeof(*lock));
-	if (lock)
+	PlatformLock *result = (PlatformLock *)DqnMemStack_Push(stack, sizeof(PlatformLock));
+	if (result)
 	{
-		if (InitializeCriticalSectionEx(&lock->critSection, DEFAULT_SPIN_COUNT, 0))
+		if (!DqnLock_Init(&result->dqnLock))
 		{
-			return lock;
+			DqnMemStack_Pop(stack, result, sizeof(PlatformLock));
+			return NULL;
 		}
 		else
 		{
-			DqnMemStack_Pop(stack, lock, sizeof(*lock));
+			return result;
 		}
 	}
-
 	return NULL;
 }
 
-void Platform_LockAcquire(PlatformLock *const lock)
-{
-	if (lock) EnterCriticalSection(&lock->critSection);
-}
-
-void Platform_LockRelease(PlatformLock *const lock)
-{
-	if (lock) LeaveCriticalSection(&lock->critSection);
-}
-
-void Platform_LockDelete(PlatformLock *const lock)
-{
-	if (lock)
-	{
-		DeleteCriticalSection(&lock->critSection);
-	}
-}
+void Platform_LockAcquire(PlatformLock *const lock) { DqnLock_Acquire(&lock->dqnLock); }
+void Platform_LockRelease(PlatformLock *const lock) { DqnLock_Release(&lock->dqnLock); }
+void Platform_LockDelete (PlatformLock *const lock) { DqnLock_Delete(&lock->dqnLock); }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Platform Multi Threading
@@ -136,25 +124,18 @@ bool Platform_QueueAllJobsComplete(PlatformJobQueue *const queue)
 
 FILE_SCOPE u32  volatile globalDebugCounter;
 FILE_SCOPE bool volatile globalDebugCounterMemoize[2048];
-FILE_SCOPE PlatformLock *globalDebugLock;
+FILE_SCOPE PlatformLock  globalDebugLock;
 FILE_SCOPE void DebugWin32IncrementCounter(PlatformJobQueue *const queue, void *const userData)
 {
-	Platform_LockAcquire(globalDebugLock);
+	Platform_LockAcquire(&globalDebugLock);
 	DQN_ASSERT(!globalDebugCounterMemoize[globalDebugCounter]);
 	globalDebugCounterMemoize[globalDebugCounter] = true;
 	globalDebugCounter++;
 	u32 number = globalDebugCounter;
-	Platform_LockRelease(globalDebugLock);
+	Platform_LockRelease(&globalDebugLock);
 
 	DqnWin32_OutputDebugString("Thread %d: Incrementing Number: %d\n", GetCurrentThreadId(),
 	                           number);
-}
-
-FILE_SCOPE void DebugWin32JobPrintNumber(PlatformJobQueue *const queue, void *const userData)
-{
-	i32 numberToPrint = *((i32 *)userData);
-	DqnWin32_OutputDebugString("Thread %d: Printing number: %d\n", GetCurrentThreadId(),
-	                           numberToPrint);
 }
 
 DWORD WINAPI Win32ThreadCallback(void *lpParameter)
@@ -253,10 +234,6 @@ void Platform_FileClose(PlatformFile *const file)
 ////////////////////////////////////////////////////////////////////////////////
 // Win32 Layer
 ////////////////////////////////////////////////////////////////////////////////
-#include <Windows.h>
-#include <Windowsx.h> // For GET_X|Y_LPARAM(), mouse input
-#include <Psapi.h>    // For win32 GetProcessMemoryInfo()
-
 const char *const DLL_NAME     = "dtrenderer.dll";
 const char *const DLL_TMP_NAME = "dtrenderer_temp.dll";
 
@@ -755,27 +732,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 				CloseHandle(handle);
 			}
 
-#if 0
-			// DEBUG Create print jobs
-			for (i32 i = 0; i < 20; i++)
-			{
-				PlatformJob job = {};
-				job.callback    = DebugWin32JobPrintNumber;
-				job.userData    = DqnMemStack_Push(&globalPlatformMemory.tempStack, sizeof(i32));
-				if (job.userData)
-				{
-					*((i32 *)job.userData) = i;
-					Platform_QueueAddJob(&jobQueue, job);
-				}
-			}
-
-			while (Platform_QueueTryExecuteNextJob(&jobQueue))
-				;
-#endif
-
 #if 1
-			globalDebugLock = Platform_LockInit(&globalPlatformMemory.mainStack);
-			DQN_ASSERT(globalDebugLock);
+			DQN_ASSERT_HARD(DqnLock_Init(&globalDebugLock.dqnLock));
 			for (i32 i = 0; i < DQN_ARRAY_COUNT(globalDebugCounterMemoize); i++)
 			{
 				PlatformJob job = {};
