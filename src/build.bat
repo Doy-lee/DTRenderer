@@ -54,7 +54,7 @@ REM incremental:no,   turn incremental builds off
 REM opt:ref,          try to remove functions from libs that are not referenced at all
 set LinkFlags=-incremental:no -opt:ref -subsystem:WINDOWS -machine:x64 -nologo
 
-set DebugMode=0
+set DebugMode=1
 
 if %DebugMode%==1 goto :DebugFlags
 goto :ReleaseFlags

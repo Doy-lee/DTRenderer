@@ -201,7 +201,7 @@ void DTRRender_Text(DTRRenderContext context,
 	DTR_DEBUG_EP_TIMED_FUNCTION();
 
 
-	if (len == -1) len = Dqn_strlen(text);
+	if (len == -1) len = DqnStr_Len(text);
 
 	i32 index = 0;
 	color = DTRRender_SRGB1ToLinearSpaceV4(color);
