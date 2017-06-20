@@ -8,6 +8,11 @@
 #define UNICODE
 #define _UNICODE
 
+FILE_SCOPE PlatformMemory globalPlatformMemory;
+FILE_SCOPE bool           globalRunning;
+
+void Platform_DieGracefully() { globalRunning = false; }
+
 ////////////////////////////////////////////////////////////////////////////////
 // Platform Atomics
 ////////////////////////////////////////////////////////////////////////////////
@@ -267,8 +272,6 @@ typedef struct Win32RenderBitmap
 } Win32RenderBitmap;
 
 FILE_SCOPE Win32RenderBitmap globalRenderBitmap;
-FILE_SCOPE PlatformMemory    globalPlatformMemory;
-FILE_SCOPE bool              globalRunning;
 
 typedef struct Win32ExternalCode
 {
@@ -659,37 +662,41 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	{
 		char exeDir[MAX_PATH] = {};
 		i32 lastSlashIndex    = DqnWin32_GetEXEDirectory(exeDir, DQN_ARRAY_COUNT(exeDir));
-		if (lastSlashIndex != -1)
+		if (DQN_ASSERT_MSG(lastSlashIndex != -1, "Not enough space in buffer for exe path"))
 		{
-			DQN_ASSERT(lastSlashIndex + 1 < DQN_ARRAY_COUNT(exeDir));
-
 			exeDir[lastSlashIndex + 1] = 0;
-			u32 numCopied              = Dqn_sprintf(dllPath, "%s%s", exeDir, DLL_NAME);
-			DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllPath));
+			u32 dllNumCopied           = Dqn_sprintf(dllPath, "%s%s", exeDir, DLL_NAME);
+			u32 dllTmpNumCopied        = Dqn_sprintf(dllTmpPath, "%s%s", exeDir, DLL_TMP_NAME);
 
-			numCopied = Dqn_sprintf(dllTmpPath, "%s%s", exeDir, DLL_TMP_NAME);
-			DQN_ASSERT(numCopied < DQN_ARRAY_COUNT(dllTmpPath));
-		}
-		else
-		{
-			DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			if (!DQN_ASSERT_MSG((dllNumCopied    < DQN_ARRAY_COUNT(dllPath)) &&
+			                    (dllTmpNumCopied < DQN_ARRAY_COUNT(dllPath)),
+			                    "Out of space to form DLL path"))
+			{
+				Platform_DieGracefully();
+			}
 		}
 	}
 
 	////////////////////////////////////////////////////////////////////////////
 	// Platform Data Pre-amble
 	////////////////////////////////////////////////////////////////////////////
-	DQN_ASSERT(DqnMemStack_Init(&globalPlatformMemory.mainStack, DQN_MEGABYTE(4), true, 4) &&
-	           DqnMemStack_Init(&globalPlatformMemory.tempStack, DQN_MEGABYTE(4), true, 4) &&
-	           DqnMemStack_Init(&globalPlatformMemory.assetStack, DQN_MEGABYTE(4), true, 4)
-			  );
+	bool memoryInitResult =
+	    DqnMemStack_Init(&globalPlatformMemory.mainStack, DQN_MEGABYTE(4), true, 4) |
+	    DqnMemStack_Init(&globalPlatformMemory.tempStack, DQN_MEGABYTE(4), true, 4) |
+	    DqnMemStack_Init(&globalPlatformMemory.assetStack, DQN_MEGABYTE(4), true, 4);
+	if (!DQN_ASSERT_MSG(memoryInitResult, "Unable to allocate DTRenderer globalPlatformMemory stacks"))
+	{
+		Platform_DieGracefully();
+	}
 
-	PlatformAPI platformAPI = {};
-	platformAPI.FileOpen    = Platform_FileOpen;
-	platformAPI.FileRead    = Platform_FileRead;
-	platformAPI.FileWrite   = Platform_FileWrite;
-	platformAPI.FileClose   = Platform_FileClose;
-	platformAPI.Print       = Platform_Print;
+	PlatformAPI platformAPI   = {};
+	platformAPI.DieGracefully = Platform_DieGracefully;
+
+	platformAPI.FileOpen  = Platform_FileOpen;
+	platformAPI.FileRead  = Platform_FileRead;
+	platformAPI.FileWrite = Platform_FileWrite;
+	platformAPI.FileClose = Platform_FileClose;
+	platformAPI.Print     = Platform_Print;
 
 	platformAPI.QueueAddJob            = Platform_QueueAddJob;
 	platformAPI.QueueTryExecuteNextJob = Platform_QueueTryExecuteNextJob;
@@ -714,11 +721,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	PlatformJob jobQueueMemory[512] = {};
 	{
 		DqnMemStackTempRegion memRegion;
-		if (!DqnMemStackTempRegion_Begin(&memRegion, &globalPlatformMemory.tempStack))
-		{
-			DQN_WIN32_ERROR_BOX("DqnMemStackTempRegion_Begin() failed", NULL);
-			DQN_ASSERT(DQN_INVALID_CODE_PATH);
-		}
+		if (!DQN_ASSERT(DqnMemStackTempRegion_Begin(&memRegion, &globalPlatformMemory.tempStack)))
+			Platform_DieGracefully();
 
 		////////////////////////////////////////////////////////////////////////
 		// Query CPU Cores
@@ -737,8 +741,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 		// NOTE: (numCores - 1), 1 core is already exclusively for main thread
 		i32 availableThreads = (numCores - 1) * numThreadsPerCore;
-		// TODO(doyle): Logic for single core/thread processors
-		DQN_ASSERT(availableThreads > 0);
+		if (availableThreads <= 0) availableThreads = 1;
 		
 		jobQueue.win32Semaphore = CreateSemaphore(NULL, 0, availableThreads, NULL);
 		if (jobQueue.win32Semaphore)

@@ -64,16 +64,40 @@ typedef float  f32;
 #define DQN_SWAP(type, a, b) do { type tmp = a; a = b; b = tmp; } while(0)
 
 ////////////////////////////////////////////////////////////////////////////////
-// Dqn Error
+// DqnAssert
 ////////////////////////////////////////////////////////////////////////////////
-#define DQN_ASSERT_HARD(expr) if (!(expr)) { *((int *)0) = 0; }
+// DQN_ASSERT() & DQN_ASSERT_MSG() will hard break the program but it can be
+// disabled in DqnAssertInternal() for release whilst still allowing the assert
+// expressions to be evaluated and instead send diagnostics to console.
 
-#define DQN_ASSERT(expr)          DqnAssertInternal(expr, __FILE__, __LINE__, #expr, NULL)
-#define DQN_ASSERT_MSG(expr, msg) DqnAssertInternal(expr, __FILE__, __LINE__, #expr, msg)
+// NOTE: "## __VA_ARGS__" is a GCC hack. Zero variadic arguments won't compile
+// because there will be a trailing ',' at the end. Pasting it swallows it. MSVC
+// implicitly swallows the trailing comma.
+
+// Macro returns if the result was true or not.
+#define DQN_ASSERT(expr)               DqnAssertInternal(expr, __FILE__, __LINE__, #expr, NULL)
+#define DQN_ASSERT_MSG(expr, msg, ...) DqnAssertInternal(expr, __FILE__, __LINE__, #expr, msg, ## __VA_ARGS__)
+
+// Usage example. This protects code against asserts that should fire in release
+// mode by still letting the expression evaluate and the ability to redirect
+// the code flow to some recovery path.
+#if 0
+	int *mem = (int *)malloc(sizeof(*mem));
+	if (DQN_ASSERT_MSG(mem, "Not enough memory for malloc")) {
+	    // success
+	} else {
+	    // failed
+	}
+#endif
+
+// Internal implementation should not be used as the macro above will handle it,
+// but is required in header for visibility to external functions calling it.
 DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file, const i32 lineNum,
-                                      const char *const expr, const char *const msg);
+                                      const char *const expr, const char *const msg, ...);
 
-
+// Hard assert causes an immediate program break at point of assertion by trying
+// to modify the 0th mem-address.
+#define DQN_ASSERT_HARD(expr) if (!(expr)) { *((int *)0) = 0; }
 ////////////////////////////////////////////////////////////////////////////////
 // DqnMem - Memory
 ////////////////////////////////////////////////////////////////////////////////
@@ -286,6 +310,9 @@ bool  DqnArray_Remove      (DqnArray<T> *array, u64 index);
 bool  DqnArray_RemoveStable(DqnArray<T> *array, u64 index);
 #endif
 
+FILE_SCOPE const char *const DQN_MEM_API_CALLBACK_RESULT_TYPE_INCORRECT =
+    "DqnMemAPICallbackResult type is incorrect";
+
 // Implementation taken from Milton, developed by Serge at
 // https://github.com/serge-rgb/milton#license
 template <typename T>
@@ -321,7 +348,10 @@ bool DqnArray_Init(DqnArray<T> *array, size_t capacity,
 	DqnMemAPICallbackResult memResult = {0};
 	DqnMemAPICallbackInfo info = DqnMemAPICallback_InfoAskAllocInternal(array->memAPI, allocateSize);
 	array->memAPI.callback(info, &memResult);
-	DQN_ASSERT(memResult.type == DqnMemAPICallbackType_Alloc);
+	if (!DQN_ASSERT_MSG(memResult.type == DqnMemAPICallbackType_Alloc, DQN_MEM_API_CALLBACK_RESULT_TYPE_INCORRECT))
+	{
+		return false;
+	}
 
 	array->data = (T *)memResult.newMemPtr;
 	if (!array->data) return false;
@@ -348,7 +378,11 @@ bool DqnArray_Grow(DqnArray<T> *array)
 	    array->memAPI, array->data, oldSize, newSize);
 
 	array->memAPI.callback(info, &memResult);
-	DQN_ASSERT(memResult.type == DqnMemAPICallbackType_Realloc);
+	if (!DQN_ASSERT_MSG(memResult.type == DqnMemAPICallbackType_Realloc,
+	                    DQN_MEM_API_CALLBACK_RESULT_TYPE_INCORRECT))
+	{
+		return false;
+	}
 
 	if (memResult.newMemPtr)
 	{
@@ -1410,17 +1444,30 @@ STBSP__PUBLICDEF void STB_SPRINTF_DECORATE(set_separators)(char comma, char peri
 #endif
 
 DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file, const i32 lineNum,
-                                      const char *const expr, const char *const msg)
+                                      const char *const expr, const char *const msg, ...)
 {
-	if (!result)
+	if (!(result))
 	{
 		const char *const formatStrNoMsg   = "DqnAssert() failed: %s|%d| (%s)\n";
 		const char *const formatStrWithMsg = "DqnAssert() failed: %s|%d| (%s): %s\n";
 		const char *const formatStr        = (msg) ? formatStrWithMsg : formatStrNoMsg;
+
+		char userMsg[512] = {};
+		if (msg)
+		{
+			va_list argList;
+			va_start(argList, msg);
+			{
+				i32 numCopied = Dqn_vsprintf(userMsg, msg, argList);
+				DQN_ASSERT_HARD(numCopied < DQN_ARRAY_COUNT(userMsg));
+			}
+			va_end(argList);
+		}
+
 #if (defined(_WIN32) || defined(_WIN64)) && defined(DQN_WIN32_IMPLEMENTATION)
-		DqnWin32_OutputDebugString(formatStr, file, lineNum, expr, msg);
+		DqnWin32_OutputDebugString(formatStr, file, lineNum, expr, userMsg);
 #else
-		printf(formatStr, file, lineNum, expr, msg);
+		printf(formatStr, file, lineNum, expr, userMsg);
 #endif
 
 		(*((i32 *)0)) = 0;
@@ -1547,9 +1594,13 @@ DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem(DqnMemStack *const stack,
 {
 	if (!stack || !mem) return false;
 
-	// TODO(doyle): Better logging
-	if (memSize < sizeof(DqnMemStackBlock))
-		DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	if (!DQN_ASSERT_MSG(
+	        memSize > sizeof(DqnMemStackBlock),
+	        "memSize is insufficient to initialise a memstack, memSize: %d, requiredSize: %d",
+	        memSize, sizeof(DqnMemStackBlock)))
+	{
+		return false;
+	}
 
 	stack->block            = (DqnMemStackBlock *)mem;
 	stack->block->memory    = mem + sizeof(DqnMemStackBlock);
@@ -1569,10 +1620,12 @@ DQN_FILE_SCOPE bool DqnMemStack_Init(DqnMemStack *const stack, size_t size,
                                       const u32 byteAlign)
 {
 	if (!stack || size <= 0) return false;
-	DQN_ASSERT(!stack->block);
+	if (!DQN_ASSERT_MSG(!stack->block, "MemStack has pre-existing block already attached"))
+		return false;
 
 	stack->block = DqnMemStack_AllocateBlockInternal(byteAlign, size);
-	if (!stack->block) return false;
+	if (!DQN_ASSERT_MSG(stack->block, "MemStack failed to allocate block, not enough memory"))
+		return false;
 
 	stack->tempRegionCount = 0;
 	stack->byteAlign       = byteAlign;
@@ -1613,17 +1666,14 @@ DQN_FILE_SCOPE void *DqnMemStack_Push(DqnMemStack *const stack, size_t size)
 		DqnMemStackBlock *newBlock = DqnMemStack_AllocateCompatibleBlock(stack, newBlockSize);
 		if (newBlock)
 		{
-			if (!DqnMemStack_AttachBlock(stack, newBlock))
-			{
-				// IMPORTANT(doyle): This should be impossible, considering that
-				// AllocateCompatibleBlock checks the preconditions that the new
-				// block should be able to be attached.
+			bool blockAttachResult = DqnMemStack_AttachBlock(stack, newBlock);
+			// IMPORTANT(doyle): This should be impossible, considering that
+			// AllocateCompatibleBlock checks the preconditions that the new
+			// block should be able to be attached.
 
-				// But if we somehow reach this, we need to free the block
-				// otherwise memory is leaked.
-				DQN_ASSERT(DQN_INVALID_CODE_PATH);
-				return NULL;
-			}
+			// But if we somehow reach this, we need to free the block
+			// otherwise memory is leaked.
+			DQN_ASSERT_HARD(blockAttachResult);
 		}
 		else
 		{
@@ -1642,11 +1692,11 @@ DQN_FILE_SCOPE void *DqnMemStack_Push(DqnMemStack *const stack, size_t size)
 	// subsequent allocations should also be aligned automatically.
 	// TODO(doyle): In the future, do we want to allow arbitrary alignment PER
 	// allocation, not per MemStack?
-	DQN_ASSERT(alignmentOffset == 0);
+	DQN_ASSERT_HARD(alignmentOffset == 0);
 
 	void *result = alignedResult;
 	stack->block->used += (alignedSize + alignmentOffset);
-	DQN_ASSERT(stack->block->used <= stack->block->size);
+	DQN_ASSERT_HARD(stack->block->used <= stack->block->size);
 	return result;
 }
 
@@ -1655,14 +1705,18 @@ DQN_FILE_SCOPE bool DqnMemStack_Pop(DqnMemStack *const stack, void *ptr, size_t 
 	if (!stack || !stack->block) return false;
 
 	u8 *currPtr = stack->block->memory + stack->block->used;
-	DQN_ASSERT((u8 *)ptr >= stack->block->memory && ptr < currPtr);
+	if (DQN_ASSERT_MSG((u8 *)ptr >= stack->block->memory && ptr < currPtr,
+	                   "'ptr' to pop does not belong to current memStack attached block"))
+	{
+		size_t calcSize = (size_t)currPtr - (size_t)ptr;
+		if (DQN_ASSERT_MSG(calcSize == size, "'ptr' was not the last item allocated to memStack"))
+		{
+			stack->block->used -= size;
+			return true;
+		}
+	}
 
-	size_t calcSize = (size_t)currPtr - (size_t)ptr;
-	DQN_ASSERT(calcSize == size);
-
-	stack->block->used -= size;
-
-	return true;
+	return false;
 }
 
 DQN_FILE_SCOPE bool DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemStackBlock *block)
@@ -1682,7 +1736,7 @@ DQN_FILE_SCOPE bool DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemS
 		DqnMem_Free(blockToFree);
 
 		// No more blocks, then last block has been freed
-		if (!stack->block) DQN_ASSERT(stack->tempRegionCount == 0);
+		if (!stack->block) DQN_ASSERT_HARD(stack->tempRegionCount == 0);
 		return true;
 	}
 
@@ -1704,7 +1758,7 @@ DQN_FILE_SCOPE void DqnMemStack_Free(DqnMemStack *stack)
 	// do is clear the block.
 	if (stack->flags & DqnMemStackFlag_IsFixedMemoryFromUser)
 	{
-		DQN_ASSERT(!stack->block->prevBlock);
+		DQN_ASSERT_HARD(!stack->block->prevBlock);
 		DqnMemStack_ClearCurrBlock(stack, false);
 		return;
 	}
@@ -1752,12 +1806,12 @@ DQN_FILE_SCOPE void DqnMemStackTempRegion_End(DqnMemStackTempRegion region)
 
 	if (stack->block)
 	{
-		DQN_ASSERT(stack->block->used >= region.used);
+		DQN_ASSERT_HARD(stack->block->used >= region.used);
 		stack->block->used = region.used;
 	}
 
 	stack->tempRegionCount--;
-	DQN_ASSERT(stack->tempRegionCount >= 0);
+	DQN_ASSERT_HARD(stack->tempRegionCount >= 0);
 }
 
 #ifdef DQN_CPP_MODE
@@ -1769,15 +1823,7 @@ DqnMemStackTempRegionScoped::DqnMemStackTempRegionScoped(DqnMemStack *const stac
 
 DqnMemStackTempRegionScoped::~DqnMemStackTempRegionScoped()
 {
-	if (this->isInit)
-	{
-		DqnMemStackTempRegion_End(this->tempMemStack);
-	}
-	else
-	{
-		// TODO(doyle): Report error
-		DQN_ASSERT(DQN_INVALID_CODE_PATH);
-	}
+	DqnMemStackTempRegion_End(this->tempMemStack);
 }
 #endif
 ////////////////////////////////////////////////////////////////////////////////
@@ -1820,23 +1866,23 @@ FILE_SCOPE DqnMemAPICallbackInfo DqnMemAPICallback_InfoAskFreeInternal(
 	return info;
 }
 
-void DqnMemAPI_ValidateCallbackInfo(DqnMemAPICallbackInfo info)
+void DqnMemAPI_ValidateCallbackInfoInternal(DqnMemAPICallbackInfo info)
 {
-	DQN_ASSERT(info.type != DqnMemAPICallbackType_Invalid);
+	DQN_ASSERT_HARD(info.type != DqnMemAPICallbackType_Invalid);
 
 	switch(info.type)
 	{
 		case DqnMemAPICallbackType_Alloc:
 		{
-			DQN_ASSERT(info.requestSize > 0);
+			DQN_ASSERT_HARD(info.requestSize > 0);
 		}
 		break;
 
 		case DqnMemAPICallbackType_Realloc:
 		{
-			DQN_ASSERT(info.oldSize > 0);
-			DQN_ASSERT(info.requestSize > 0);
-			DQN_ASSERT(info.oldMemPtr);
+			DQN_ASSERT_HARD(info.oldSize > 0);
+			DQN_ASSERT_HARD(info.requestSize > 0);
+			DQN_ASSERT_HARD(info.oldMemPtr);
 		}
 		break;
 
@@ -1852,8 +1898,9 @@ FILE_SCOPE void
 DqnMemAPI_DefaultUseCallocCallbackInternal(DqnMemAPICallbackInfo info,
                                            DqnMemAPICallbackResult *result)
 {
-	DQN_ASSERT(!info.userContext);
-	DqnMemAPI_ValidateCallbackInfo(info);
+	DQN_ASSERT_HARD(!info.userContext);
+
+	DqnMemAPI_ValidateCallbackInfoInternal(info);
 	switch(info.type)
 	{
 		case DqnMemAPICallbackType_Alloc:
@@ -2859,7 +2906,7 @@ DQN_FILE_SCOPE i32 Dqn_I64ToStr(i64 value, char *const buf, const i32 bufSize)
 		// it is for positives, so ABS will fail.
 		lastDigitDecremented = true;
 		val                  = DQN_ABS(val - 1);
-		DQN_ASSERT(val >= 0);
+		DQN_ASSERT_HARD(val >= 0);
 	}
 
 	if (validBuffer)
@@ -2971,7 +3018,7 @@ DQN_FILE_SCOPE f32 Dqn_StrToF32(const char *const buf, const i32 bufSize)
 			if (i < bufSize)
 			{
 				if (buf[i + 1] == '-') digitShiftIsPositive = false;
-				DQN_ASSERT(buf[i + 1] == '-' || buf[i + 1] == '+');
+				DQN_ASSERT_HARD(buf[i + 1] == '-' || buf[i + 1] == '+');
 				i += 2;
 			}
 
@@ -2997,7 +3044,7 @@ DQN_FILE_SCOPE f32 Dqn_StrToF32(const char *const buf, const i32 bufSize)
 			// NOTE(doyle): If exponent not specified but this branch occurred,
 			// the float string has a malformed scientific notation in the
 			// string, i.e. "e" followed by no number.
-			DQN_ASSERT(scientificNotation);
+			DQN_ASSERT_HARD(scientificNotation);
 
 			numDigitsAfterDecimal += exponentPow;
 			if (digitShiftIsPositive) digitShiftMultiplier = 10.0f;
@@ -3443,10 +3490,8 @@ DQN_FILE_SCOPE void DqnWin32_GetNumThreadsAndCores(i32 *const numCores, i32 *con
 		    &requiredSize);
 
 		u8 *rawProcInfoArray = (u8 *)DqnMem_Calloc(requiredSize);
-		if (!rawProcInfoArray)
+		if (!DQN_ASSERT_MSG(rawProcInfoArray, "Calloc failed, could not allocate memory"))
 		{
-			DQN_WIN32_ERROR_BOX("DqnMem_Calloc() failed", NULL);
-			DQN_ASSERT(DQN_INVALID_CODE_PATH);
 			return;
 		}
 
@@ -3464,8 +3509,8 @@ DQN_FILE_SCOPE void DqnWin32_GetNumThreadsAndCores(i32 *const numCores, i32 *con
 				PROCESSOR_RELATIONSHIP *procInfo = &logicalProcInfo->Processor;
 				u32 efficiency                   = procInfo->EfficiencyClass;
 				(*numCores)++;
-				DQN_ASSERT(logicalProcInfo->Relationship == RelationProcessorCore);
-				DQN_ASSERT(procInfo->GroupCount == 1);
+				DQN_ASSERT_HARD(logicalProcInfo->Relationship == RelationProcessorCore);
+				DQN_ASSERT_HARD(procInfo->GroupCount == 1);
 
 				bytesRead += logicalProcInfo->Size;
 				logicalProcInfo =
@@ -3595,7 +3640,7 @@ DQN_FILE_SCOPE size_t DqnFile_Write(const DqnFile *const file,
 {
 	size_t numBytesWritten = 0;
 	// TODO(doyle): Implement when it's needed
-	DQN_ASSERT(fileOffset == 0);
+	if (DQN_ASSERT_MSG(fileOffset != 0, "'fileOffset' not implemented yet")) return 0;
 	if (!file || !buffer) return numBytesToWrite;
 
 #ifdef DQN_WIN32_IMPLEMENTATION
@@ -3612,7 +3657,7 @@ DQN_FILE_SCOPE size_t DqnFile_Write(const DqnFile *const file,
 	}
 
 #else
-	DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented");
 #endif
 
 	return numBytesWritten;
@@ -3630,7 +3675,7 @@ DQN_FILE_SCOPE void DqnFile_Close(DqnFile *const file)
 		file->permissionFlags = 0;
 	}
 #else
-	DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented");
 #endif
 }
 
@@ -3757,7 +3802,7 @@ FILE_SCOPE f64 DqnWin32_QueryPerfCounterTimeInSInternal()
 	if (queryPerformanceFrequency.QuadPart == 0)
 	{
 		QueryPerformanceFrequency(&queryPerformanceFrequency);
-		DQN_ASSERT(queryPerformanceFrequency.QuadPart != 0);
+		DQN_ASSERT_HARD(queryPerformanceFrequency.QuadPart != 0);
 	}
 
 	LARGE_INTEGER qpcResult;
@@ -3777,7 +3822,7 @@ f64 DqnTime_NowInS()
 	result = DQN_MAX(DqnWin32_QueryPerfCounterTimeInSInternal(), 0);
 #else
 	result = 0;
-	DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented yet");
 #endif
 	return result;
 };
@@ -3817,13 +3862,13 @@ FILE_SCOPE u32 DqnRnd_MakeSeedInternal()
 	__int64 numClockCycles = __rdtsc();
 	return (u32)numClockCycles;
 #elif __ANDROID__
-	DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Android path not implemented yet");
 	return 0;
 #elif __linux__
 	unsigned long long numClockCycles = rdtsc();
 	return (u32)numClockCycles;
 #else
-	DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented yet");
 	return 0;
 #endif
 }

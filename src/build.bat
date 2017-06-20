@@ -16,6 +16,11 @@ if %errorlevel%==0 (
 	ctags -R
 )
 
+where /q gtags
+if %errorlevel%==0 (
+	gtags
+)
+
 set ProjectName=dtrenderer
 ctime -begin ..\src\%ProjectName%.ctm
 
@@ -56,7 +61,7 @@ goto :ReleaseFlags
 
 :DebugFlags
 REM Od     disables optimisations
-REM RTC1   runtime error checks
+REM RTC1   runtime error checks, only possible with optimisations disabled
 set CompileFlags=%CompileFlags% -Od -RTC1
 goto compile
 
