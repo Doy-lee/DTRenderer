@@ -3,24 +3,75 @@
 ////////////////////////////////////////////////////////////////////////////////
 /*
 	#define DQN_IMPLEMENTATION       // Enable the implementation
-	#define DQN_WIN32_IMPLEMENTATION // Enable Win32 Code, but only if _WIN32 is already defined. Also requires DQN_IMPLEMENTATION.
+
+	// NOTE: For platform code, it's one or the other or you will get compilation problems.
+	#define DQN_WIN32_IMPLEMENTATION // Enable Win32 Code, but only if _WIN32 or _WIN64 is already defined. Also requires DQN_IMPLEMENTATION.
+	#define DQN_UNIX_IMPLEMENTATION  // Enable Unix Code, but only if __linux__ is already defined. Also requires DQN_IMPLEMENTATION.
+
 	#define DQN_MAKE_STATIC          // Make all functions be static
 	#include "dqn.h"
  */
 
 ////////////////////////////////////////////////////////////////////////////////
-// Platform Checks
+// Table Of Contents #TOC #TableOfContents
+////////////////////////////////////////////////////////////////////////////////
+// You can search by #<entry> to jump straight to the section.
+// The first match is the public API, the next matche(s) are the implementation
+
+// #Portable Code
+// #DqnAssert    Assertions
+// #DqnMem       Memory Allocation
+// #DqnMemStack  Memory Allocator, Push, Pop Style
+// #DqnMemAPI    Custom memory API for Dqn Data Structures
+// #DqnArray     CPP Dynamic Array with Templates
+// #DqnMath      Simple Math Helpers (Lerp etc.)
+// #DqnV2        2D  Math Vectors
+// #DqnV3        3D  Math Vectors
+// #DqnV4        4D  Math Vectors
+// #DqnMat4      4x4 Math Matrix
+// #DqnRect      Rectangles
+// #DqnChar      Char  Operations (IsDigit(), IsAlpha() etc)
+// #DqnStr       Str   Operations (Str_Len(), Str_Copy() etc)
+// #DqnWChar     WChar Operations (IsDigit(), IsAlpha() etc)
+// #DqnWStr      WStr  Operations (WStr_Len() etc)
+// #DqnRnd       Random Number Generator (ints and floats)
+
+// #XPlatform (Win32 & Unix)
+// #DqnFile   File I/O (Read, Write, Delete)
+// #DqnDir    Directory Querying
+// #DqnTimer  High Resolution Timer
+
+// #Platform
+// - #Win32Platform
+//   - #DqnLock      Mutex Synchronisation
+//   - #DqnAtomic    Interlocks/Atomic Operations
+//   - #DqnJobQueue  Multithreaded Job Queue
+//   - #DqnWin32     Common Win32 API Helpers
+
+// #External Code
+// #DqnIni       Simple INI Config File API (Public Domain lib by Mattias Gustavsson)
+// #DqnSprintf   Cross-platform Sprintf Implementation (Public Domain lib stb_sprintf)
+
+////////////////////////////////////////////////////////////////////////////////
+// Global Preprocessor Checks
 ////////////////////////////////////////////////////////////////////////////////
 // This needs to be above the portable layer so  that, if the user requests
 // a platform implementation, platform specific implementations in the portable
 // layer will get activated.
 #if (defined(_WIN32) || defined(_WIN64)) && defined(DQN_WIN32_IMPLEMENTATION)
-	#define DQN_PLATFORM_LAYER
+	#define DQN_XPLATFORM_LAYER
 	#define DQN_WIN32_PLATFORM
+#elif defined(__linux__) && defined(DQN_UNIX_IMPLEMENTATION)
+	#define DQN_XPLATFORM_LAYER
+	#define DQN_UNIX_PLATFORM
+#endif
+
+#if defined(__cplusplus)
+	#define DQN_CPP_MODE
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
-// Cross-Platform/Portable Layer
+// #Portable Code
 ////////////////////////////////////////////////////////////////////////////////
 #ifndef DQN_H
 #define DQN_H
@@ -30,11 +81,9 @@
 	#define DQN_FILE_SCOPE
 #endif
 
-#ifdef __cplusplus
-	#define DQN_CPP_MODE
-#endif
-
 #include <stdint.h> // For standard types
+#include <stddef.h> // For standard types
+#include <string.h> // memmove
 #include <float.h>
 #define LOCAL_PERSIST static
 #define FILE_SCOPE    static
@@ -75,7 +124,7 @@ typedef float  f32;
 #define DQN_SWAP(type, a, b) do { type tmp = a; a = b; b = tmp; } while(0)
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnAssert
+// #DqnAssert Public API - Assertions
 ////////////////////////////////////////////////////////////////////////////////
 // DQN_ASSERT() & DQN_ASSERT_MSG() will hard break the program but it can be
 // disabled in DqnAssertInternal() for release whilst still allowing the assert
@@ -85,7 +134,7 @@ typedef float  f32;
 // because there will be a trailing ',' at the end. Pasting it swallows it. MSVC
 // implicitly swallows the trailing comma.
 
-// Macro returns if the result was true or not.
+// returns: If the expr was true or not.
 #define DQN_ASSERT(expr)               DqnAssertInternal(expr, __FILE__, __LINE__, #expr, NULL)
 #define DQN_ASSERT_MSG(expr, msg, ...) DqnAssertInternal(expr, __FILE__, __LINE__, #expr, msg, ## __VA_ARGS__)
 
@@ -101,16 +150,22 @@ typedef float  f32;
 	}
 #endif
 
-// Internal implementation should not be used as the macro above will handle it,
-// but is required in header for visibility to external functions calling it.
+// Internal implementation should not be used as the macro above will handle it, but is required in
+// header for visibility to external functions calling it.
+// returns: If the expr was true or not.
 DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file, const i32 lineNum,
                                       const char *const expr, const char *const msg, ...);
 
 // Hard assert causes an immediate program break at point of assertion by trying
 // to modify the 0th mem-address.
 #define DQN_ASSERT_HARD(expr) if (!(expr)) { *((int *)0) = 0; }
+
+// Assert at compile time by making a type that is invalid depending on the expression result
+#define DQN_COMPILE_ASSERT(expr)                DQN_COMPILE_ASSERT_INTERNAL(expr, __COUNTER__)
+#define DQN_COMPILE_ASSERT_INTERNAL(expr, guid) typedef char DqnCompileAssertInternal_##guid[((int)(expr)) * 2 - 1];
+
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMem - Memory
+// #DqnMem Public API - Memory Allocation
 ////////////////////////////////////////////////////////////////////////////////
 // TODO(doyle): Use platform allocation, fallback to malloc if platform not defined
 DQN_FILE_SCOPE void *DqnMem_Alloc  (const size_t size);
@@ -120,17 +175,15 @@ DQN_FILE_SCOPE void *DqnMem_Realloc(void *const memory, const size_t newSize);
 DQN_FILE_SCOPE void  DqnMem_Free   (void *memory);
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemStack - Memory Stack, For push stack/ptr memory style management
+// #DqnMemStack Public API - Memory Allocator, Push, Pop Style
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemStack is an memory allocator in a stack like, push-pop style. It
-// pre-allocates a block of memory at init and sub-allocates from this block to
-// take advantage of memory locality.
+// DqnMemStack is an memory allocator in a stack like, push-pop style. It pre-allocates a block of
+// memory at init and sub-allocates from this block to take advantage of memory locality.
 
-// When an allocation requires a larger amount of memory than available in the
-// block then the MemStack will allocate a new block of sufficient size for
-// you in DqnMemStack_Push(..). This DOES mean that there will be wasted space
-// at the end of each block and is a tradeoff for memory locality against
-// optimal space usage.
+// When an allocation requires a larger amount of memory than available in the block then the
+// MemStack will allocate a new block of sufficient size for you in DqnMemStack_Push(..). This DOES
+// mean that there will be wasted spaceat the end of each block and is a tradeoff for memory
+// locality against optimal space usage.
 
 // How To Use:
 // 1. Create a DqnMemStack struct and pass it into an initialisation function
@@ -149,34 +202,102 @@ DQN_FILE_SCOPE void  DqnMem_Free   (void *memory);
 enum DqnMemStackFlag
 {
 	DqnMemStackFlag_IsNotExpandable       = (1 << 0),
-	DqnMemStackFlag_IsFixedMemoryFromUser = (1 << 1), // NOTE(doyle): Required to indicate we CAN'T free this memory when free is called.
+
+	// NOTE(doyle): Required to indicate we CAN'T free this memory when free is called.
+	DqnMemStackFlag_IsFixedMemoryFromUser = (1 << 1),
 };
 
 typedef struct DqnMemStack
 {
 	struct DqnMemStackBlock *block;
-
 	u32 flags;
 	i32 tempRegionCount;
 	u32 byteAlign;
+
+#if defined(DQN_CPP_MODE)
+	// Initialisation API
+	bool  InitWithFixedMem (u8 *const mem,     const size_t memSize, const u32 byteAlignment = 4);
+	bool  InitWithFixedSize(const size_t size, const bool zeroClear, const u32 byteAlignment = 4);
+	bool  Init             (const size_t size, const bool zeroClear, const u32 byteAlignment = 4);
+
+	// Memory API
+	void *Push(size_t size);
+	void  Pop (void *const ptr, size_t size);
+	void  Free();
+	bool  FreeMemBlock  (DqnMemStackBlock *memBlock);
+	bool  FreeLastBlock ();
+	void  ClearCurrBlock(const bool zeroClear);
+
+	// Temporary Regions API
+	struct DqnMemStackTempRegion TempRegionBegin();
+	void                         TempRegionEnd  (DqnMemStackTempRegion region);
+
+	// Scoped Temporary Regions API
+	struct DqnMemStackTempRegionScoped TempRegionScoped();
+
+	// Advanced API
+	DqnMemStackBlock *AllocateCompatibleBlock(size_t size);
+	bool              AttachBlock            (DqnMemStackBlock *const newBlock);
+	bool              DetachBlock            (DqnMemStackBlock *const detachBlock);
+    void              FreeDetachedBlock      (DqnMemStackBlock *memBlock);
+#endif
 } DqnMemStack;
 
-DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem (DqnMemStack *const stack, u8 *const mem, const size_t memSize, const u32 byteAlign = 4); // Use preallocated memory, no further allocations, returns NULL on allocate if out of space
-DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedSize(DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4); // Single allocation from platform, no further allocations, returns NULL of allocate if out of space
-DQN_FILE_SCOPE bool DqnMemStack_Init             (DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4); // Allocates from platform dynamically as space runs out
+////////////////////////////////////////////////////////////////////////////////
+//  DqnMemStack Initialisation
+////////////////////////////////////////////////////////////////////////////////
+// Uses fixed memory given by user. All allocations from the MemStack will be suballocated from the
+// given memory. Allocations fail after the MemStack becomes full.
+// stack:     Pass in a pointer to a zero cleared DqnMemStack struct.
+// mem:       Memory to use for the memory stack
+// byteAlign: Set the alignment of memory addresses for all allocated items from the memory stack.
+// return:    FALSE if args are invalid, or insufficient memSize.
+DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem (DqnMemStack *const stack, u8 *const mem, const size_t memSize, const u32 byteAlign = 4);
 
-DQN_FILE_SCOPE void *DqnMemStack_Push          (DqnMemStack *const stack, size_t size);             // Returns NULL if out of space and stack is using fixed memory/size, or platform allocation fails.
-DQN_FILE_SCOPE bool  DqnMemStack_Pop           (DqnMemStack *const stack, void *ptr, size_t size);  // Frees the given ptr. It MUST be the last allocated item in the stack.
-DQN_FILE_SCOPE void  DqnMemStack_Free          (DqnMemStack *const stack);                          // Frees all blocks belonging to this stack.
-DQN_FILE_SCOPE bool  DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemStackBlock *block); // Frees the specified block, returns false if block doesn't belong, calls DqnMem_Free().
-DQN_FILE_SCOPE bool  DqnMemStack_FreeLastBlock (DqnMemStack *const stack);                          // Frees the last-most memory block. If last block, free that block, next allocate will attach a block.
-DQN_FILE_SCOPE void  DqnMemStack_ClearCurrBlock(DqnMemStack *const stack, const bool zeroClear);    // Reset the current memory block usage to 0.
+// The memory stack uses 1 initial allocation from the DqnMem_Alloc(). No further allocations are
+// made. All allocations are suballocated from the first allocation.
+// size: The amount of memory to allocate. Size gets aligned to the next "byteAlign"ed value.
+DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedSize(DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4);
 
-// TempMemRegion is only required for the function. Once BeginTempRegion() is called, subsequent allocation calls can be made using the original stack.
-// Upon EndTempRegion() the original stack will free any additional blocks it allocated during the temp region and revert to the original
-// state before BeginTempRegion() was called.
-// WARNING: Any calls to Free/Clear functions in a TempRegion will invalidate and trash the stack structure.
-// TODO(doyle): Look into a way of disallowing calls to free/clear in temp regions
+// Dynamically expandable stack. Akin to DqnMemStack_InitWithFixedSize() except if the MemStack does
+// not have enough space for allocation it will automatically attach another MemBlock using
+// DqnMem_Alloc().
+DQN_FILE_SCOPE bool DqnMemStack_Init (DqnMemStack *const stack, size_t size, const bool zeroClear, const u32 byteAlign = 4);
+
+////////////////////////////////////////////////////////////////////////////////
+//  DqnMemStack Memory Operations
+////////////////////////////////////////////////////////////////////////////////
+// Allocate memory from the MemStack.
+// size:   "size" gets aligned to the byte alignment of the stack. 
+// return: NULL if out of space OR stack is using fixed memory/size OR stack full and platform malloc fails.
+DQN_FILE_SCOPE void *DqnMemStack_Push          (DqnMemStack *const stack, size_t size);
+
+// Frees the given ptr. It MUST be the last allocated item in the stack, fails otherwise.
+DQN_FILE_SCOPE bool  DqnMemStack_Pop           (DqnMemStack *const stack, void *ptr, size_t size);
+
+// Frees all blocks belonging to this stack.
+DQN_FILE_SCOPE void  DqnMemStack_Free          (DqnMemStack *const stack);
+
+// Frees the specified block belonging to the stack.
+// return: FALSE if block doesn't belong this into calls DqnMem_Free() or invalid args.
+DQN_FILE_SCOPE bool  DqnMemStack_FreeMemBlock(DqnMemStack *const stack, DqnMemStackBlock *memBlock);
+
+// Frees the last-most memory block. If last block, free that block making the MemStack blockless.
+// Next allocate will attach a block.
+DQN_FILE_SCOPE bool  DqnMemStack_FreeLastBlock (DqnMemStack *const stack);
+
+// Reset the current memory block usage to 0.
+DQN_FILE_SCOPE void  DqnMemStack_ClearCurrBlock(DqnMemStack *const stack, const bool zeroClear);
+
+////////////////////////////////////////////////////////////////////////////////
+//  DqnMemStack Temporary Regions
+////////////////////////////////////////////////////////////////////////////////
+// Lets the programmer mark a begin/end region in which all the memory allocated from the MemStack
+// will be reverted upon reaching the DqnMemStackTempRegion_End() call. This includes the reverting
+// of additional MemBlocks allocated in a dynamic stack and all other various MemStack configs.
+
+// TODO(doyle): Look into a way of "preventing/guarding" against anual calls to free/clear in temp
+// regions
 typedef struct DqnMemStackTempRegion
 {
 	DqnMemStack             *stack;
@@ -184,14 +305,17 @@ typedef struct DqnMemStackTempRegion
 	size_t used;
 } DqnMemStackTempRegion;
 
+// region: Takes pointer to a zero-cleared DqnMemStackTempRegion struct.
+// return: FALSE if arguments are invalid.
 DQN_FILE_SCOPE bool DqnMemStackTempRegion_Begin(DqnMemStackTempRegion *region, DqnMemStack *const stack);
 DQN_FILE_SCOPE void DqnMemStackTempRegion_End  (DqnMemStackTempRegion region);
 
+// In cplusplus this allows automatic Begin/End pairs upon constructor of DqnMemStackTempRegionScoped.
+// isInit: Constructor was successful
 #ifdef DQN_CPP_MODE
 struct DqnMemStackTempRegionScoped
 {
-	bool isInit;
-	DqnMemStackTempRegionScoped(DqnMemStack *const stack);
+	DqnMemStackTempRegionScoped(DqnMemStack *const stack, bool *const succeeded);
 	~DqnMemStackTempRegionScoped();
 
 private:
@@ -200,10 +324,10 @@ private:
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
-// (OPTIONAL) DqnMemStack Advanced API
-// Blocks are freely modifiable if you want fine grained control. Size value and
-// memory ptr should _NOT_ be modified directly, only indirectly through the
-// regular API.
+// DqnMemStack Advanced API (OPTIONAL)
+////////////////////////////////////////////////////////////////////////////////
+// Blocks are freely modifiable if you want fine grained control. Size value and memory ptr should
+// NOT be modified directly, only indirectly through the regular API.
 typedef struct DqnMemStackBlock
 {
 	u8     *memory;
@@ -213,22 +337,21 @@ typedef struct DqnMemStackBlock
 	DqnMemStackBlock *prevBlock;
 } DqnMemStackBlock;
 
-// This is useful for forcing a new block to be used. AllocateCompatibleBlock
-// will fail if the supplied stack has flags set such that the stack is not
-// allowed to have new blocks.
+// These are useful for forcing a new block to be used. AllocateCompatibleBlock() will fail if the
+// supplied stack has flags set such that the stack is not allowed to have new blocks.
 DQN_FILE_SCOPE DqnMemStackBlock *DqnMemStack_AllocateCompatibleBlock(const DqnMemStack *const stack, size_t size);
 DQN_FILE_SCOPE bool              DqnMemStack_AttachBlock            (DqnMemStack *const stack, DqnMemStackBlock *const newBlock);
 DQN_FILE_SCOPE bool              DqnMemStack_DetachBlock            (DqnMemStack *const stack, DqnMemStackBlock *const detachBlock);
 
-// (IMPORTANT) Should only be used to free blocks that haven't been attached!
-// Attached blocks should be freed using FreeStackBlock().
-DQN_FILE_SCOPE void DqnMemStack_FreeBlock(DqnMemStackBlock *block);
+// (IMPORTANT) Should only be used to free blocks that haven't been attached! Attached blocks should
+// be freed using DqnMemStack_FreeMemBlock().
+DQN_FILE_SCOPE void DqnMemStack_FreeDetachedBlock(DqnMemStackBlock *memBlock);
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemAPI - Memory API, For using custom allocators
+// #DqnMemAPI Public API - Custom memory API for Dqn Data Structures
 ////////////////////////////////////////////////////////////////////////////////
-// You only need to care about this API if you want to use custom mem-alloc
-// routines in the data structures! Otherwise it has a default one to use.
+// You only need to care about this API if you want to use custom mem-alloc routines in the data
+// structures! Otherwise it already has a default one to use.
 
 // How To Use:
 // 1. Implement the callback function, where DqnMemApiCallbackInfo will tell you the request.
@@ -237,9 +360,9 @@ DQN_FILE_SCOPE void DqnMemStack_FreeBlock(DqnMemStackBlock *block);
 //    - (OPTIONAL) Set the user context to your book-keeping/mem allocating service
 // 3. Initialise any data structure that supports a DqnMemAPI with your struct.
 
-// That's it! Done :) Of course, changing memAPI's after initialisation is
-// invalid since the pointers belonging to your old routine may not be tracked
-// in your new memAPI. So you're at your own discretion there.
+// That's it! Done :) Of course, changing memAPI's after initialisation is invalid since the
+// pointers belonging to your old routine may not be tracked in your new memAPI. So you're at your
+// own discretion there.
 
 enum DqnMemAPICallbackType
 {
@@ -254,7 +377,8 @@ typedef struct DqnMemAPICallbackInfo
 	void *userContext;
 	enum DqnMemAPICallbackType type;
 	union {
-		struct { size_t requestSize; }; // DqnMemAPICallbackType_Alloc
+		 // DqnMemAPICallbackType_Alloc
+		struct { size_t requestSize; };
 
 		// DqnMemAPICallbackType_Free
 		struct
@@ -280,7 +404,10 @@ typedef struct DqnMemAPICallbackResult
 	enum DqnMemAPICallbackType type;
 } DqnMemAPICallbackResult;
 
+// Function prototype for implementing a DqnMemAPI_Callback. You must fill out the result structure.
+// result: Is always guaranteed to be a valid pointer.
 typedef void DqnMemAPI_Callback(DqnMemAPICallbackInfo info, DqnMemAPICallbackResult *result);
+
 typedef struct DqnMemAPI
 {
 	DqnMemAPI_Callback *callback;
@@ -288,9 +415,8 @@ typedef struct DqnMemAPI
 } DqnMemAPI;
 
 DQN_FILE_SCOPE DqnMemAPI DqnMemAPI_DefaultUseCalloc();
-
 ////////////////////////////////////////////////////////////////////////////////
-// DArray - Dynamic Array
+// #DqnArray Public API - CPP Dynamic Array with Templates
 ////////////////////////////////////////////////////////////////////////////////
 // Cplusplus mode only since it uses templates
 
@@ -304,19 +430,6 @@ struct DqnArray
 	u64 capacity;
 	T *data;
 };
-
-#if 0
-template <typename T>
-bool  DqnArray_Init        (DqnArray<T> *array, size_t capacity);
-bool  DqnArray_Grow        (DqnArray<T> *array);
-T    *DqnArray_Push        (DqnArray<T> *array, T item);
-T    *DqnArray_Pop         (DqnArray<T> *array)
-T    *DqnArray_Get         (DqnArray<T> *array, u64 index);
-bool  DqnArray_Clear       (DqnArray<T> *array);
-bool  DqnArray_Free        (DqnArray<T> *array);
-bool  DqnArray_Remove      (DqnArray<T> *array, u64 index);
-bool  DqnArray_RemoveStable(DqnArray<T> *array, u64 index);
-#endif
 
 FILE_SCOPE const char *const DQN_MEM_API_CALLBACK_RESULT_TYPE_INCORRECT =
     "DqnMemAPICallbackResult type is incorrect";
@@ -499,14 +612,14 @@ bool DqnArray_RemoveStable(DqnArray<T> *array, u64 index)
 #endif // DQN_CPP_MODE
 
 ////////////////////////////////////////////////////////////////////////////////
-// Math
+// #DqnMath Public API - Simple Math Helpers
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE f32 DqnMath_Lerp  (f32 a, f32 t, f32 b);
 DQN_FILE_SCOPE f32 DqnMath_Sqrtf (f32 a);
 DQN_FILE_SCOPE f32 DqnMath_Clampf(f32 val, f32 min, f32 max);
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV2 Vec2
+// #DqnV2 Public API - 2D Math Vectors
 ////////////////////////////////////////////////////////////////////////////////
 typedef union DqnV2 {
 	struct { f32 x, y; };
@@ -584,7 +697,7 @@ DQN_FILE_SCOPE inline bool    operator==(DqnV2i  a, DqnV2i b) { return      DqnV
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
-// Vec3
+// #DqnV3 Public API - 3D Math Vectors
 ////////////////////////////////////////////////////////////////////////////////
 typedef union DqnV3
 {
@@ -641,7 +754,7 @@ DQN_FILE_SCOPE DqnV3i DqnV3i_3i(i32 x, i32 y, i32 z);
 DQN_FILE_SCOPE DqnV3i DqnV3i_3f(f32 x, f32 y, f32 z);
 
 ////////////////////////////////////////////////////////////////////////////////
-// Vec4
+// #DqnV4 Public API - 4D Math Vectors
 ////////////////////////////////////////////////////////////////////////////////
 typedef union DqnV4 {
 	struct
@@ -687,7 +800,7 @@ DQN_FILE_SCOPE inline bool   operator==(DqnV4  a, DqnV4 b) { return      DqnV4_E
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
-// 4D Matrix Mat4
+// #DqnMat4 Public API - 4x4 Math Matrix
 ////////////////////////////////////////////////////////////////////////////////
 typedef union DqnMat4
 {
@@ -711,7 +824,7 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_Mul         (DqnMat4 a, DqnMat4 b);
 DQN_FILE_SCOPE DqnV4   DqnMat4_MulV4       (DqnMat4 a, DqnV4 b);
 
 ////////////////////////////////////////////////////////////////////////////////
-// Other Math
+// #DqnRect Public API - Rectangles
 ////////////////////////////////////////////////////////////////////////////////
 typedef struct DqnRect
 {
@@ -732,19 +845,28 @@ DQN_FILE_SCOPE DqnRect DqnRect_Move     (DqnRect rect, DqnV2 shift);
 DQN_FILE_SCOPE bool    DqnRect_ContainsP(DqnRect rect, DqnV2 p);
 
 ////////////////////////////////////////////////////////////////////////////////
-// char String Operations
+// #DqnChar Public API - Char Operations
 ////////////////////////////////////////////////////////////////////////////////
-DQN_FILE_SCOPE char  DqnChar_ToLower   (char c);
-DQN_FILE_SCOPE char  DqnChar_ToUpper   (char c);
-DQN_FILE_SCOPE bool  DqnChar_IsDigit   (char c);
-DQN_FILE_SCOPE bool  DqnChar_IsAlpha   (char c);
-DQN_FILE_SCOPE bool  DqnChar_IsAlphanum(char c);
+DQN_FILE_SCOPE char DqnChar_ToLower   (char c);
+DQN_FILE_SCOPE char DqnChar_ToUpper   (char c);
+DQN_FILE_SCOPE bool DqnChar_IsDigit   (char c);
+DQN_FILE_SCOPE bool DqnChar_IsAlpha   (char c);
+DQN_FILE_SCOPE bool DqnChar_IsAlphanum(char c);
 
-DQN_FILE_SCOPE i32   DqnStr_Cmp(const char *a, const char *b);
-// Returns the length without the null terminator
+////////////////////////////////////////////////////////////////////////////////
+// #DqnStr Public API - Str Operations
+////////////////////////////////////////////////////////////////////////////////
+// return: 0 if equal. 0 < if a is before b, > 0 if a is after b
+DQN_FILE_SCOPE i32 DqnStr_Cmp(const char *a, const char *b);
+
+// return: String length not including the NULL terminator. 0 if invalid args.
 DQN_FILE_SCOPE i32   DqnStr_Len           (const char *a);
+
+// Get the String length starting from a, up to and not including the first delimiter character.
 DQN_FILE_SCOPE i32   DqnStr_LenDelimitWith(const char *a, const char delimiter);
-DQN_FILE_SCOPE char *DqnStr_Copy          (char *dest, const char *src, i32 numChars);
+
+// return: The dest argument, NULL if args invalid (i.e. NULL pointers or numChars < 0)
+DQN_FILE_SCOPE char *DqnStr_Copy(char *dest, const char *src, i32 numChars);
 
 DQN_FILE_SCOPE bool DqnStr_Reverse           (char *buf, const i32 bufSize);
 DQN_FILE_SCOPE i32  DqnStr_FindFirstOccurence(const char *const src, const i32 srcLen, const char *const find, const i32 findLen);
@@ -764,7 +886,7 @@ DQN_FILE_SCOPE u32 Dqn_UCSToUTF8(u32 *dest, u32 character);
 DQN_FILE_SCOPE u32 Dqn_UTF8ToUCS(u32 *dest, u32 character);
 
 ////////////////////////////////////////////////////////////////////////////////
-// wchar String Operations
+// #DqnWChar Public API - WChar Operations
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE bool    DqnWChar_IsDigit(const wchar_t c);
 DQN_FILE_SCOPE wchar_t DqnWChar_ToLower(const wchar_t c);
@@ -777,39 +899,35 @@ DQN_FILE_SCOPE i32  Dqn_WStrToI32(const wchar_t *const buf, const i32 bufSize);
 DQN_FILE_SCOPE i32  Dqn_I32ToWStr(i32 value, wchar_t *buf, i32 bufSize);
 
 ////////////////////////////////////////////////////////////////////////////////
-// PCG (Permuted Congruential Generator) Random Number Generator
+// #DqnRnd Public API - Random Number Generator
 ////////////////////////////////////////////////////////////////////////////////
+// PCG (Permuted Congruential Generator) Random Number Generator
 typedef struct DqnRandPCGState
 {
 	u64 state[2];
 } DqnRandPCGState;
 
-// Initialise the random number generator using a seed. If not given it is
-// automatically created by using rdtsc. The generator is not valid until it's
-// been seeded.
+// pcg: Pass in a pointer to a zero-cleared DqnRandPCGState
 DQN_FILE_SCOPE void DqnRnd_PCGInitWithSeed(DqnRandPCGState *pcg, u32 seed);
-DQN_FILE_SCOPE void DqnRnd_PCGInit        (DqnRandPCGState *pcg);
+// Uses __rdtsc() to create a seed. TODO(doyle): This requires the platform layer.
+DQN_FILE_SCOPE void DqnRnd_PCGInit(DqnRandPCGState *pcg);
 
-// Returns a random number N between [0, 0xFFFFFFFF]
+// return: A random number N between [0, 0xFFFFFFFF]
 DQN_FILE_SCOPE u32  DqnRnd_PCGNext (DqnRandPCGState *pcg);
-// Returns a random float N between [0.0, 1.0f]
+// return: A random float N between [0.0, 1.0f]
 DQN_FILE_SCOPE f32  DqnRnd_PCGNextf(DqnRandPCGState *pcg);
-// Returns a random integer N between [min, max]
+// return: A random integer N between [min, max]
 DQN_FILE_SCOPE i32  DqnRnd_PCGRange(DqnRandPCGState *pcg, i32 min, i32 max);
 #endif  /* DQN_H */
 
 ////////////////////////////////////////////////////////////////////////////////
-// Platform Layer
+// #XPlatform (Win32 & Unix) Public API
 ////////////////////////////////////////////////////////////////////////////////
-// TODO(doyle): The following functions require a platform to work, at this
-// point in time, they all only support Win32.
-#ifdef DQN_PLATFORM_LAYER
-#ifdef DQN_WIN32_PLATFORM
-
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+// Functions in the Cross Platform are guaranteed to be supported in both Unix
+// and Win32
+#ifdef DQN_XPLATFORM_LAYER
 ////////////////////////////////////////////////////////////////////////////////
-// DqnFile
+// XPlatform > #DqnFile Public API - File I/O
 ////////////////////////////////////////////////////////////////////////////////
 enum DqnFilePermissionFlag
 {
@@ -836,36 +954,63 @@ enum DqnFileAction
 
 typedef struct DqnFile
 {
+	u32 permissionFlags;
 	void   *handle;
 	size_t  size;
-	u32     permissionFlags;
+
 } DqnFile;
 
-// Open a handle to the file
-DQN_FILE_SCOPE bool   DqnFile_Open (const char *const path, DqnFile *const file, const u32 permissionFlags, const enum DqnFileAction action);
-DQN_FILE_SCOPE bool   DqnFile_OpenW(const wchar_t *const path, DqnFile *const file, const u32 permissionFlags, const enum DqnFileAction action);
-// File offset is the byte offset to starting writing from
-DQN_FILE_SCOPE size_t DqnFile_Write(const DqnFile *const file, const u8 *const buffer, const size_t numBytesToWrite, const size_t fileOffset);
+// NOTE: W(ide) versions of functions only work on Win32, since Unix is UTF-8 compatible.
 
-// Return the number of bytes read
-DQN_FILE_SCOPE size_t DqnFile_Read (const DqnFile file, const u8 *const buffer, const size_t numBytesToRead);
+// Open a handle for file read and writing. Deleting files does not need a handle. Handles should be
+// closed before deleting files otherwise the OS may not be able to delete the file.
+// return: FALSE if invalid args or failed to get handle (i.e. insufficient permissions)
+DQN_FILE_SCOPE bool DqnFile_Open (const char *const path, DqnFile *const file, const u32 permissionFlags, const enum DqnFileAction action);
+DQN_FILE_SCOPE bool DqnFile_OpenW(const wchar_t *const path, DqnFile *const file, const u32 permissionFlags, const enum DqnFileAction action);
+
+// fileOffset: The byte offset to starting writing from.
+// return:     The number of bytes written. 0 if invalid args or it failed to write.
+DQN_FILE_SCOPE size_t DqnFile_Write(const DqnFile *const file, u8 *const buffer, const size_t numBytesToWrite, const size_t fileOffset);
+
+// return: The number of bytes read. 0 if invalid args or it failed to read.
+DQN_FILE_SCOPE size_t DqnFile_Read (const DqnFile file, u8 *const buffer, const size_t numBytesToRead);
 DQN_FILE_SCOPE void   DqnFile_Close(DqnFile *const file);
 
-// Return an array of strings of the files in the directory in UTF-8. numFiles
-// returns the number of strings read.
-// This is allocated using malloc and MUST BE FREED! Can be done manually or
-// using the helper function.
-DQN_FILE_SCOPE char **DqnDir_Read    (char *dir, u32 *numFiles);
+// NOTE: You can't delete a file unless the handle has been closed to it on Win32.
+DQN_FILE_SCOPE bool DqnFile_Delete (const char *const path);
+DQN_FILE_SCOPE bool DqnFile_DeleteW(const wchar_t *const path);
+
+////////////////////////////////////////////////////////////////////////////////
+// XPlatform > #DqnDir Public API - Directory Querying
+////////////////////////////////////////////////////////////////////////////////
+// numFiles: Pass in a pointer to a u32. The function fills it out with the number of entries.
+// return:   An array of strings of the files in the directory in UTF-8. The directory lisiting is
+//           allocated with malloc and must be freed using free() or the helper function DqnDir_ReadFree()
+DQN_FILE_SCOPE char **DqnDir_Read    (const char *const dir, u32 *const numFiles);
 DQN_FILE_SCOPE void   DqnDir_ReadFree(char **fileList, u32 numFiles);
 
 ////////////////////////////////////////////////////////////////////////////////
-// Timer
+// XPlatform > #DqnTimer Public API - High Resolution Timer
 ////////////////////////////////////////////////////////////////////////////////
-DQN_FILE_SCOPE f64 DqnTime_NowInS();
-DQN_FILE_SCOPE f64 DqnTime_NowInMs();
+DQN_FILE_SCOPE f64  DqnTimer_NowInMs();
+DQN_FILE_SCOPE f64  DqnTimer_NowInS ();
+#endif // DQN_XPLATFORM_LAYER
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnLock
+// #Platform Public API
+////////////////////////////////////////////////////////////////////////////////
+// Functions here are only available for the #defined sections (i.e. all functions in
+// DQN_WIN32_PLATFORM only have a valid implementation in Win32.
+
+////////////////////////////////////////////////////////////////////////////////
+// #Win32Platform Public API
+////////////////////////////////////////////////////////////////////////////////
+#ifdef DQN_WIN32_PLATFORM
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+
+////////////////////////////////////////////////////////////////////////////////
+// Win32Platform > #DqnLock Public API - Mutex Synchronisation
 ////////////////////////////////////////////////////////////////////////////////
 typedef struct DqnLock
 {
@@ -878,28 +1023,28 @@ DQN_FILE_SCOPE void DqnLock_Release(DqnLock *const lock);
 DQN_FILE_SCOPE void DqnLock_Delete (DqnLock *const lock);
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnAtomics
+// Win32Platform > #DqnAtomic Public API - Interlocks/Atomic Operations
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE u32 DqnAtomic_CompareSwap32(u32 volatile *dest, u32 swapVal, u32 compareVal);
 DQN_FILE_SCOPE u32 DqnAtomic_Add32        (u32 volatile *src);
 DQN_FILE_SCOPE u32 DqnAtomic_Sub32        (u32 volatile *src);
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnJobQueue - Multithreaded Job Queue
+// Win32Platform > #DqnJobQueue Public API - Multithreaded Job Queue
 ////////////////////////////////////////////////////////////////////////////////
-// DqnJobQueue is a platform abstracted "lockless" multithreaded work queue. It
-// will create threads and assign threads to complete the job via the job
-// 'callback' using the 'userData' supplied.
+// DqnJobQueue is a platform abstracted "lockless" multithreaded work queue. It will create threads
+// and assign threads to complete the job via the job "callback" using the "userData" supplied.
 
 // Usage
-// 1. Prepare your callback function for threads to execute following the
-//   'DqnJob_Callback' function signature.
-// 2. Create a work queue with DqnJobQueue_InitWithMem()
-// 3. Add jobs with DqnJobQueue_AddJob() and threads will be dispatched.
-//
-// When all jobs are sent you can also utilise the main executing thread to
-// complete jobs whilst you wait for all jobs to complete using
-// DqnJobQueue_TryExecuteNextJob().
+// 1. Prepare your callback function for threads to execute following the 'DqnJob_Callback' function
+//    signature.
+// 2. Create a job queue with DqnJobQueue_InitWithMem()
+// 3. Add jobs with DqnJobQueue_AddJob() and threads will be dispatched automatically.
+
+// When all jobs are sent you can also utilise the main executing thread to complete jobs whilst you
+// wait for all jobs to complete using DqnJobQueue_TryExecuteNextJob() or spinlock on
+// DqnJobQueue_AllJobsComplete(). Alternatively you can combine both for the main thread to help
+// complete work and not move on until all tasks are complete.
 typedef struct DqnJobQueue DqnJobQueue;
 
 typedef void   DqnJob_Callback(DqnJobQueue *const queue, void *const userData);
@@ -909,62 +1054,72 @@ typedef struct DqnJob
 	void            *userData;
 } DqnJob;
 
-// If 'mem' is null OR 'memsize' is NULL or 0 OR queueSize is 0, the function
-// returns the required size in 'memSize' for initialisation.
+// memSize: The size of the supplied memory. If "mem" is NULL OR "memsize" is NULL/0 OR "queueSize"
+//          is 0, the function puts required size it needs into "memSize".
+// return:  The JobQueue or NULL if args invalid.
 DQN_FILE_SCOPE DqnJobQueue *DqnJobQueue_InitWithMem(const void *const mem, size_t *const memSize, const u32 queueSize, const u32 numThreads);
 
-// Returns false if the job is not able to be added, this can occur if the queue is full.
+// return: FALSE if the job is not able to be added, this occurs if the queue is full.
 DQN_FILE_SCOPE bool DqnJobQueue_AddJob(DqnJobQueue *const queue, const DqnJob job);
 
-// Returns true if there was an available job for the thread to execute. It may
-// return false whilst there are still jobs. This can occur if another thread
-// has taken the work before you have. Returning false does NOT mean that there
-// are no jobs left. That can only be known using DqnJobQueue_AllJobsComplete().
+// return: TRUE if there was a job to execute (the calling thread executes it). FALSE if it could
+//         not get a job. It may return FALSE whilst there are still jobs, this means that another thread
+//         has taken the job before the calling thread could and should NOT be used to determine if there
+//         are any remaining jobs left. That can only be definitively known using
+//         DqnJobQueue_AllJobsComplete(). This is typically combined like so ..
+//         while (DqnJobQueue_TryExecuteNextJob(queue) && !DqnJobQueue_AllJobsComplete(queue));
 DQN_FILE_SCOPE bool DqnJobQueue_TryExecuteNextJob(DqnJobQueue *const queue);
 DQN_FILE_SCOPE bool DqnJobQueue_AllJobsComplete  (DqnJobQueue *const queue);
 
 ////////////////////////////////////////////////////////////////////////////////
-// Win32 Specific
+// Platform > #DqnWin32 Public API - Common Win32 API Helpers
 ////////////////////////////////////////////////////////////////////////////////
 #define DQN_WIN32_ERROR_BOX(text, title) MessageBoxA(NULL, text, title, MB_OK);
-// Out is a pointer to the buffer to receive the characters.
-// outLen is the length/capacity of the out buffer
-DQN_FILE_SCOPE bool DqnWin32_UTF8ToWChar (const char *const in, wchar_t *const out, const i32 outLen);
-DQN_FILE_SCOPE bool DqnWin32_WCharToUTF8 (const wchar_t *const in, char *const out, const i32 outLen);
 
-DQN_FILE_SCOPE void DqnWin32_GetClientDim     (const HWND window, LONG *width, LONG *height);
-DQN_FILE_SCOPE void DqnWin32_GetRectDim       (RECT rect, LONG *width, LONG *height);
+// out:    A pointer to the buffer to receive the characters.
+// outLen: The length/capacity of the buffer "out"
+DQN_FILE_SCOPE bool DqnWin32_UTF8ToWChar(const char    *const in, wchar_t *const out, const i32 outLen);
+DQN_FILE_SCOPE bool DqnWin32_WCharToUTF8(const wchar_t *const in, char    *const out, const i32 outLen);
+
+// "width" and "height" are optional and won't be used if not given by user.
+// width & height: Pass in a pointer for function to fill out.
+DQN_FILE_SCOPE void DqnWin32_GetClientDim     (const HWND window, LONG *const width, LONG *const height);
+DQN_FILE_SCOPE void DqnWin32_GetRectDim       (const RECT rect,   LONG *const width, LONG *const height);
+
+// Displays error in the format <errorPrefix>: <Win32 Error Message> in a Win32 Dialog Box.
+// errorPrefix: The message before the Win32 error, can be NULL
 DQN_FILE_SCOPE void DqnWin32_DisplayLastError (const char *const errorPrefix);
+
+// Asimilar to DqnWin32_DisplayLastError() a particular error can be specified in a Win32 Dialog Box.
 DQN_FILE_SCOPE void DqnWin32_DisplayErrorCode (const DWORD error, const char *const errorPrefix);
+
+// Output text to the debug console. For visual studio this is the output window and not the console.
+// ...: Variable args alike printf, powered by stb_sprintf
 DQN_FILE_SCOPE void DqnWin32_OutputDebugString(const char *const formatStr, ...);
 
-// buf: Filled with the path to the executable file.
-// Returns the offset to the last backslash, -1 if bufLen was not large enough or buf is null.
+// Get the full path of to the current processes executable, and return the char offset in the
+// string to the last backslash, i.e. the directory.
+// buf:    Filled with the path to the executable file.
+// return: The offset to the last backslash. -1 if bufLen was not large enough or buf is null.
 DQN_FILE_SCOPE i32  DqnWin32_GetEXEDirectory(char *const buf, const u32 bufLen);
 
 // numCores: numThreadsPerCore: Can be NULL, the function will just skip it.
 // Uses calloc and free for querying numCores.
 DQN_FILE_SCOPE void DqnWin32_GetNumThreadsAndCores(i32 *const numCores, i32 *const numThreadsPerCore);
 #endif // DQN_WIN32_PLATFORM
-#endif // DQN_PLATFORM_LAYER
 
+////////////////////////////////////////////////////////////////////////////////
+// #External Code
+////////////////////////////////////////////////////////////////////////////////
 #ifndef DQN_INI_H
 #define DQN_INI_H
 ////////////////////////////////////////////////////////////////////////////////
-// ini.h v1.1
-// Simple ini-file reader for C/C++.
+// #DqnIni Public API - Simple INI Config File API v1.1
 ////////////////////////////////////////////////////////////////////////////////
 /*
 TODO(doyle): Make my own for fun?
 Public Domain library with thanks to Mattias Gustavsson
 https://github.com/mattiasgustavsson/libs/blob/master/docs/ini.md
-
-API Documentation
-ini.h is a small library for reading classic .ini files. It is a single-header
-library, and does not need any .lib files or other binaries, or any build
-scripts. To use it, you just include ini.h to get the API declarations. To get
-the definitions, you must include ini.h from *one* single C or C++ file, and
-#define the symbol `DQN_INI_IMPLEMENTATION` before you do.
 
 Examples
 Loading an ini file and retrieving values
@@ -1347,34 +1502,12 @@ zero-terminated. If `length` is zero, the length is determined automatically,
 #define STB_SPRINTF_DECORATE(name) Dqn_##name
 
 ////////////////////////////////////////////////////////////////////////////////
-// STB_Sprintf renamed to Dqn_Sprintf
+// #DqnSprintf Public API - Cross-platform Sprintf Implementation
 ////////////////////////////////////////////////////////////////////////////////
 /*
 Public Domain library originally written by Jeff Roberts at RAD Game Tools
 - 2015/10/20.  Hereby placed in public domain.
-
-API:
-====
-int Dqn_sprintf (char *buf, char const * fmt, ...)
-int Dqn_snprintf(char *buf, int count, char const *fmt, ...)
-- Convert an arg list into a buffer.
-- dqn_snprintf always returns a zero-terminated string (unlike regular snprintf).
-
-int Dqn_vsprintf (char *buf, char const *fmt, va_list va)
-int Dqn_vsnprintf(char *buf, int count, char const *fmt, va_list va)
-- Convert a va_list arg list into a buffer.
-- dqn_vsnprintf always returns a zero-terminated string (unlike regular snprintf).
-
-int dqn_vsprintfcb(STBSP_SPRINTFCB *callback, void *user, char *buf, char const *fmt, va_list va)
-typedef char *STBSP_SPRINTFCB(char const *buf, void *user, int len);
-- Convert into a buffer, calling back every STB_SPRINTF_MIN chars.
-- Your callback can then copy the chars out, print them or whatever.
-- This function is actually the workhorse for everything else.
-- The buffer you pass in must hold at least STB_SPRINTF_MIN characters.
-- You return the next buffer to use or 0 to stop converting
-
-void dqn_set_separators(char comma, char period)
-- Set the comma and period characters to use.
+STB_Sprintf renamed to Dqn_Sprintf
 
 FLOATS/DOUBLES:
 ===============
@@ -1441,18 +1574,30 @@ binary: "%b" for 256 would print 100.
 #ifndef STB_SPRINTF_MIN
 	#define STB_SPRINTF_MIN 512 // how many characters per callback
 #endif
-typedef char *STBSP_SPRINTFCB(char *buf, void *user, int len);
 
 #ifndef STB_SPRINTF_DECORATE
 	#define STB_SPRINTF_DECORATE(name) stbsp_##name  // define this before including if you want to change the names
 #endif
 
+// Convert a va_list arg list into a buffer. vsnprintf always returns a zero-terminated string (unlike regular snprintf).
+// return: The number of characters copied into the buffer
 STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintf) (char *buf, char const *fmt, va_list va);
 STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsnprintf)(char *buf, int count, char const *fmt, va_list va);
-STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(sprintf)  (char *buf, char const *fmt, ...);
-STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(snprintf) (char *buf, int count, char const *fmt, ...);
 
+// Convert an arg list into a buffer. snprintf() always returns a zero-terminated string (unlike regular snprintf).
+// return: The number of characters copied into the buffer
+STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(sprintf) (char *buf, char const *fmt, ...);
+STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(snprintf)(char *buf, int count, char const *fmt, ...);
+
+// Convert into a buffer, calling back every STB_SPRINTF_MIN chars.
+// Your callback can then copy the chars out, print them or whatever.
+// This function is actually the workhorse for everything else.
+// The buffer you pass in must hold at least STB_SPRINTF_MIN characters.
+// You return the next buffer to use or 0 to stop converting
+typedef char *STBSP_SPRINTFCB(char *buf, void *user, int len);
 STBSP__PUBLICDEF int  STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB* callback, void *user, char *buf, char const *fmt, va_list va);
+
+// Set the comma and period characters to use.
 STBSP__PUBLICDEF void STB_SPRINTF_DECORATE(set_separators)(char comma, char period);
 
 #endif // STB_SPRINTF_H_INCLUDE
@@ -1463,10 +1608,9 @@ STBSP__PUBLICDEF void STB_SPRINTF_DECORATE(set_separators)(char comma, char peri
 // DQN_IMPLEMENTATION
 //
 ////////////////////////////////////////////////////////////////////////////////
-#include <math.h>   // TODO(doyle): For trigonometry functions (for now)
-#include <stdlib.h> // For calloc, malloc, free
-#include <string.h> // For memset
-#include <stdio.h>  // For printf
+#include <math.h>    // TODO(doyle): For trigonometry functions (for now)
+#include <stdlib.h>  // For calloc, malloc, free
+#include <stdio.h>   // For printf
 
 // NOTE: STB_SPRINTF is included when DQN_IMPLEMENTATION defined
 // #define STB_SPRINTF_IMPLEMENTATION
@@ -1476,7 +1620,7 @@ STBSP__PUBLICDEF void STB_SPRINTF_DECORATE(set_separators)(char comma, char peri
 #define DQN_INI_STRLEN(s) DqnStr_Len(s)
 
 ////////////////////////////////////////////////////////////////////////////////
-// Dqn Error
+// #DqnAssert Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file, const i32 lineNum,
                                       const char *const expr, const char *const msg, ...)
@@ -1493,7 +1637,7 @@ DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file,
 			va_list argList;
 			va_start(argList, msg);
 			{
-				i32 numCopied = Dqn_vsprintf(userMsg, msg, argList);
+				u32 numCopied = Dqn_vsprintf(userMsg, msg, argList);
 				DQN_ASSERT_HARD(numCopied < DQN_ARRAY_COUNT(userMsg));
 			}
 			va_end(argList);
@@ -1511,7 +1655,7 @@ DQN_FILE_SCOPE bool DqnAssertInternal(const bool result, const char *const file,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemory - Default Memory Routines
+// #DqnMemory Implementation
 ////////////////////////////////////////////////////////////////////////////////
 // NOTE: All memory allocations in dqn.h go through these functions. So they can
 // be rerouted fairly easily especially for platform specific mallocs.
@@ -1548,7 +1692,7 @@ DQN_FILE_SCOPE void DqnMem_Free(void *memory)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemStackInternal Implementation
+// #DqnMemStackInternal Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnMemStackBlock *
 DqnMemStackInternal_AllocateBlock(u32 byteAlign, size_t size)
@@ -1557,7 +1701,6 @@ DqnMemStackInternal_AllocateBlock(u32 byteAlign, size_t size)
 	size_t totalSize   = alignedSize + sizeof(DqnMemStackBlock) + (byteAlign -1);
 	// NOTE(doyle): Total size includes another (byteAlign-1) since we also want
 	// to align the base pointer to memory that we receive.
-
 	DqnMemStackBlock *result = (DqnMemStackBlock *)DqnMem_Calloc(totalSize);
 	if (!result) return NULL;
 
@@ -1568,11 +1711,47 @@ DqnMemStackInternal_AllocateBlock(u32 byteAlign, size_t size)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemStack_Init* Implementation
+// #DqnMemStack CPP Implementation
+////////////////////////////////////////////////////////////////////////////////
+#if defined(DQN_CPP_MODE)
+#include <utility>
+bool DqnMemStack::InitWithFixedMem (u8 *const mem,     const size_t memSize, const u32 byteAlignment) { return DqnMemStack_InitWithFixedMem (this, mem, memSize, byteAlign);    }
+bool DqnMemStack::InitWithFixedSize(const size_t size, const bool zeroClear, const u32 byteAlignment) { return DqnMemStack_InitWithFixedSize(this, size, zeroClear, byteAlign); }
+bool DqnMemStack::Init             (const size_t size, const bool zeroClear, const u32 byteAlignment) { return DqnMemStack_Init             (this, size, zeroClear, byteAlign); }
+
+void *DqnMemStack::Push(size_t size)                        { return DqnMemStack_Push(this, size);                }
+void  DqnMemStack::Pop (void *const ptr, size_t size)       {        DqnMemStack_Pop (this, ptr, size);           }
+void  DqnMemStack::Free()                                   {        DqnMemStack_Free(this);                      }
+bool  DqnMemStack::FreeMemBlock(DqnMemStackBlock *memBlock) { return DqnMemStack_FreeMemBlock(this, block);       }
+bool  DqnMemStack::FreeLastBlock()                          { return DqnMemStack_FreeLastBlock(this);             }
+void  DqnMemStack::ClearCurrBlock(const bool zeroClear)     {        DqnMemStack_ClearCurrBlock(this, zeroClear); }
+
+DqnMemStackTempRegion DqnMemStack::TempRegionBegin()
+{
+	// NOTE: Should always succeed since the stack is guaranteed to exist.
+	DqnMemStackTempRegion result = {};
+	bool succeeded               = DqnMemStackTempRegion_Begin(&result, this);
+	DQN_ASSERT_HARD(succeeded);
+	return result;
+}
+void DqnMemStack::TempRegionEnd(DqnMemStackTempRegion region) { DqnMemStackTempRegion_End(region); }
+
+// NOTE: Guaranteed to always succeed. Fails when arguments are invalid, like a NULL ptr which is impossible here.
+DqnMemStackTempRegionScoped DqnMemStack::TempRegionScoped() { return DqnMemStackTempRegionScoped(this, NULL); }
+
+DqnMemStackBlock *DqnMemStack::AllocateCompatibleBlock(size_t size)                          { return DqnMemStack_AllocateCompatibleBlock(this, size);        }
+bool              DqnMemStack::AttachBlock            (DqnMemStackBlock *const newBlock)     { return DqnMemStack_AttachBlock            (this, newBlock);    }
+bool              DqnMemStack::DetachBlock            (DqnMemStackBlock *const detachBlock)  { return DqnMemStack_DetachBlock            (this, detachBlock); }
+void              DqnMemStack::FreeDetachedBlock      (DqnMemStackBlock *memBlock)           {        DqnMemStack_FreeDetachedBlock      (memBlock);             }
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+// #DqnMemStack Initialisation Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem(DqnMemStack *const stack, u8 *const mem,
                                                  const size_t memSize, const u32 byteAlign)
 {
+	// TODO(doyle): Logging
 	if (!stack || !mem) return false;
 
 	if (!DQN_ASSERT_MSG(
@@ -1591,7 +1770,7 @@ DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedMem(DqnMemStack *const stack, u8 *c
 	stack->flags = (DqnMemStackFlag_IsFixedMemoryFromUser | DqnMemStackFlag_IsNotExpandable);
 
 	const u32 DEFAULT_ALIGNMENT = 4;
-	stack->tempRegionCount     = 0;
+	stack->tempRegionCount      = 0;
 	stack->byteAlign = (byteAlign == 0) ? DEFAULT_ALIGNMENT : byteAlign;
 	return true;
 }
@@ -1609,9 +1788,8 @@ DQN_FILE_SCOPE bool DqnMemStack_InitWithFixedSize(DqnMemStack *const stack, size
 	return false;
 }
 
-DQN_FILE_SCOPE bool DqnMemStack_Init(DqnMemStack *const stack, size_t size,
-                                      const bool zeroClear,
-                                      const u32 byteAlign)
+DQN_FILE_SCOPE bool DqnMemStack_Init(DqnMemStack *const stack, size_t size, const bool zeroClear,
+                                     const u32 byteAlign)
 {
 	if (!stack || size <= 0) return false;
 	if (!DQN_ASSERT_MSG(!stack->block, "MemStack has pre-existing block already attached"))
@@ -1628,7 +1806,7 @@ DQN_FILE_SCOPE bool DqnMemStack_Init(DqnMemStack *const stack, size_t size,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemStack Push/Pop/Free Implementation
+// #DqnMemStack Push/Pop/Free Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE void *DqnMemStack_Push(DqnMemStack *const stack, size_t size)
 {
@@ -1691,9 +1869,10 @@ DQN_FILE_SCOPE bool DqnMemStack_Pop(DqnMemStack *const stack, void *ptr, size_t 
 	                   "'ptr' to pop does not belong to current memStack attached block"))
 	{
 		size_t calcSize = (size_t)currPtr - (size_t)ptr;
-		if (DQN_ASSERT_MSG(calcSize == size, "'ptr' was not the last item allocated to memStack"))
+		size_t sizeAligned = DQN_ALIGN_POW_N(size, stack->byteAlign);
+		if (DQN_ASSERT_MSG(calcSize == sizeAligned, "'ptr' was not the last item allocated to memStack"))
 		{
-			stack->block->used -= size;
+			stack->block->used -= sizeAligned;
 			return true;
 		}
 	}
@@ -1722,14 +1901,14 @@ DQN_FILE_SCOPE void DqnMemStack_Free(DqnMemStack *stack)
 	stack->flags &= ~DqnMemStackFlag_IsNotExpandable;
 }
 
-DQN_FILE_SCOPE bool DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemStackBlock *block)
+DQN_FILE_SCOPE bool DqnMemStack_FreeMemBlock(DqnMemStack *const stack, DqnMemStackBlock *memBlock)
 {
-	if (!stack || !block || !stack->block) return false;
+	if (!stack || !memBlock || !stack->block) return false;
 	if (stack->flags & DqnMemStackFlag_IsFixedMemoryFromUser) return false;
 
 	DqnMemStackBlock **blockPtr = &stack->block;
 
-	while (*blockPtr && (*blockPtr) != block)
+	while (*blockPtr && (*blockPtr) != memBlock)
 		blockPtr = &((*blockPtr)->prevBlock);
 
 	if (*blockPtr)
@@ -1748,7 +1927,7 @@ DQN_FILE_SCOPE bool DqnMemStack_FreeStackBlock(DqnMemStack *const stack, DqnMemS
 
 DQN_FILE_SCOPE bool DqnMemStack_FreeLastBlock(DqnMemStack *const stack)
 {
-	bool result = DqnMemStack_FreeStackBlock(stack, stack->block);
+	bool result = DqnMemStack_FreeMemBlock(stack, stack->block);
 	return result;
 }
 
@@ -1766,7 +1945,7 @@ DQN_FILE_SCOPE void DqnMemStack_ClearCurrBlock(DqnMemStack *const stack, const b
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemStackTempRegion Implementation
+// #DqnMemStackTempRegion Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE bool DqnMemStackTempRegion_Begin(DqnMemStackTempRegion *region,
                                                 DqnMemStack *const stack)
@@ -1798,10 +1977,10 @@ DQN_FILE_SCOPE void DqnMemStackTempRegion_End(DqnMemStackTempRegion region)
 }
 
 #ifdef DQN_CPP_MODE
-DqnMemStackTempRegionScoped::DqnMemStackTempRegionScoped(DqnMemStack *const stack)
+DqnMemStackTempRegionScoped::DqnMemStackTempRegionScoped(DqnMemStack *const stack, bool *const succeeded)
 {
-	this->isInit = DqnMemStackTempRegion_Begin(&this->tempMemStack, stack);
-	DQN_ASSERT(this->isInit);
+	bool result = DqnMemStackTempRegion_Begin(&this->tempMemStack, stack);
+	if (succeeded) *succeeded = result;
 }
 
 DqnMemStackTempRegionScoped::~DqnMemStackTempRegionScoped()
@@ -1811,7 +1990,7 @@ DqnMemStackTempRegionScoped::~DqnMemStackTempRegionScoped()
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemStack Advanced API Implementation
+// #DqnMemStack Advanced API Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnMemStackBlock *
 DqnMemStack_AllocateCompatibleBlock(const DqnMemStack *const stack, size_t size)
@@ -1861,14 +2040,14 @@ DQN_FILE_SCOPE bool DqnMemStack_DetachBlock(DqnMemStack *const stack,
 	return true;
 }
 
-DQN_FILE_SCOPE void DqnMemStack_FreeBlock(DqnMemStackBlock *block)
+DQN_FILE_SCOPE void DqnMemStack_FreeDetachedBlock(DqnMemStackBlock *memBlock)
 {
-	if (!block) return;
-	DqnMem_Free(block);
+	if (!memBlock) return;
+	DqnMem_Free(memBlock);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemAPIInternal Implementation
+// #DqnMemAPIInternal Implementation
 ////////////////////////////////////////////////////////////////////////////////
 FILE_SCOPE inline DqnMemAPICallbackInfo
 DqnMemAPIInternal_CallbackInfoAskRealloc(const DqnMemAPI memAPI,
@@ -1932,6 +2111,12 @@ FILE_SCOPE void DqnMemAPIInternal_ValidateCallbackInfo(DqnMemAPICallbackInfo inf
 			// nothing to validate
 		}
 		break;
+
+		default:
+		{
+			DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);
+		}
+		break;
 	}
 }
 
@@ -1967,11 +2152,17 @@ FILE_SCOPE void DqnMemAPIInternal_DefaultUseCallocCallback(DqnMemAPICallbackInfo
 			DqnMem_Free(info.ptrToFree);
 		}
 		break;
+
+		default:
+		{
+			DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);
+		}
+		break;
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnMemAPI Implementation - Mem API for custom allocation
+// #DqnMemAPI Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnMemAPI DqnMemAPI_DefaultUseCalloc()
 {
@@ -1982,7 +2173,7 @@ DQN_FILE_SCOPE DqnMemAPI DqnMemAPI_DefaultUseCalloc()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Math
+// #DqnMath Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE f32 DqnMath_Lerp(f32 a, f32 t, f32 b)
 {
@@ -2016,7 +2207,7 @@ DQN_FILE_SCOPE f32 DqnMath_Clampf(f32 val, f32 min, f32 max)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV2 Init Implementation
+// #DqnV2 Init Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV2 DqnV2_1f(f32 xy)
 {
@@ -2051,12 +2242,12 @@ DQN_FILE_SCOPE DqnV2 DqnV2_V2i(DqnV2i a)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV2 Arithmetic Implementation
+// #DqnV2 Arithmetic Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV2 DqnV2_Add(DqnV2 a, DqnV2 b)
 {
 	DqnV2 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] + b.e[i];
 
 	return result;
@@ -2065,7 +2256,7 @@ DQN_FILE_SCOPE DqnV2 DqnV2_Add(DqnV2 a, DqnV2 b)
 DQN_FILE_SCOPE DqnV2 DqnV2_Sub(DqnV2 a, DqnV2 b)
 {
 	DqnV2 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] - b.e[i];
 
 	return result;
@@ -2074,7 +2265,7 @@ DQN_FILE_SCOPE DqnV2 DqnV2_Sub(DqnV2 a, DqnV2 b)
 DQN_FILE_SCOPE DqnV2 DqnV2_Scalei(DqnV2 a, i32 b)
 {
 	DqnV2 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b;
 
 	return result;
@@ -2083,7 +2274,7 @@ DQN_FILE_SCOPE DqnV2 DqnV2_Scalei(DqnV2 a, i32 b)
 DQN_FILE_SCOPE DqnV2 DqnV2_Scalef(DqnV2 a, f32 b)
 {
 	DqnV2 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b;
 
 	return result;
@@ -2092,7 +2283,7 @@ DQN_FILE_SCOPE DqnV2 DqnV2_Scalef(DqnV2 a, f32 b)
 DQN_FILE_SCOPE DqnV2 DqnV2_Hadamard(DqnV2 a, DqnV2 b)
 {
 	DqnV2 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b.e[i];
 
 	return result;
@@ -2108,7 +2299,7 @@ DQN_FILE_SCOPE f32 DqnV2_Dot(DqnV2 a, DqnV2 b)
 	   |c|   |f|
 	 */
 	f32 result = 0;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result += (a.e[i] * b.e[i]);
 
 	return result;
@@ -2117,7 +2308,7 @@ DQN_FILE_SCOPE f32 DqnV2_Dot(DqnV2 a, DqnV2 b)
 DQN_FILE_SCOPE bool DqnV2_Equals(DqnV2 a, DqnV2 b)
 {
 	bool result = true;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		if (a.e[i] != b.e[i]) result = false;
 	return result;
 }
@@ -2194,7 +2385,7 @@ DQN_FILE_SCOPE DqnV2 DqnV2_ConstrainToRatio(DqnV2 dim, DqnV2 ratio)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV2i Init Implementation
+// #DqnV2i Init Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV2i DqnV2i_2i(i32 x, i32 y)
 {
@@ -2219,12 +2410,12 @@ DQN_FILE_SCOPE DqnV2i DqnV2i_V2(DqnV2 a)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV2i Arithmetic Implementation
+// #DqnV2i Arithmetic Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV2i DqnV2i_Add(DqnV2i a, DqnV2i b)
 {
 	DqnV2i result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] + b.e[i];
 
 	return result;
@@ -2233,7 +2424,7 @@ DQN_FILE_SCOPE DqnV2i DqnV2i_Add(DqnV2i a, DqnV2i b)
 DQN_FILE_SCOPE DqnV2i DqnV2i_Sub(DqnV2i a, DqnV2i b)
 {
 	DqnV2i result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] - b.e[i];
 
 	return result;
@@ -2242,7 +2433,7 @@ DQN_FILE_SCOPE DqnV2i DqnV2i_Sub(DqnV2i a, DqnV2i b)
 DQN_FILE_SCOPE DqnV2i DqnV2i_Scalef(DqnV2i a, f32 b)
 {
 	DqnV2i result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = (i32)(a.e[i] * b);
 
 	return result;
@@ -2251,7 +2442,7 @@ DQN_FILE_SCOPE DqnV2i DqnV2i_Scalef(DqnV2i a, f32 b)
 DQN_FILE_SCOPE DqnV2i DqnV2i_Scalei(DqnV2i a, i32 b)
 {
 	DqnV2i result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b;
 
 	return result;
@@ -2260,7 +2451,7 @@ DQN_FILE_SCOPE DqnV2i DqnV2i_Scalei(DqnV2i a, i32 b)
 DQN_FILE_SCOPE DqnV2i DqnV2i_Hadamard(DqnV2i a, DqnV2i b)
 {
 	DqnV2i result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b.e[i];
 
 	return result;
@@ -2276,7 +2467,7 @@ DQN_FILE_SCOPE f32 DqnV2i_Dot(DqnV2i a, DqnV2i b)
 	   |c|   |f|
 	 */
 	f32 result = 0;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result += (a.e[i] * b.e[i]);
 
 	return result;
@@ -2285,13 +2476,13 @@ DQN_FILE_SCOPE f32 DqnV2i_Dot(DqnV2i a, DqnV2i b)
 DQN_FILE_SCOPE bool DqnV2i_Equals(DqnV2i a, DqnV2i b)
 {
 	bool result = true;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		if (a.e[i] != b.e[i]) result = false;
 	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV3 Init Implementation
+// #DqnV3 Init Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV3 DqnV3_1f(f32 xyz)
 {
@@ -2312,12 +2503,12 @@ DQN_FILE_SCOPE DqnV3 DqnV3_3i(i32 x, i32 y, i32 z)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV3 Arithmetic Implementation
+// #DqnV3 Arithmetic Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV3 DqnV3_Add(DqnV3 a, DqnV3 b)
 {
 	DqnV3 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] + b.e[i];
 
 	return result;
@@ -2326,7 +2517,7 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Add(DqnV3 a, DqnV3 b)
 DQN_FILE_SCOPE DqnV3 DqnV3_Sub(DqnV3 a, DqnV3 b)
 {
 	DqnV3 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] - b.e[i];
 
 	return result;
@@ -2335,7 +2526,7 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Sub(DqnV3 a, DqnV3 b)
 DQN_FILE_SCOPE DqnV3 DqnV3_Scalei(DqnV3 a, i32 b)
 {
 	DqnV3 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b;
 
 	return result;
@@ -2344,7 +2535,7 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Scalei(DqnV3 a, i32 b)
 DQN_FILE_SCOPE DqnV3 DqnV3_Scalef(DqnV3 a, f32 b)
 {
 	DqnV3 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b;
 
 	return result;
@@ -2353,7 +2544,7 @@ DQN_FILE_SCOPE DqnV3 DqnV3_Scalef(DqnV3 a, f32 b)
 DQN_FILE_SCOPE DqnV3 DqnV3_Hadamard(DqnV3 a, DqnV3 b)
 {
 	DqnV3 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b.e[i];
 
 	return result;
@@ -2369,7 +2560,7 @@ DQN_FILE_SCOPE f32 DqnV3_Dot(DqnV3 a, DqnV3 b)
 	   |c|   |f|
 	 */
 	f32 result = 0;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result += (a.e[i] * b.e[i]);
 
 	return result;
@@ -2378,7 +2569,7 @@ DQN_FILE_SCOPE f32 DqnV3_Dot(DqnV3 a, DqnV3 b)
 DQN_FILE_SCOPE bool DqnV3_Equals(DqnV3 a, DqnV3 b)
 {
 	bool result = true;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		if (a.e[i] != b.e[i]) result = false;
 	return result;
 }
@@ -2427,7 +2618,7 @@ DQN_FILE_SCOPE f32 DqnV3_Length(DqnV3 a, DqnV3 b)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV3i Init Implementation
+// #DqnV3i Init Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV3i DqnV3i_3i(i32 x, i32 y, i32 z)
 {
@@ -2442,7 +2633,7 @@ DQN_FILE_SCOPE DqnV3i DqnV3i_3f(f32 x, f32 y, f32 z)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV4 Vec4 Init Implementation
+// #DqnV4 Init Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV4 DqnV4_1f(f32 xyzw)
 {
@@ -2471,12 +2662,12 @@ DQN_FILE_SCOPE DqnV4 DqnV4_V3(DqnV3 a, f32 w)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnV4 Vec4 Arithmetic Implementation
+// #DqnV4 Arithmetic Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnV4 DqnV4_Add(DqnV4 a, DqnV4 b)
 {
 	DqnV4 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] + b.e[i];
 
 	return result;
@@ -2485,7 +2676,7 @@ DQN_FILE_SCOPE DqnV4 DqnV4_Add(DqnV4 a, DqnV4 b)
 DQN_FILE_SCOPE DqnV4 DqnV4_Sub(DqnV4 a, DqnV4 b)
 {
 	DqnV4 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] - b.e[i];
 
 	return result;
@@ -2494,7 +2685,7 @@ DQN_FILE_SCOPE DqnV4 DqnV4_Sub(DqnV4 a, DqnV4 b)
 DQN_FILE_SCOPE DqnV4 DqnV4_Scalei(DqnV4 a, i32 b)
 {
 	DqnV4 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b;
 
 	return result;
@@ -2503,7 +2694,7 @@ DQN_FILE_SCOPE DqnV4 DqnV4_Scalei(DqnV4 a, i32 b)
 DQN_FILE_SCOPE DqnV4 DqnV4_Scalef(DqnV4 a, f32 b)
 {
 	DqnV4 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b;
 
 	return result;
@@ -2512,7 +2703,7 @@ DQN_FILE_SCOPE DqnV4 DqnV4_Scalef(DqnV4 a, f32 b)
 DQN_FILE_SCOPE DqnV4 DqnV4_Hadamard(DqnV4 a, DqnV4 b)
 {
 	DqnV4 result = {0};
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result.e[i] = a.e[i] * b.e[i];
 
 	return result;
@@ -2528,7 +2719,7 @@ DQN_FILE_SCOPE f32 DqnV4_Dot(DqnV4 a, DqnV4 b)
 	   |c|   |f|
 	 */
 	f32 result = 0;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		result += (a.e[i] * b.e[i]);
 
 	return result;
@@ -2537,13 +2728,13 @@ DQN_FILE_SCOPE f32 DqnV4_Dot(DqnV4 a, DqnV4 b)
 DQN_FILE_SCOPE bool DqnV4_Equals(DqnV4 a, DqnV4 b)
 {
 	bool result = true;
-	for (i32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
+	for (u32 i = 0; i < DQN_ARRAY_COUNT(a.e); i++)
 		if (a.e[i] != b.e[i]) result = false;
 	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// 4D Matrix Mat4
+// #DqnMat4 Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Identity()
 {
@@ -2669,8 +2860,8 @@ DQN_FILE_SCOPE DqnMat4 DqnMat4_ScaleV3(DqnV3 scale)
 DQN_FILE_SCOPE DqnMat4 DqnMat4_Mul(DqnMat4 a, DqnMat4 b)
 {
 	DqnMat4 result = {0};
-	for (i32 j = 0; j < 4; j++) {
-		for (i32 i = 0; i < 4; i++)
+	for (u32 j = 0; j < 4; j++) {
+		for (u32 i = 0; i < 4; i++)
 		{
 			result.e[j][i] = a.e[0][i] * b.e[j][0]
 			               + a.e[1][i] * b.e[j][1]
@@ -2694,7 +2885,7 @@ DQN_FILE_SCOPE DqnV4 DqnMat4_MulV4(DqnMat4 a, DqnV4 b)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnRect Init Implementation
+// #DqnRect Init Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnRect DqnRect_4f(f32 minX, f32 minY, f32 maxX, f32 maxY)
 {
@@ -2724,7 +2915,7 @@ DQN_FILE_SCOPE DqnRect DqnRect_Init(DqnV2 origin, DqnV2 size)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnRect Implementation
+// #DqnRect Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE void DqnRect_GetSize2f(DqnRect rect, f32 *width, f32 *height)
 {
@@ -2791,7 +2982,7 @@ DQN_FILE_SCOPE bool DqnRect_ContainsP(DqnRect rect, DqnV2 p)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnChar Implementation
+// #DqnChar Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE char DqnChar_ToLower(char c)
 {
@@ -2833,7 +3024,7 @@ DQN_FILE_SCOPE bool DqnChar_IsAlphaNum(char c)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnStr Implementation
+// #DqnStr Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE i32 DqnStr_Cmp(const char *a, const char *b)
 {
@@ -2869,7 +3060,8 @@ DQN_FILE_SCOPE i32 DqnStr_LenDelimitWith(const char *a, const char delimiter)
 DQN_FILE_SCOPE char *DqnStr_Copy(char *dest, const char *src, i32 numChars)
 {
 	if (!dest) return NULL;
-	if (!src)  return dest;
+	if (!src)  return NULL;
+	if (numChars < 0) return NULL;
 
 	for (i32 i  = 0; i < numChars; i++)
 		dest[i] = src[i];
@@ -3006,7 +3198,6 @@ DQN_FILE_SCOPE i32 Dqn_I64ToStr(i64 value, char *const buf, const i32 bufSize)
 	{
 		while (val != 0)
 		{
-			i32 rem = val % 10;
 			val /= 10;
 			charIndex++;
 		}
@@ -3111,8 +3302,14 @@ DQN_FILE_SCOPE f32 Dqn_StrToF32(const char *const buf, const i32 bufSize)
 			// string, i.e. "e" followed by no number.
 			DQN_ASSERT_HARD(scientificNotation);
 
-			numDigitsAfterDecimal += exponentPow;
-			if (digitShiftIsPositive) digitShiftMultiplier = 10.0f;
+			if (digitShiftIsPositive)
+			{
+				numDigitsAfterDecimal -= exponentPow;
+			}
+			else
+			{
+				numDigitsAfterDecimal += exponentPow;
+			}
 		}
 		else if (DqnChar_IsDigit(ch))
 		{
@@ -3299,7 +3496,7 @@ DQN_FILE_SCOPE u32 Dqn_UTF8ToUCS(u32 *dest, u32 character)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnWChar Implementation
+// #DqnWChar Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE bool DqnWChar_IsDigit(const wchar_t c)
 {
@@ -3318,6 +3515,9 @@ DQN_FILE_SCOPE wchar_t DqnWChar_ToLower(const wchar_t c)
 	return c;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// #DqnWStr Implementation
+////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE i32 DqnWStr_Len(const wchar_t *a)
 {
 	i32 result = 0;
@@ -3431,7 +3631,7 @@ DQN_FILE_SCOPE i32 Dqn_I32ToWstr(i32 value, wchar_t *buf, i32 bufSize)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// PCG (Permuted Congruential Generator) Random Number Generator
+// #DqnRnd Implementation
 ////////////////////////////////////////////////////////////////////////////////
 // Public Domain library with thanks to Mattias Gustavsson
 // https://github.com/mattiasgustavsson/libs/blob/master/docs/rnd.md
@@ -3457,17 +3657,18 @@ FILE_SCOPE u64 DqnRnd_Murmur3Avalanche64Internal(u64 h)
 	return h;
 }
 
+#if defined(DQN_UNIX_PLATFORM)
+	#include <x86intrin.h> // __rdtsc
+#endif
+
 FILE_SCOPE u32 DqnRnd_MakeSeedInternal()
 {
-#ifdef DQN_WIN32_PLATFORM
-	__int64 numClockCycles = __rdtsc();
+#if defined(DQN_WIN32_PLATFORM) || defined(DQN_UNIX_PLATFORM)
+	i64 numClockCycles = __rdtsc();
 	return (u32)numClockCycles;
 #elif __ANDROID__
 	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Android path not implemented yet");
 	return 0;
-#elif __linux__
-	unsigned long long numClockCycles = rdtsc();
-	return (u32)numClockCycles;
 #else
 	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented yet");
 	return 0;
@@ -3514,7 +3715,10 @@ DQN_FILE_SCOPE i32 DqnRnd_PCGRange(DqnRandPCGState *pcg, i32 min, i32 max)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// STB_Sprintf
+// #External Code
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// #DqnSprintf Implementation - STB_Sprintf
 ////////////////////////////////////////////////////////////////////////////////
 /*
 Single file sprintf replacement.
@@ -3565,6 +3769,11 @@ PERFORMANCE vs MSVC 2008 32-/64-bit (GCC is even slower than MSVC):
 "%s%s%s" for 64 char strings (7.1x/7.3x faster)
 "...512 char string..." ( 35.0x/32.5x faster!)
 */
+
+#ifdef __GNUC__
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#endif
 
 #include <stdlib.h>  // for va_arg()
 
@@ -4547,10 +4756,18 @@ static stbsp__int32 stbsp__real_to_str( char const * * start, stbsp__uint32 * le
 #undef stbsp__int64
 #undef STBSP__UNALIGNED
 
+#ifdef __GNUC__
+	#pragma GCC diagnostic pop
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
-// ini.h v1.1 | IMPLEMENTATION
-// Simple ini-file reader for C/C++.
+// #DqnIni Implementation - Simple ini-file reader for C/C++.
 ////////////////////////////////////////////////////////////////////////////////
+#ifdef __GNUC__
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wsign-compare"
+#endif
+
 #define INITIAL_CAPACITY (256)
 
 #define _CRT_NONSTDC_NO_DEPRECATE
@@ -5186,24 +5403,39 @@ void DqnIni_PropertyValueSet(DqnIni *ini, int section, int property,
 		}
 	}
 }
+
+#ifdef __GNUC__
+		#pragma GCC diagnostic pop // -Wsign-compare for DQN_INI
+#endif
 #endif // DQN_IMPLEMENTATION
 
+#if defined(DQN_XPLATFORM_LAYER)
 ////////////////////////////////////////////////////////////////////////////////
-// Platform Layer
+// #XPlatform (Win32 & Unix) Implementation
 ////////////////////////////////////////////////////////////////////////////////
+// Functions in the Cross Platform are guaranteed to be supported in both Unix
+// and Win32
 
+#ifdef DQN_UNIX_PLATFORM
+	#include <sys/stat.h>
+	#include <sys/time.h>
+	#include <time.h>
+	#include <stdio.h>    // Basic File I/O // TODO(doyle): Syscall versions
+	#include <unistd.h>   // unlink()
+	#include <dirent.h>   // readdir()/opendir()/closedir()
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+// XPlatform > #DqnFileInternal Implementation
+////////////////////////////////////////////////////////////////////////////////
 #ifdef DQN_WIN32_PLATFORM
-////////////////////////////////////////////////////////////////////////////////
-// DqnFileInternal Implementation
-////////////////////////////////////////////////////////////////////////////////
-FILE_SCOPE bool DqnFileInternal_Open(const wchar_t *const path,
-                                     DqnFile *const file,
-                                     const u32 permissionFlags,
-                                     const enum DqnFileAction action)
+FILE_SCOPE bool DqnFileInternal_Win32OpenW(const wchar_t *const path,
+                                           DqnFile *const file,
+                                           const u32 permissionFlags,
+                                           const enum DqnFileAction action)
 {
 	if (!file || !path) return false;
 
-#ifdef DQN_WIN32_PLATFORM
 	DWORD win32Permission = 0;
 	if (permissionFlags & DqnFilePermissionFlag_All)
 	{
@@ -5237,6 +5469,7 @@ FILE_SCOPE bool DqnFileInternal_Open(const wchar_t *const path,
 	LARGE_INTEGER size;
 	if (GetFileSizeEx(handle, &size) == 0)
 	{
+		DqnFile_Close(file);
 		DqnWin32_DisplayLastError("GetFileSizeEx() failed");
 		return false;
 	}
@@ -5245,114 +5478,12 @@ FILE_SCOPE bool DqnFileInternal_Open(const wchar_t *const path,
 	file->size            = (size_t)size.QuadPart;
 	file->permissionFlags = permissionFlags;
 	return true;
-#else
-	DQN_ASSERT(DQN_INVALID_CODE_PATH);
-	return false;
-#endif
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// DqnFile Implementation
-////////////////////////////////////////////////////////////////////////////////
-DQN_FILE_SCOPE
-bool DqnFile_Open(const char *const path, DqnFile *const file,
-                  const u32 permissionFlags, const enum DqnFileAction action)
+DQN_FILE_SCOPE char **DqnDirInternal_PlatformRead(const char *const dir,
+                                                  u32 *const numFiles)
 {
-	if (!file || !path) return false;
-
-#ifdef DQN_WIN32_PLATFORM
-	wchar_t widePath[MAX_PATH] = {0};
-	DqnWin32_UTF8ToWChar(path, widePath, DQN_ARRAY_COUNT(widePath));
-	return DqnFileInternal_Open(widePath, file, permissionFlags, action);
-#else
-	DQN_ASSERT(DQN_INVALID_CODE_PATH);
-	return false;
-#endif
-}
-
-DQN_FILE_SCOPE
-bool DqnFile_OpenW(const wchar_t *const path, DqnFile *const file, const u32 permissionFlags,
-                   const enum DqnFileAction action)
-{
-	if (!file || !path) return false;
-	return DqnFileInternal_Open(path, file, permissionFlags, action);
-}
-
-DQN_FILE_SCOPE size_t DqnFile_Write(const DqnFile *const file,
-                                    const u8 *const buffer,
-                                    const size_t numBytesToWrite,
-                                    const size_t fileOffset)
-{
-	size_t numBytesWritten = 0;
-	// TODO(doyle): Implement when it's needed
-	if (DQN_ASSERT_MSG(fileOffset != 0, "'fileOffset' not implemented yet")) return 0;
-	if (!file || !buffer) return numBytesToWrite;
-
-#ifdef DQN_WIN32_PLATFORM
-	DWORD bytesToWrite = (DWORD)numBytesToWrite;
-	DWORD bytesWritten;
-	BOOL result =
-	    WriteFile(file->handle, buffer, bytesToWrite, &bytesWritten, NULL);
-
-	numBytesWritten = (size_t)bytesWritten;
-	// TODO(doyle): Better logging system
-	if (result == 0)
-	{
-		DQN_WIN32_ERROR_BOX("ReadFile() failed.", NULL);
-	}
-
-#else
-	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented");
-#endif
-
-	return numBytesWritten;
-}
-
-DQN_FILE_SCOPE size_t DqnFile_Read(const DqnFile file, const u8 *const buffer,
-                                   const size_t numBytesToRead)
-{
-	size_t numBytesRead = 0;
-#ifdef DQN_WIN32_PLATFORM
-	if (file.handle && buffer)
-	{
-		DWORD bytesToRead = (DWORD)numBytesToRead;
-		DWORD bytesRead    = 0;
-		HANDLE win32Handle = file.handle;
-
-		BOOL result = ReadFile(win32Handle, (void *)buffer, bytesToRead,
-		                       &bytesRead, NULL);
-
-		numBytesRead = (size_t)bytesRead;
-		// TODO(doyle): 0 also means it is completing async, but still valid
-		if (result == 0)
-		{
-			DQN_WIN32_ERROR_BOX("ReadFile() failed.", NULL);
-		}
-
-	}
-#endif
-	return numBytesRead;
-}
-
-DQN_FILE_SCOPE void DqnFile_Close(DqnFile *const file)
-{
-#ifdef DQN_WIN32_PLATFORM
-	if (file && file->handle)
-	{
-		CloseHandle(file->handle);
-		file->handle          = NULL;
-		file->size            = 0;
-		file->permissionFlags = 0;
-	}
-#else
-	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented");
-#endif
-}
-
-DQN_FILE_SCOPE char **DqnDir_Read(char *dir, u32 *numFiles)
-{
-	if (!dir) return NULL;
-#ifdef DQN_WIN32_PLATFORM
+	if (!dir || !numFiles) return NULL;
 
 	u32 currNumFiles = 0;
 	wchar_t wideDir[MAX_PATH] = {0};
@@ -5403,6 +5534,7 @@ DQN_FILE_SCOPE char **DqnDir_Read(char *dir, u32 *numFiles)
 		if (findHandle == INVALID_HANDLE_VALUE)
 		{
 			DQN_WIN32_ERROR_BOX("FindFirstFile() failed.", NULL);
+			*numFiles = 0;
 			return NULL;
 		}
 
@@ -5411,21 +5543,20 @@ DQN_FILE_SCOPE char **DqnDir_Read(char *dir, u32 *numFiles)
 		if (!list)
 		{
 			DQN_WIN32_ERROR_BOX("DqnMem_Alloc() failed.", NULL);
+			*numFiles = 0;
 			return NULL;
 		}
 
 		for (u32 i = 0; i < currNumFiles; i++)
 		{
-			list[i] =
-			    (char *)DqnMem_Calloc(sizeof(**list) * MAX_PATH);
+			list[i] = (char *)DqnMem_Calloc(sizeof(**list) * MAX_PATH);
 			if (!list[i])
 			{
 				for (u32 j = 0; j < i; j++)
-				{
 					DqnMem_Free(list[j]);
-				}
 
 				DQN_WIN32_ERROR_BOX("DqnMem_Alloc() failed.", NULL);
+				*numFiles = 0;
 				return NULL;
 			}
 		}
@@ -5443,9 +5574,300 @@ DQN_FILE_SCOPE char **DqnDir_Read(char *dir, u32 *numFiles)
 
 		return list;
 	}
+}
+#endif // DQN_WIN32_PLATFORM
+
+#ifdef DQN_UNIX_PLATFORM
+FILE_SCOPE bool DqnFileInternal_UnixOpen(const char *const path,
+                                         DqnFile *const file,
+                                         const u32 permissionFlags,
+                                         const enum DqnFileAction action)
+{
+	char operation  = 0;
+	bool updateFlag = false;
+
+	if (permissionFlags & DqnFilePermissionFlag_Write)
+	{
+		updateFlag = true;
+		switch (action)
+		{
+			default: DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			case DqnFileAction_OpenOnly:
+			{
+				operation   = 'r';
+			}
+			break;
+
+			case DqnFileAction_CreateIfNotExist:
+			case DqnFileAction_ClearIfExist:
+			{
+				operation   = 'w';
+			}
+			break;
+		}
+	}
+	else if ((permissionFlags & DqnFilePermissionFlag_Read) ||
+	         (permissionFlags & DqnFilePermissionFlag_Execute))
+	{
+		if (permissionFlags & DqnFilePermissionFlag_Execute)
+		{
+			// TODO(doyle): Logging, UNIX doesn't have execute param for file
+			// handles. Execution goes through system()
+		}
+		operation = 'r';
+	}
+	DQN_ASSERT_HARD(operation != 0);
+
+	// TODO(doyle): What about not reading as a binary file and appending to end
+	// of file.
+	char mode[4] = {};
+	mode[0]      = operation;
+	mode[1]      = (updateFlag) ? '+' : 0;
+	mode[2]      = 'b';
+
+	// TODO(doyle): Use open syscall
+	// TODO(doyle): Query errno
+	FILE *handle = fopen(path, mode);
+	if (!handle) return false;
+
+	struct stat fileStat = {0};
+	if (stat(path, &fileStat))
+	{
+		// TODO(doyle): Logging
+		fclose(handle);
+		return false;
+	}
+
+	file->handle          = (void *)handle;
+	file->size            = fileStat.st_size;
+	file->permissionFlags = permissionFlags;
+
+	return true;
+}
+
+DQN_FILE_SCOPE char **DqnDirInternal_PlatformRead(const char *const dir,
+                                                  u32 *const numFiles)
+{
+	if (!dir || !numFiles) return NULL;
+
+	// Enumerate num files
+	u32 currNumFiles = 0;
+	{
+		DIR *const dirHandle = opendir(dir);
+		if (!dirHandle) return NULL;
+
+		struct dirent *dirFile = readdir(dirHandle);
+		while (dirFile)
+		{
+			currNumFiles++;
+			dirFile = readdir(dirHandle);
+		}
+		closedir(dirHandle);
+	}
+
+	if (currNumFiles == 0)
+	{
+		*numFiles = 0;
+		return NULL;
+	}
+
+	// Create file list
+	{
+		DIR *const dirHandle = opendir(dir);
+		if (!dirHandle) return NULL;
+
+		char **list = (char **)DqnMem_Calloc(sizeof(*list) * currNumFiles);
+		if (!list)
+		{
+			// TODO(doyle): Logging
+			DQN_ASSERT(DQN_INVALID_CODE_PATH);
+			*numFiles = 0;
+			return NULL;
+		}
+
+		struct dirent *dirFile = readdir(dirHandle);
+		for (u32 i = 0; i < currNumFiles; i++)
+		{
+			list[i] = (char *)DqnMem_Calloc(sizeof(**list) *
+			                                DQN_ARRAY_COUNT(dirFile->d_name));
+			if (!list[i])
+			{
+				for (u32 j = 0; j < i; j++) DqnMem_Free(list[j]);
+
+				// TODO(doyle): Logging
+				*numFiles = 0;
+				return NULL;
+			}
+		}
+
+		u32 listIndex = 0;
+		*numFiles     = currNumFiles;
+		while (dirFile)
+		{
+			DqnStr_Copy(list[listIndex++], dirFile->d_name, DQN_ARRAY_COUNT(dirFile->d_name));
+			dirFile = readdir(dirHandle);
+		}
+		closedir(dirHandle);
+
+		return list;
+	}
+}
+#endif // DQN_UNIX_PLATFORM
+
+////////////////////////////////////////////////////////////////////////////////
+// XPlatform > #DqnFile Implementation
+////////////////////////////////////////////////////////////////////////////////
+DQN_FILE_SCOPE
+bool DqnFile_Open(const char *const path, DqnFile *const file,
+                  const u32 permissionFlags, const enum DqnFileAction action)
+{
+	if (!file || !path) return false;
+
+#if defined(DQN_WIN32_PLATFORM)
+	wchar_t widePath[MAX_PATH] = {0};
+	DqnWin32_UTF8ToWChar(path, widePath, DQN_ARRAY_COUNT(widePath));
+	return DqnFileInternal_Win32OpenW(widePath, file, permissionFlags, action);
+
+#elif defined(DQN_UNIX_PLATFORM)
+	return DqnFileInternal_UnixOpen(path, file, permissionFlags, action);
+
 #else
-	return NULL;
+	DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);
+	return false;
+
 #endif
+}
+
+DQN_FILE_SCOPE
+bool DqnFile_OpenW(const wchar_t *const path, DqnFile *const file, const u32 permissionFlags,
+                   const enum DqnFileAction action)
+{
+	if (!file || !path) return false;
+
+#if defined(DQN_WIN32_PLATFORM)
+	return DqnFileInternal_Win32OpenW(path, file, permissionFlags, action);
+#else
+	DQN_ASSERT(DQN_INVALID_CODE_PATH);
+	return false;
+#endif
+}
+
+DQN_FILE_SCOPE size_t DqnFile_Write(const DqnFile *const file,
+                                    u8 *const buffer,
+                                    const size_t numBytesToWrite,
+                                    const size_t fileOffset)
+{
+	size_t numBytesWritten = 0;
+	// TODO(doyle): Implement when it's needed
+	if (!DQN_ASSERT_MSG(fileOffset == 0, "'fileOffset' not implemented yet")) return 0;
+	if (!file || !buffer) return numBytesToWrite;
+
+#if defined(DQN_WIN32_PLATFORM)
+	DWORD bytesToWrite = (DWORD)numBytesToWrite;
+	DWORD bytesWritten;
+	BOOL result =
+	    WriteFile(file->handle, buffer, bytesToWrite, &bytesWritten, NULL);
+
+	numBytesWritten = (size_t)bytesWritten;
+	// TODO(doyle): Better logging system
+	if (result == 0)
+	{
+		DQN_WIN32_ERROR_BOX("ReadFile() failed.", NULL);
+	}
+
+#elif defined(DQN_UNIX_PLATFORM)
+	const size_t ITEMS_TO_WRITE = 1;
+	if (fwrite(buffer, numBytesToWrite, ITEMS_TO_WRITE, (FILE *)file->handle) ==
+	    ITEMS_TO_WRITE)
+	{
+		rewind((FILE *)file->handle);
+		numBytesWritten = ITEMS_TO_WRITE * numBytesToWrite;
+	}
+#endif
+
+	return numBytesWritten;
+}
+
+DQN_FILE_SCOPE size_t DqnFile_Read(DqnFile file, u8 *const buffer,
+                                   const size_t numBytesToRead)
+{
+	size_t numBytesRead = 0;
+	if (file.handle && buffer)
+	{
+#if defined(DQN_WIN32_PLATFORM)
+		DWORD bytesToRead = (DWORD)numBytesToRead;
+		DWORD bytesRead    = 0;
+		HANDLE win32Handle = file.handle;
+
+		BOOL result = ReadFile(win32Handle, (void *)buffer, bytesToRead,
+		                       &bytesRead, NULL);
+
+		numBytesRead = (size_t)bytesRead;
+		// TODO(doyle): 0 also means it is completing async, but still valid
+		if (result == 0)
+		{
+			DQN_WIN32_ERROR_BOX("ReadFile() failed.", NULL);
+		}
+
+#elif defined(DQN_UNIX_PLATFORM)
+		// TODO(doyle): Syscall version
+		const size_t ITEMS_TO_READ = 1;
+		if (fread(buffer, numBytesToRead, ITEMS_TO_READ, (FILE *)file.handle) ==
+		    ITEMS_TO_READ)
+		{
+			rewind((FILE *)file.handle);
+			numBytesRead = ITEMS_TO_READ * numBytesToRead;
+		}
+		else
+		{
+			// TODO(doyle): Logging, failed read
+		}
+#else
+	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32/Unix path not implemented");
+#endif
+	}
+	return numBytesRead;
+}
+
+DQN_FILE_SCOPE void DqnFile_Close(DqnFile *const file)
+{
+	if (file && file->handle)
+	{
+#if defined(DQN_WIN32_PLATFORM)
+		CloseHandle(file->handle);
+#elif defined(DQN_UNIX_PLATFORM)
+		fclose((FILE *)file->handle);
+#endif
+		file->handle          = NULL;
+		file->size            = 0;
+		file->permissionFlags = 0;
+	}
+}
+
+DQN_FILE_SCOPE bool DqnFile_Delete(const char *const path)
+{
+	if (!path) return false;
+
+	// TODO(doyle): Logging
+#if defined(DQN_WIN32_PLATFORM)
+	return DeleteFileA(path);
+
+#elif defined(DQN_UNIX_PLATFORM)
+	i32 result = unlink(path);
+
+	if (result == 0) return true;
+	return false;
+
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// XPlatform > #DqnDir Implementation
+////////////////////////////////////////////////////////////////////////////////
+DQN_FILE_SCOPE char **DqnDir_Read(const char *const dir, u32 *const numFiles)
+{
+	char **result = DqnDirInternal_PlatformRead(dir, numFiles);
+	return result;
 }
 
 DQN_FILE_SCOPE void DqnDir_ReadFree(char **fileList, u32 numFiles)
@@ -5463,10 +5885,10 @@ DQN_FILE_SCOPE void DqnDir_ReadFree(char **fileList, u32 numFiles)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Timer
+// XPlatform > #DqnTimer Implementation
 ////////////////////////////////////////////////////////////////////////////////
-#ifdef DQN_WIN32_PLATFORM
-FILE_SCOPE f64 DqnTimeInternal_Win32QueryPerfCounterTimeInS()
+#if defined (DQN_WIN32_PLATFORM)
+FILE_SCOPE f64 DqnTimerInternal_Win32QueryPerfCounterTimeInMs()
 {
 	LOCAL_PERSIST LARGE_INTEGER queryPerformanceFrequency = {0};
 	if (queryPerformanceFrequency.QuadPart == 0)
@@ -5478,29 +5900,53 @@ FILE_SCOPE f64 DqnTimeInternal_Win32QueryPerfCounterTimeInS()
 	LARGE_INTEGER qpcResult;
 	QueryPerformanceCounter(&qpcResult);
 
-	// Convert to ms
-	f64 timestamp =
-	    qpcResult.QuadPart / (f64)queryPerformanceFrequency.QuadPart;
+	// Convert to microseconds first then divide by ticks per second then to milliseconds
+	qpcResult.QuadPart *= 1000000;
+	f64 timestamp = qpcResult.QuadPart / (f64)queryPerformanceFrequency.QuadPart;
+	timestamp /= 1000.0f;
 	return timestamp;
 }
 #endif
 
-f64 DqnTime_NowInS()
+DQN_FILE_SCOPE f64 DqnTimer_NowInMs()
 {
-	f64 result;
-#ifdef DQN_WIN32_PLATFORM
-	result = DQN_MAX(DqnTimeInternal_Win32QueryPerfCounterTimeInS(), 0);
+	f64 result = 0;
+#if defined(DQN_WIN32_PLATFORM)
+	result = DQN_MAX(DqnTimerInternal_Win32QueryPerfCounterTimeInMs(), 0);
+
+#elif defined(DQN_UNIX_PLATFORM)
+	struct timespec timeSpec = {0};
+	if (clock_gettime(CLOCK_MONOTONIC, &timeSpec))
+	{
+		// TODO(doyle): Failed logging
+		DQN_ASSERT_HARD(DQN_INVALID_CODE_PATH);
+	}
+	else
+	{
+		printf("tv_nsec: %ld\n", timeSpec.tv_nsec);
+		result = ((f64)timeSpec.tv_sec * 1000.0f) + ((f64)timeSpec.tv_nsec / 100000.0f);
+	}
+
 #else
-	result = 0;
-	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Win32 path not implemented yet");
+	DQN_ASSERT_MSG(DQN_INVALID_CODE_PATH, "Non Unix/Win32 path not implemented yet");
+
 #endif
 	return result;
 };
 
-f64 DqnTime_NowInMs() { return DqnTime_NowInS() * 1000.0f; }
+DQN_FILE_SCOPE f64 DqnTimer_NowInS() { return DqnTimer_NowInMs() / 1000.0f; }
+#endif // DQN_XPLATFORM_LAYER
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnLock
+// #Platform Implementation
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef DQN_WIN32_PLATFORM
+////////////////////////////////////////////////////////////////////////////////
+// #Win32Platform Implementation
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// Win32Platform > #DqnLock Implementation
 ////////////////////////////////////////////////////////////////////////////////
 bool DqnLock_Init(DqnLock *const lock, const u32 spinCount)
 {
@@ -5545,7 +5991,7 @@ void DqnLock_Delete(DqnLock *const lock)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnAtomics
+// Win32Platform > #DqnAtomic Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE u32 DqnAtomic_CompareSwap32(u32 volatile *dest, u32 swapVal, u32 compareVal)
 {
@@ -5585,7 +6031,7 @@ DQN_FILE_SCOPE u32 DqnAtomic_Sub32(u32 volatile *src)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnJobQueue - Multithreaded Job Queue
+// Win32Platform > #DqnJobQueue Implementation
 ////////////////////////////////////////////////////////////////////////////////
 typedef struct DqnJobQueue
 {
@@ -5602,7 +6048,7 @@ typedef struct DqnJobQueue
 } DqnJobQueue;
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnJobQueueInternal
+// Win32Platform > #DqnJobQueueInternal Implementation
 ////////////////////////////////////////////////////////////////////////////////
 size_t DQN_JOB_QUEUE_INTERNAL_THREAD_DEFAULT_STACK_SIZE = 0;
 FILE_SCOPE u32 DqnJobQueueInternal_ThreadCreate(const size_t stackSize, void *threadCallback,
@@ -5647,7 +6093,7 @@ FILE_SCOPE u32 DqnJobQueueInternal_ThreadCallback(void *threadParam)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnJobQueue Implementation
+// Win32Platform > #DqnJobQueue Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE DqnJobQueue *DqnJobQueue_InitWithMem(const void *const mem, size_t *const memSize,
                                                     const u32 queueSize, const u32 numThreads)
@@ -5744,7 +6190,7 @@ DQN_FILE_SCOPE bool DqnJobQueue_AllJobsComplete(DqnJobQueue *const queue)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DqnWin32 Operations
+// Win32Platform > #DqnWin32 Implementation
 ////////////////////////////////////////////////////////////////////////////////
 DQN_FILE_SCOPE bool DqnWin32_UTF8ToWChar(const char *const in,
                                          wchar_t *const out, const i32 outLen)
@@ -5775,8 +6221,7 @@ DQN_FILE_SCOPE bool DqnWin32_WCharToUTF8(const wchar_t *const in,
 	return true;
 }
 
-DQN_FILE_SCOPE void DqnWin32_GetClientDim(const HWND window, LONG *width,
-                                          LONG *height)
+DQN_FILE_SCOPE void DqnWin32_GetClientDim(const HWND window, LONG *const width, LONG *const height)
 {
 	RECT rect;
 	GetClientRect(window, &rect);
@@ -5784,7 +6229,7 @@ DQN_FILE_SCOPE void DqnWin32_GetClientDim(const HWND window, LONG *width,
 	if (height) *height = rect.bottom - rect.top;
 }
 
-DQN_FILE_SCOPE void DqnWin32_GetRectDim(RECT rect, LONG *width, LONG *height)
+DQN_FILE_SCOPE void DqnWin32_GetRectDim(const RECT rect, LONG *const width, LONG *const height)
 {
 	if (width)  *width  = rect.right - rect.left;
 	if (height) *height = rect.bottom - rect.top;
@@ -5797,9 +6242,16 @@ DQN_FILE_SCOPE void DqnWin32_DisplayLastError(const char *const errorPrefix)
 	FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 	               NULL, error, 0, errorMsg, DQN_ARRAY_COUNT(errorMsg), NULL);
 
-	char formattedError[2048] = {0};
-	Dqn_sprintf(formattedError, "%s: %s", errorPrefix, errorMsg);
-	DQN_WIN32_ERROR_BOX(formattedError, NULL);
+	if (errorPrefix)
+	{
+		char formattedError[2048] = {0};
+		Dqn_sprintf(formattedError, "%s: %s", errorPrefix, errorMsg);
+		DQN_WIN32_ERROR_BOX(formattedError, NULL);
+	}
+	else
+	{
+		DQN_WIN32_ERROR_BOX(errorMsg, NULL);
+	}
 }
 
 DQN_FILE_SCOPE void DqnWin32_DisplayErrorCode(const DWORD error, const char *const errorPrefix)
@@ -5825,13 +6277,13 @@ DQN_FILE_SCOPE void DqnWin32_OutputDebugString(const char *const formatStr, ...)
 	}
 	va_end(argList);
 
-	OutputDebugString(str);
+	OutputDebugStringA(str);
 }
 
 DQN_FILE_SCOPE i32 DqnWin32_GetEXEDirectory(char *const buf, const u32 bufLen)
 {
 	if (!buf || bufLen == 0) return 0;
-	u32 copiedLen = GetModuleFileName(NULL, buf, bufLen);
+	u32 copiedLen = GetModuleFileNameA(NULL, buf, bufLen);
 	if (copiedLen == bufLen) return -1;
 
 	// NOTE: Should always work if GetModuleFileName works and we're running an
@@ -5905,4 +6357,3 @@ DQN_FILE_SCOPE void DqnWin32_GetNumThreadsAndCores(i32 *const numCores, i32 *con
 	}
 }
 #endif // DQN_WIN32_PLATFORM
-

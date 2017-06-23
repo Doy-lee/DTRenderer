@@ -1,12 +1,12 @@
+#define UNICODE
+#define _UNICODE
+
 #include "DTRenderer.h"
 #include "DTRendererPlatform.h"
 
 #define DQN_WIN32_IMPLEMENTATION
 #define DQN_IMPLEMENTATION
 #include "dqn.h"
-
-#define UNICODE
-#define _UNICODE
 
 #include <Windows.h>
 #include <Windowsx.h> // For GET_X|Y_LPARAM(), mouse input
@@ -176,7 +176,7 @@ FILE_SCOPE inline DqnFile PlatformFileToDqnFileInternal(const PlatformFile file)
 void Platform_Print(const char *const string)
 {
 	if (!string) return;
-	OutputDebugString(string);
+	OutputDebugStringA(string);
 }
 
 bool Platform_FileOpen(const char *const path, PlatformFile *const file, const u32 permissionFlags,
@@ -287,7 +287,7 @@ FILETIME Win32GetLastWriteTime(const char *const srcName)
 {
 	FILETIME lastWriteTime               = {};
 	WIN32_FILE_ATTRIBUTE_DATA attribData = {};
-	if (GetFileAttributesEx(srcName, GetFileExInfoStandard, &attribData) != 0)
+	if (GetFileAttributesExA(srcName, GetFileExInfoStandard, &attribData) != 0)
 	{
 		lastWriteTime = attribData.ftLastWriteTime;
 	}
@@ -301,7 +301,7 @@ FILE_SCOPE Win32ExternalCode Win32LoadExternalDLL(const char *const srcPath,
 {
 	Win32ExternalCode result = {};
 	result.lastWriteTime     = lastWriteTime;
-	CopyFile(srcPath, tmpPath, false);
+	CopyFileA(srcPath, tmpPath, false);
 
 	DTR_UpdateFunction *updateFunction = NULL;
 	result.dll                        = LoadLibraryA(tmpPath);
@@ -332,10 +332,10 @@ FILE_SCOPE void Win32CreateMenu(HWND window)
 	HMENU menuBar  = CreateMenu();
 	{ // File Menu
 		HMENU menu = CreatePopupMenu();
-		AppendMenu(menuBar, MF_STRING | MF_POPUP, (UINT_PTR)menu, "File");
-		AppendMenu(menu, MF_STRING, Win32Menu_FileOpen, "Open");
-		AppendMenu(menu, MF_STRING, Win32Menu_FileFlushMemory, "Flush Memory");
-		AppendMenu(menu, MF_STRING, Win32Menu_FileExit, "Exit");
+		AppendMenuA(menuBar, MF_STRING | MF_POPUP, (UINT_PTR)menu, "File");
+		AppendMenuA(menu, MF_STRING, Win32Menu_FileOpen, "Open");
+		AppendMenuA(menu, MF_STRING, Win32Menu_FileFlushMemory, "Flush Memory");
+		AppendMenuA(menu, MF_STRING, Win32Menu_FileExit, "Exit");
 	}
 	SetMenu(window, menuBar);
 }
@@ -774,7 +774,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		////////////////////////////////////////////////////////////////////////
 		// Update State
 		////////////////////////////////////////////////////////////////////////
-		f64 startFrameTimeInS = DqnTime_NowInS();
+		f64 startFrameTimeInS = DqnTimer_NowInS();
 
 		FILETIME lastWriteTime = Win32GetLastWriteTime(dllPath);
 		if (CompareFileTime(&lastWriteTime, &dllCode.lastWriteTime) != 0)
@@ -785,7 +785,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		}
 
 		{
-			platformInput.timeNowInS    = DqnTime_NowInS();
+			platformInput.timeNowInS    = DqnTimer_NowInS();
 			platformInput.deltaForFrame = (f32)frameTimeInS;
 			Win32ProcessMessages(mainWindow, &platformInput);
 
@@ -823,7 +823,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		// Frame Limiting
 		////////////////////////////////////////////////////////////////////////
 		{
-			f64 workTimeInS = DqnTime_NowInS() - startFrameTimeInS;
+			f64 workTimeInS = DqnTimer_NowInS() - startFrameTimeInS;
 			if (workTimeInS < targetSecondsPerFrame)
 			{
 				DWORD remainingTimeInMs =
@@ -832,7 +832,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 			}
 		}
 
-		frameTimeInS        = DqnTime_NowInS() - startFrameTimeInS;
+		frameTimeInS        = DqnTimer_NowInS() - startFrameTimeInS;
 		f32 msPerFrame      = 1000.0f * (f32)frameTimeInS;
 		f32 framesPerSecond = 1.0f / (f32)frameTimeInS;
 

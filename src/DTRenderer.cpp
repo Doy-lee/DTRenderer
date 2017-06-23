@@ -935,8 +935,9 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 		if (DTR_DEBUG)
 		{
 			DTRDebug_TestMeshFaceAndVertexParser(&state->mesh);
-			auto memRegion = DqnMemStackTempRegionScoped(&memory->tempStack);
-			if (memRegion.isInit)
+			bool regionValid;
+			auto memRegion = DqnMemStackTempRegionScoped(&memory->tempStack, &regionValid);
+			if (regionValid)
 			{
 				DTRBitmap test = {};
 				DTRAsset_LoadBitmap(input->api, assetStack, &memory->tempStack, &test,
@@ -947,8 +948,9 @@ extern "C" void DTR_Update(PlatformRenderBuffer *const platformRenderBuffer,
 	}
 
 	{
-		auto tempMemRegion = DqnMemStackTempRegionScoped(&memory->tempStack);
-		if (tempMemRegion.isInit)
+		bool regionValid;
+		auto tempMemRegion = DqnMemStackTempRegionScoped(&memory->tempStack, &regionValid);
+		if (regionValid)
 		{
 			size_t debugSize = DQN_MEGABYTE(1);
 			u8 *debugMemory  = (u8 *)DqnMemStack_Push(&memory->tempStack, debugSize);
