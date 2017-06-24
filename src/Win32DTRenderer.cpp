@@ -207,7 +207,7 @@ size_t Platform_FileRead(PlatformFile *const file, u8 *const buf,
 	if (!file || !buf) return 0;
 
 	DqnFile dqnFile     = PlatformFileToDqnFileInternal(*file);
-	size_t numBytesRead = DqnFile_Read(dqnFile, buf, bytesToRead);
+	size_t numBytesRead = DqnFile_Read(&dqnFile, buf, bytesToRead);
 
 	return numBytesRead;
 }

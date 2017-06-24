@@ -635,7 +635,7 @@ bool DTRAsset_LoadFontToBitmap(const PlatformAPI api, DqnMemStack *const memStac
 
 	bool result       = false;
 	bool regionValid;
-	auto tmpMemRegion = DqnMemStackTempRegionScoped(tmpMemStack, &regionValid);
+	auto tmpMemRegion = DqnMemStackTempRegionGuard(tmpMemStack, &regionValid);
 	if (!regionValid)
 	{
 		// TODO(doyle): Logging
@@ -767,8 +767,7 @@ bool DTRAsset_LoadBitmap(const PlatformAPI api, DqnMemStack *const memStack,
 	if (!api.FileOpen(path, &file, PlatformFilePermissionFlag_Read, PlatformFileAction_OpenOnly))
 		return result;
 
-	DqnMemStackTempRegionScoped tmpMemRegion = tempStack->TempRegionScoped();
-
+	DqnMemStackTempRegionGuard tmpMemRegion = tempStack->TempRegionGuard();
 	u8 *const rawData = (u8 *)DqnMemStack_Push(tempStack, file.size);
 	size_t bytesRead  = api.FileRead(&file, rawData, file.size);
 

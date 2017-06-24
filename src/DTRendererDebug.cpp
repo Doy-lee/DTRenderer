@@ -78,7 +78,7 @@ void DTRDebug_DumpZBuffer(DTRRenderBuffer *const renderBuffer, DqnMemStack *cons
 		}
 
 		bool regionValid;
-		auto memRegion = DqnMemStackTempRegionScoped(tempStack, &regionValid);
+		auto memRegion = DqnMemStackTempRegionGuard(tempStack, &regionValid);
 		if (regionValid)
 		{
 			size_t bufSize  = DQN_MEGABYTE(16);
